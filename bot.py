@@ -1,0 +1,145 @@
+import discord
+from discord import app_commands
+from discord.ext import tasks
+import logging
+from datetime import datetime, timezone, timedelta
+
+from config import DISCORD_TOKEN, LEAGUE_ID, STATS_CHANNEL_ID
+from fetcher import fetch_and_store_weekly_matches
+from db import get_latest_week_stats, get_all_weeks
+from formatters import format_leaderboard, format_player_stats, format_weekly_summary
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+logger = logging.getLogger(__name__)
+
+intents = discord.Intents.default()
+bot = discord.Client(intents=intents)
+tree = app_commands.CommandTree(bot)
+
+
+# ---------------------------------------------------------------------------
+# Slash commands
+# ---------------------------------------------------------------------------
+
+@tree.command(name="leaderboard", description="Show the weekly leaderboard sorted by a stat")
+@app_commands.describe(
+    stat="Which stat to sort by",
+    week="Which week (0 = latest, 1 = previous, etc.)"
+)
+@app_commands.choices(stat=[
+    app_commands.Choice(name="Fantasy Points", value="fantasy_points"),
+    app_commands.Choice(name="GPM", value="gpm"),
+    app_commands.Choice(name="KDA", value="kda"),
+    app_commands.Choice(name="Last Hits", value="last_hits"),
+    app_commands.Choice(name="Denies", value="denies"),
+    app_commands.Choice(name="Damage Dealt", value="hero_damage"),
+    app_commands.Choice(name="Healing Done", value="hero_healing"),
+    app_commands.Choice(name="XPM", value="xpm"),
+])
+async def leaderboard(interaction: discord.Interaction, stat: app_commands.Choice[str], week: int = 0):
+    stats = get_latest_week_stats(week_offset=week)
+    if not stats:
+        await interaction.response.send_message("⚠️ No data found for that week. Try `/leaderboard` with no week argument for the latest.", ephemeral=True)
+        return
+    embed = format_leaderboard(stats, sort_by=stat.value, week_offset=week)
+    await interaction.response.send_message(embed=embed)
+
+
+@tree.command(name="player", description="Show detailed stats for a specific player this week")
+@app_commands.describe(
+    name="Player name (partial match is fine)",
+    week="Which week (0 = latest, 1 = previous, etc.)"
+)
+async def player(interaction: discord.Interaction, name: str, week: int = 0):
+    stats = get_latest_week_stats(week_offset=week)
+    if not stats:
+        await interaction.response.send_message("⚠️ No data found for that week.", ephemeral=True)
+        return
+
+    # Case-insensitive partial match
+    matches = [p for p in stats if name.lower() in p["name"].lower()]
+    if not matches:
+        await interaction.response.send_message(f"⚠️ No player matching \"{name}\" found this week.", ephemeral=True)
+        return
+    if len(matches) > 1:
+        names = ", ".join(f"`{p['name']}`" for p in matches[:10])
+        await interaction.response.send_message(f"Multiple matches found: {names}\nPlease be more specific.", ephemeral=True)
+        return
+
+    embed = format_player_stats(matches[0], week_offset=week)
+    await interaction.response.send_message(embed=embed)
+
+
+@tree.command(name="roles", description="Show stats grouped by role for this week")
+@app_commands.describe(week="Which week (0 = latest, 1 = previous, etc.)")
+async def roles(interaction: discord.Interaction, week: int = 0):
+    stats = get_latest_week_stats(week_offset=week)
+    if not stats:
+        await interaction.response.send_message("⚠️ No data found for that week.", ephemeral=True)
+        return
+
+    # Group by role, show best player per role per stat
+    from formatters import format_roles_summary
+    embed = format_roles_summary(stats, week_offset=week)
+    await interaction.response.send_message(embed=embed)
+
+
+@tree.command(name="refresh", description="[Admin] Manually trigger a data fetch from OpenDota")
+async def refresh(interaction: discord.Interaction):
+    # Only allow the guild owner or admins
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("⚠️ Only admins can use this command.", ephemeral=True)
+        return
+    await interaction.response.send_message("⏳ Fetching match data...", ephemeral=True)
+    try:
+        count = await fetch_and_store_weekly_matches()
+        await interaction.followup.send(f"✅ Done! Fetched and stored {count} match(es).", ephemeral=True)
+    except Exception as e:
+        logger.exception("Refresh failed")
+        await interaction.followup.send(f"❌ Error during fetch: {e}", ephemeral=True)
+
+
+# ---------------------------------------------------------------------------
+# Weekly auto-fetch (Monday 6:00 AM UTC)
+# ---------------------------------------------------------------------------
+
+@tasks.loop(time=datetime.now(timezone.utc).replace(hour=6, minute=0, second=0, microsecond=0).time())
+async def weekly_fetch():
+    # Only run on Mondays (weekday() == 0)
+    if datetime.now(timezone.utc).weekday() != 0:
+        return
+    logger.info("Weekly fetch triggered (Monday 06:00 UTC)")
+    try:
+        count = await fetch_and_store_weekly_matches()
+        logger.info(f"Weekly fetch complete: {count} match(es) stored.")
+
+        # Post a summary to the configured channel if set
+        if STATS_CHANNEL_ID:
+            channel = bot.get_channel(STATS_CHANNEL_ID)
+            if channel:
+                stats = get_latest_week_stats(week_offset=0)
+                if stats:
+                    embed = format_weekly_summary(stats)
+                    await channel.send(embed=embed)
+                    logger.info("Weekly summary posted to channel.")
+    except Exception:
+        logger.exception("Weekly auto-fetch failed")
+
+
+# ---------------------------------------------------------------------------
+# Bot startup
+# ---------------------------------------------------------------------------
+
+@bot.event
+async def on_ready():
+    logger.info(f"Logged in as {bot.user} (ID: {bot.user.id})")
+    try:
+        synced = await tree.sync()
+        logger.info(f"Synced {len(synced)} slash command(s).")
+    except Exception:
+        logger.exception("Failed to sync commands")
+    weekly_fetch.start()
+
+
+if __name__ == "__main__":
+    bot.run(DISCORD_TOKEN)
