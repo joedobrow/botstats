@@ -17,6 +17,13 @@ STATS_CHANNEL_ID: int | None = int(os.environ["STATS_CHANNEL_ID"]) if os.environ
 OPENDOTA_API_KEY: str | None = os.environ.get("OPENDOTA_API_KEY")
 
 # ---------------------------------------------------------------------------
+# Season configuration
+# ---------------------------------------------------------------------------
+
+# Season start date (used for week numbering). Format: "YYYY-MM-DD"
+SEASON_START_DATE: str = os.environ.get("SEASON_START_DATE", "2026-01-24")
+
+# ---------------------------------------------------------------------------
 # Dota 2 constants
 # ---------------------------------------------------------------------------
 

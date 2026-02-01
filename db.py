@@ -126,6 +126,28 @@ def _week_start(week_offset: int = 0) -> tuple[int, int]:
     return int(monday.timestamp()), int(sunday_end.timestamp())
 
 
+def _season_week_start(week_number: int) -> tuple[int, int]:
+    """Return (start_unix, end_unix) for a specific season week.
+    
+    week_number=1 means the first week of the season (starting from SEASON_START_DATE).
+    """
+    from config import SEASON_START_DATE
+    from datetime import datetime
+    
+    # Parse season start date
+    season_start = datetime.strptime(SEASON_START_DATE, "%Y-%m-%d")
+    season_start = season_start.replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=timezone.utc)
+    
+    # Find the Monday of the week containing season start
+    season_monday = season_start - timedelta(days=season_start.weekday())
+    
+    # Calculate the start of the requested week (week_number is 1-indexed)
+    target_monday = season_monday + timedelta(weeks=week_number - 1)
+    target_sunday = target_monday + timedelta(days=7) - timedelta(seconds=1)
+    
+    return int(target_monday.timestamp()), int(target_sunday.timestamp())
+
+
 def get_latest_week_stats(week_offset: int = 0) -> list[dict]:
     """Return aggregated per-player stats for the given week.
 
@@ -198,6 +220,57 @@ def get_matches_for_week(week_offset: int = 0) -> list[dict]:
             WHERE start_time BETWEEN :start AND :end
             ORDER BY start_time DESC
         """, {"start": start, "end": end}).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_matches_for_season_week(week_number: int) -> list[dict]:
+    """Return all matches for a specific season week (1-indexed)."""
+    start, end = _season_week_start(week_number)
+    with _conn() as conn:
+        rows = conn.execute("""
+            SELECT
+                match_id,
+                start_time,
+                duration,
+                radiant_win,
+                radiant_score,
+                dire_score
+            FROM matches
+            WHERE start_time BETWEEN :start AND :end
+            ORDER BY start_time DESC
+        """, {"start": start, "end": end}).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_latest_matches() -> list[dict]:
+    """Return all matches from the most recent week that has data."""
+    with _conn() as conn:
+        # Find the most recent match
+        latest = conn.execute("SELECT MAX(start_time) as max_time FROM matches").fetchone()
+        if not latest or not latest["max_time"]:
+            return []
+        
+        latest_time = latest["max_time"]
+        # Find the Monday of the week containing that match
+        from datetime import datetime
+        dt = datetime.fromtimestamp(latest_time, tz=timezone.utc)
+        monday = dt - timedelta(days=dt.weekday())
+        monday = monday.replace(hour=0, minute=0, second=0, microsecond=0)
+        sunday = monday + timedelta(days=7) - timedelta(seconds=1)
+        
+        # Get all matches in that week
+        rows = conn.execute("""
+            SELECT
+                match_id,
+                start_time,
+                duration,
+                radiant_win,
+                radiant_score,
+                dire_score
+            FROM matches
+            WHERE start_time BETWEEN :start AND :end
+            ORDER BY start_time DESC
+        """, {"start": int(monday.timestamp()), "end": int(sunday.timestamp())}).fetchall()
     return [dict(r) for r in rows]
 
 

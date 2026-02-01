@@ -84,17 +84,26 @@ async def roles(interaction: discord.Interaction, week: int = 0):
     await interaction.response.send_message(embed=embed)
 
 
-@tree.command(name="matches", description="Show this week's matches with Dotabuff links")
-@app_commands.describe(week="Which week (0 = latest, 1 = previous, etc.)")
-async def matches(interaction: discord.Interaction, week: int = 0):
-    from db import get_matches_for_week
-    matches = get_matches_for_week(week_offset=week)
+@tree.command(name="matches", description="Show matches with Dotabuff links")
+@app_commands.describe(week="Season week number (1 = first week, 2 = second week, etc.). Leave blank for latest.")
+async def matches(interaction: discord.Interaction, week: int = None):
+    from db import get_matches_for_season_week, get_latest_matches
+    
+    if week is None:
+        # No week specified - show latest
+        matches = get_latest_matches()
+        week_label = "Latest Week"
+    else:
+        # Specific season week requested
+        matches = get_matches_for_season_week(week)
+        week_label = f"Week {week}"
+    
     if not matches:
-        await interaction.response.send_message("⚠️ No matches found for that week.", ephemeral=True)
+        await interaction.response.send_message(f"⚠️ No matches found for {week_label.lower()}.", ephemeral=True)
         return
 
     from formatters import format_matches_list
-    embed = format_matches_list(matches, week_offset=week)
+    embed = format_matches_list(matches, week_label=week_label)
     await interaction.response.send_message(embed=embed)
 
 
