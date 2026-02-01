@@ -29,10 +29,10 @@ WEIGHTS = {
     "assists_per_game":     1.5,
     "last_hits_per_game":   0.02,
     "denies_per_game":      0.5,
-    "gpm_bonus_per_100":    0.5,   # per 100 GPM above GPM_BASELINE
-    "xpm_bonus_per_100":    0.3,   # per 100 XPM above XPM_BASELINE
-    "damage_per_100":       0.01,
-    "healing_per_100":      0.02,
+    "gpm_bonus_per_100":    2.0,   # per 100 GPM above GPM_BASELINE (was 0.5, now 4x)
+    "xpm_bonus_per_100":    1.8,   # per 100 XPM above XPM_BASELINE (was 0.3, now 6x)
+    "damage_per_100":       0.05,  # (was 0.01, now 5x)
+    "healing_per_100":      0.08,  # (was 0.02, now 4x)
     "win_bonus":            5.0,
 }
 
