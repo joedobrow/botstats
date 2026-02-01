@@ -37,12 +37,14 @@ tree = app_commands.CommandTree(bot)
     app_commands.Choice(name="XPM", value="xpm"),
 ])
 async def leaderboard(interaction: discord.Interaction, stat: app_commands.Choice[str], week: int = 0):
+    await interaction.response.defer()
+    
     stats = get_latest_week_stats(week_offset=week)
     if not stats:
-        await interaction.response.send_message("⚠️ No data found for that week. Try `/leaderboard` with no week argument for the latest.", ephemeral=True)
+        await interaction.followup.send("⚠️ No data found for that week. Try `/leaderboard` with no week argument for the latest.", ephemeral=True)
         return
     embed = format_leaderboard(stats, sort_by=stat.value, week_offset=week)
-    await interaction.response.send_message(embed=embed)
+    await interaction.followup.send(embed=embed)
 
 
 @tree.command(name="player", description="Show detailed stats for a specific player this week")
@@ -51,42 +53,49 @@ async def leaderboard(interaction: discord.Interaction, stat: app_commands.Choic
     week="Which week (0 = latest, 1 = previous, etc.)"
 )
 async def player(interaction: discord.Interaction, name: str, week: int = 0):
+    await interaction.response.defer()
+    
     stats = get_latest_week_stats(week_offset=week)
     if not stats:
-        await interaction.response.send_message("⚠️ No data found for that week.", ephemeral=True)
+        await interaction.followup.send("⚠️ No data found for that week.", ephemeral=True)
         return
 
     # Case-insensitive partial match
     matches = [p for p in stats if name.lower() in p["name"].lower()]
     if not matches:
-        await interaction.response.send_message(f"⚠️ No player matching \"{name}\" found this week.", ephemeral=True)
+        await interaction.followup.send(f"⚠️ No player matching \"{name}\" found this week.", ephemeral=True)
         return
     if len(matches) > 1:
         names = ", ".join(f"`{p['name']}`" for p in matches[:10])
-        await interaction.response.send_message(f"Multiple matches found: {names}\nPlease be more specific.", ephemeral=True)
+        await interaction.followup.send(f"Multiple matches found: {names}\nPlease be more specific.", ephemeral=True)
         return
 
     embed = format_player_stats(matches[0], week_offset=week)
-    await interaction.response.send_message(embed=embed)
+    await interaction.followup.send(embed=embed)
 
 
 @tree.command(name="roles", description="Show stats grouped by role for this week")
 @app_commands.describe(week="Which week (0 = latest, 1 = previous, etc.)")
 async def roles(interaction: discord.Interaction, week: int = 0):
+    await interaction.response.defer()
+    
     stats = get_latest_week_stats(week_offset=week)
     if not stats:
-        await interaction.response.send_message("⚠️ No data found for that week.", ephemeral=True)
+        await interaction.followup.send("⚠️ No data found for that week.", ephemeral=True)
         return
 
     # Group by role, show best player per role per stat
     from formatters import format_roles_summary
     embed = format_roles_summary(stats, week_offset=week)
-    await interaction.response.send_message(embed=embed)
+    await interaction.followup.send(embed=embed)
 
 
 @tree.command(name="matches", description="Show matches with Dotabuff links")
 @app_commands.describe(week="Season week number (1 = first week, 2 = second week, etc.). Leave blank for latest.")
 async def matches(interaction: discord.Interaction, week: int = None):
+    # Defer immediately to avoid 3-second timeout
+    await interaction.response.defer()
+    
     from db import get_matches_for_season_week, get_latest_matches
     
     if week is None:
@@ -99,12 +108,12 @@ async def matches(interaction: discord.Interaction, week: int = None):
         week_label = f"Week {week}"
     
     if not matches:
-        await interaction.response.send_message(f"⚠️ No matches found for {week_label.lower()}.", ephemeral=True)
+        await interaction.followup.send(f"⚠️ No matches found for {week_label.lower()}.", ephemeral=True)
         return
 
     from formatters import format_matches_list
     embed = format_matches_list(matches, week_label=week_label)
-    await interaction.response.send_message(embed=embed)
+    await interaction.followup.send(embed=embed)
 
 
 @tree.command(name="refresh", description="[Admin] Manually trigger a data fetch from OpenDota")
