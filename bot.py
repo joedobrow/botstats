@@ -6,7 +6,7 @@ from datetime import datetime, timezone, timedelta
 
 from config import DISCORD_TOKEN, LEAGUE_ID, STATS_CHANNEL_ID
 from fetcher import fetch_and_store_weekly_matches
-from db import get_latest_week_stats, get_all_weeks
+from db import get_latest_week_stats, get_all_weeks, init_db
 from formatters import format_leaderboard, format_player_stats, format_weekly_summary
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -133,6 +133,10 @@ async def weekly_fetch():
 @bot.event
 async def on_ready():
     logger.info(f"Logged in as {bot.user} (ID: {bot.user.id})")
+    
+    # Initialize database
+    init_db()
+    
     try:
         synced = await tree.sync()
         logger.info(f"Synced {len(synced)} slash command(s).")
