@@ -60,33 +60,21 @@ async def fetch_and_store_weekly_matches() -> int:
     stored = 0
 
     async with aiohttp.ClientSession() as session:
-        # --- Step 1: get league match list ---
-        league_matches = await _get(session, f"/leagues/{LEAGUE_ID}/matches")
-        if not league_matches:
-            logger.warning("No matches returned for league %d", LEAGUE_ID)
+        # --- Step 1: get league match IDs (works for amateur leagues) ---
+        match_ids = await _get(session, f"/leagues/{LEAGUE_ID}/matchIds")
+        if not match_ids:
+            logger.warning("No match IDs returned for league %d", LEAGUE_ID)
             return 0
 
-        logger.info("Fetched %d league match records", len(league_matches))
+        logger.info("Fetched %d match IDs for league", len(match_ids))
 
-        # --- Step 2: filter ---
-        candidates = []
-        for m in league_matches:
-            game_mode = m.get("game_mode", 0)
-            cluster = m.get("cluster", 0)
+        # --- Step 2: we'll filter AFTER fetching full match details ---
+        # (can't filter on summary data since /matchIds only gives us IDs)
+        candidates = match_ids
 
-            if game_mode in EXCLUDED_GAME_MODES:
-                logger.debug("Skipping match %d — excluded game mode %d", m["match_id"], game_mode)
-                continue
-            if cluster not in US_WEST_CLUSTERS:
-                logger.debug("Skipping match %d — cluster %d not in US West", m["match_id"], cluster)
-                continue
-            candidates.append(m)
-
-        logger.info("%d matches survived filtering (US West, non-AD)", len(candidates))
-
-        # --- Step 3: fetch full details for each candidate ---
-        for summary in candidates:
-            mid = summary["match_id"]
+        # --- Step 3: fetch full details for each match ID and filter ---
+        for match_id_str in candidates:
+            mid = int(match_id_str)
 
             # Skip if we already have this match stored
             if match_exists(mid):
@@ -96,6 +84,17 @@ async def fetch_and_store_weekly_matches() -> int:
             full = await _get(session, f"/matches/{mid}")
             if not full:
                 logger.warning("Failed to fetch full data for match %d", mid)
+                continue
+
+            # --- Apply filters now that we have full match data ---
+            game_mode = full.get("game_mode", 0)
+            cluster = full.get("cluster", 0)
+
+            if game_mode in EXCLUDED_GAME_MODES:
+                logger.debug("Skipping match %d — excluded game mode %d", mid, game_mode)
+                continue
+            if cluster not in US_WEST_CLUSTERS:
+                logger.debug("Skipping match %d — cluster %d not in US West", mid, cluster)
                 continue
 
             # --- Persist match row ---
