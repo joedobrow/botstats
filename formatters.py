@@ -65,7 +65,14 @@ def format_leaderboard(stats: list[dict], sort_by: str = "fantasy_points", week_
         else:
             val_str = f"{int(val):,}"
 
-        lines.append(f"{medal} **{p['name']}** — {val_str}")
+        # Make name a clickable Dotabuff link
+        account_id = p.get("account_id", 0)
+        if account_id:
+            player_link = f"[{p['name']}](https://www.dotabuff.com/players/{account_id})"
+        else:
+            player_link = f"**{p['name']}**"
+
+        lines.append(f"{medal} {player_link} — {val_str}")
 
     embed.add_field(name="\u200b", value="\n".join(lines) or "No data.", inline=False)
 
