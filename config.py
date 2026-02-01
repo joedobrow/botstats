@@ -21,8 +21,8 @@ OPENDOTA_API_KEY: str | None = os.environ.get("OPENDOTA_API_KEY")
 # ---------------------------------------------------------------------------
 
 # OpenDota game_mode values we want to EXCLUDE.
-# 19 = Ability Draft.  Add more here if needed.
-EXCLUDED_GAME_MODES: set[int] = {19}
+# 18 = Ability Draft. Add more here if needed.
+EXCLUDED_GAME_MODES: set[int] = {18}
 
 # OpenDota cluster IDs that correspond to US West servers.
 # Dota 2 uses numeric cluster IDs; these are the known US West clusters.
