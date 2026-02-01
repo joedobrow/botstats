@@ -28,6 +28,7 @@ EXCLUDED_GAME_MODES: set[int] = {19}
 # Dota 2 uses numeric cluster IDs; these are the known US West clusters.
 # If your league uses a different cluster, add it here.
 US_WEST_CLUSTERS: set[int] = {
+    118,  # US West (common for lobbies)
     131,  # US West (Seattle)
     132,  # US West (Los Angeles)
     133,  # US West
