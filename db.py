@@ -18,7 +18,7 @@ from datetime import datetime, timezone, timedelta
 
 logger = logging.getLogger(__name__)
 
-DB_PATH = os.environ.get("DB_PATH", "dota_stats.db")
+DB_PATH = os.environ.get("DB_PATH", "/data/dota_stats.db" if os.path.exists("/data") else "dota_stats.db")
 
 
 def _conn() -> sqlite3.Connection:
