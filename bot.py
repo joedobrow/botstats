@@ -84,6 +84,20 @@ async def roles(interaction: discord.Interaction, week: int = 0):
     await interaction.response.send_message(embed=embed)
 
 
+@tree.command(name="matches", description="Show this week's matches with Dotabuff links")
+@app_commands.describe(week="Which week (0 = latest, 1 = previous, etc.)")
+async def matches(interaction: discord.Interaction, week: int = 0):
+    from db import get_matches_for_week
+    matches = get_matches_for_week(week_offset=week)
+    if not matches:
+        await interaction.response.send_message("⚠️ No matches found for that week.", ephemeral=True)
+        return
+
+    from formatters import format_matches_list
+    embed = format_matches_list(matches, week_offset=week)
+    await interaction.response.send_message(embed=embed)
+
+
 @tree.command(name="refresh", description="[Admin] Manually trigger a data fetch from OpenDota")
 async def refresh(interaction: discord.Interaction):
     # Only allow the guild owner or admins

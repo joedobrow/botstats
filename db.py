@@ -182,6 +182,25 @@ def get_all_weeks() -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def get_matches_for_week(week_offset: int = 0) -> list[dict]:
+    """Return all matches for a given week with basic info."""
+    start, end = _week_start(week_offset)
+    with _conn() as conn:
+        rows = conn.execute("""
+            SELECT
+                match_id,
+                start_time,
+                duration,
+                radiant_win,
+                radiant_score,
+                dire_score
+            FROM matches
+            WHERE start_time BETWEEN :start AND :end
+            ORDER BY start_time DESC
+        """, {"start": start, "end": end}).fetchall()
+    return [dict(r) for r in rows]
+
+
 def match_exists(match_id: int) -> bool:
     with _conn() as conn:
         row = conn.execute("SELECT 1 FROM matches WHERE match_id = ?", (match_id,)).fetchone()

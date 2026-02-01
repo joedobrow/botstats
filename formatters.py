@@ -198,3 +198,40 @@ def format_weekly_summary(stats: list[dict]) -> discord.Embed:
 
     embed.set_footer(text="Use /leaderboard or /player for full details")
     return embed
+
+
+# ---------------------------------------------------------------------------
+# /matches
+# ---------------------------------------------------------------------------
+
+def format_matches_list(matches: list[dict], week_offset: int = 0) -> discord.Embed:
+    """Format a list of matches with Dotabuff links."""
+    from datetime import datetime
+    
+    embed = discord.Embed(
+        title=f"🎮 Matches — {_week_label(week_offset)}",
+        description=f"{len(matches)} match(es) found",
+        colour=EMBED_COLOUR_BLUE,
+    )
+    
+    lines = []
+    for m in matches:
+        match_id = m["match_id"]
+        # Convert unix timestamp to readable date
+        match_time = datetime.fromtimestamp(m["start_time"]).strftime("%b %d, %I:%M %p")
+        duration_min = m["duration"] // 60
+        
+        winner = "Radiant" if m["radiant_win"] else "Dire"
+        score = f"{m['radiant_score']}-{m['dire_score']}"
+        
+        dotabuff_link = f"https://www.dotabuff.com/matches/{match_id}"
+        opendota_link = f"https://www.opendota.com/matches/{match_id}"
+        
+        lines.append(
+            f"**{match_time}** ({duration_min}m) — {winner} won {score}\n"
+            f"[Dotabuff]({dotabuff_link}) · [OpenDota]({opendota_link})"
+        )
+    
+    embed.add_field(name="\u200b", value="\n\n".join(lines) or "No matches.", inline=False)
+    embed.set_footer(text="Click the links to view full match details")
+    return embed
