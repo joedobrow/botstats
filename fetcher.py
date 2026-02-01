@@ -1,148 +1,149 @@
-"""
-Fetcher — talks to the OpenDota API.
-
-Flow:
-  1. GET /leagues/{league_id}/matches  →  list of recent matches for the league
-  2. Filter out ability draft and non-US-West matches
-  3. For each surviving match_id, GET /matches/{match_id}  →  full player data
-  4. Persist everything to SQLite via db.py
-"""
-
-import aiohttp
+import discord
+from discord import app_commands
+from discord.ext import tasks
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
-from config import LEAGUE_ID, OPENDOTA_API_KEY, EXCLUDED_GAME_MODES, US_WEST_CLUSTERS
-from db import upsert_match, upsert_players, match_exists
+from config import DISCORD_TOKEN, LEAGUE_ID, STATS_CHANNEL_ID
+from fetcher import fetch_and_store_weekly_matches
+from db import get_latest_week_stats, get_all_weeks, init_db
+from formatters import format_leaderboard, format_player_stats, format_weekly_summary
 
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
-BASE_URL = "https://api.opendota.com/api"
+intents = discord.Intents.default()
+bot = discord.Client(intents=intents)
+tree = app_commands.CommandTree(bot)
 
 
-def _headers() -> dict:
-    """Return auth header if we have an API key."""
-    if OPENDOTA_API_KEY:
-        return {"Authorization": f"Bearer {OPENDOTA_API_KEY}"}
-    return {}
+# ---------------------------------------------------------------------------
+# Slash commands
+# ---------------------------------------------------------------------------
+
+@tree.command(name="leaderboard", description="Show the weekly leaderboard sorted by a stat")
+@app_commands.describe(
+    stat="Which stat to sort by",
+    week="Which week (0 = latest, 1 = previous, etc.)"
+)
+@app_commands.choices(stat=[
+    app_commands.Choice(name="Fantasy Points", value="fantasy_points"),
+    app_commands.Choice(name="GPM", value="gpm"),
+    app_commands.Choice(name="KDA", value="kda"),
+    app_commands.Choice(name="Last Hits", value="last_hits"),
+    app_commands.Choice(name="Denies", value="denies"),
+    app_commands.Choice(name="Damage Dealt", value="hero_damage"),
+    app_commands.Choice(name="Healing Done", value="hero_healing"),
+    app_commands.Choice(name="XPM", value="xpm"),
+])
+async def leaderboard(interaction: discord.Interaction, stat: app_commands.Choice[str], week: int = 0):
+    stats = get_latest_week_stats(week_offset=week)
+    if not stats:
+        await interaction.response.send_message("⚠️ No data found for that week. Try `/leaderboard` with no week argument for the latest.", ephemeral=True)
+        return
+    embed = format_leaderboard(stats, sort_by=stat.value, week_offset=week)
+    await interaction.response.send_message(embed=embed)
 
 
-async def _get(session: aiohttp.ClientSession, path: str) -> dict | list | None:
-    """Make a GET request, return parsed JSON or None on error."""
-    url = f"{BASE_URL}{path}"
-    async with session.get(url, headers=_headers()) as resp:
-        if resp.status != 200:
-            logger.warning("OpenDota returned %d for %s", resp.status, url)
-            return None
-        return await resp.json()
+@tree.command(name="player", description="Show detailed stats for a specific player this week")
+@app_commands.describe(
+    name="Player name (partial match is fine)",
+    week="Which week (0 = latest, 1 = previous, etc.)"
+)
+async def player(interaction: discord.Interaction, name: str, week: int = 0):
+    stats = get_latest_week_stats(week_offset=week)
+    if not stats:
+        await interaction.response.send_message("⚠️ No data found for that week.", ephemeral=True)
+        return
+
+    # Case-insensitive partial match
+    matches = [p for p in stats if name.lower() in p["name"].lower()]
+    if not matches:
+        await interaction.response.send_message(f"⚠️ No player matching \"{name}\" found this week.", ephemeral=True)
+        return
+    if len(matches) > 1:
+        names = ", ".join(f"`{p['name']}`" for p in matches[:10])
+        await interaction.response.send_message(f"Multiple matches found: {names}\nPlease be more specific.", ephemeral=True)
+        return
+
+    embed = format_player_stats(matches[0], week_offset=week)
+    await interaction.response.send_message(embed=embed)
 
 
-def _determine_role(player: dict) -> int | None:
-    """
-    Determine positional role (1-5) from a player object.
+@tree.command(name="roles", description="Show stats grouped by role for this week")
+@app_commands.describe(week="Which week (0 = latest, 1 = previous, etc.)")
+async def roles(interaction: discord.Interaction, week: int = 0):
+    stats = get_latest_week_stats(week_offset=week)
+    if not stats:
+        await interaction.response.send_message("⚠️ No data found for that week.", ephemeral=True)
+        return
 
-    OpenDota's player_slot encodes side + position:
-        Radiant: slots 0-4  → positions 1-5
-        Dire:    slots 128-132 → positions 1-5
-    """
-    slot = player.get("player_slot", 0)
-    if slot < 128:
-        return slot + 1       # Radiant: 0→1, 1→2, …, 4→5
-    else:
-        return slot - 128 + 1 # Dire: 128→1, 129→2, …, 132→5
+    # Group by role, show best player per role per stat
+    from formatters import format_roles_summary
+    embed = format_roles_summary(stats, week_offset=week)
+    await interaction.response.send_message(embed=embed)
 
 
-async def fetch_and_store_weekly_matches() -> int:
-    """
-    Main entry point.  Fetches recent league matches, filters, fetches full
-    details, and stores them.  Returns the number of NEW matches stored.
-    """
-    stored = 0
+@tree.command(name="refresh", description="[Admin] Manually trigger a data fetch from OpenDota")
+async def refresh(interaction: discord.Interaction):
+    # Only allow the guild owner or admins
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("⚠️ Only admins can use this command.", ephemeral=True)
+        return
+    await interaction.response.send_message("⏳ Fetching match data...", ephemeral=True)
+    try:
+        count = await fetch_and_store_weekly_matches()
+        await interaction.followup.send(f"✅ Done! Fetched and stored {count} match(es).", ephemeral=True)
+    except Exception as e:
+        logger.exception("Refresh failed")
+        await interaction.followup.send(f"❌ Error during fetch: {e}", ephemeral=True)
 
-    async with aiohttp.ClientSession() as session:
-        # --- Step 1: get league match IDs (works for amateur leagues) ---
-        match_ids = await _get(session, f"/leagues/{LEAGUE_ID}/matchIds")
-        if not match_ids:
-            logger.warning("No match IDs returned for league %d", LEAGUE_ID)
-            return 0
 
-        logger.info("Fetched %d match IDs for league", len(match_ids))
+# ---------------------------------------------------------------------------
+# Weekly auto-fetch (Monday 6:00 AM UTC)
+# ---------------------------------------------------------------------------
 
-        # --- Step 2: we'll filter AFTER fetching full match details ---
-        # (can't filter on summary data since /matchIds only gives us IDs)
-        candidates = match_ids
+@tasks.loop(time=datetime.now(timezone.utc).replace(hour=6, minute=0, second=0, microsecond=0).time())
+async def weekly_fetch():
+    # Only run on Mondays (weekday() == 0)
+    if datetime.now(timezone.utc).weekday() != 0:
+        return
+    logger.info("Weekly fetch triggered (Monday 06:00 UTC)")
+    try:
+        count = await fetch_and_store_weekly_matches()
+        logger.info(f"Weekly fetch complete: {count} match(es) stored.")
 
-        # --- Step 3: fetch full details for each match ID and filter ---
-        for match_id_str in candidates:
-            mid = int(match_id_str)
+        # Post a summary to the configured channel if set
+        if STATS_CHANNEL_ID:
+            channel = bot.get_channel(STATS_CHANNEL_ID)
+            if channel:
+                stats = get_latest_week_stats(week_offset=0)
+                if stats:
+                    embed = format_weekly_summary(stats)
+                    await channel.send(embed=embed)
+                    logger.info("Weekly summary posted to channel.")
+    except Exception:
+        logger.exception("Weekly auto-fetch failed")
 
-            # Skip if we already have this match stored
-            if match_exists(mid):
-                logger.debug("Match %d already in DB, skipping", mid)
-                continue
 
-            full = await _get(session, f"/matches/{mid}")
-            if not full:
-                logger.warning("Failed to fetch full data for match %d", mid)
-                continue
+# ---------------------------------------------------------------------------
+# Bot startup
+# ---------------------------------------------------------------------------
 
-            # --- Apply filters now that we have full match data ---
-            game_mode = full.get("game_mode", 0)
-            cluster = full.get("cluster", 0)
+@bot.event
+async def on_ready():
+    logger.info(f"Logged in as {bot.user} (ID: {bot.user.id})")
+    
+    # Initialize database
+    init_db()
+    
+    try:
+        synced = await tree.sync()
+        logger.info(f"Synced {len(synced)} slash command(s).")
+    except Exception:
+        logger.exception("Failed to sync commands")
+    weekly_fetch.start()
 
-            if game_mode in EXCLUDED_GAME_MODES:
-                logger.debug("Skipping match %d — excluded game mode %d", mid, game_mode)
-                continue
-            if cluster not in US_WEST_CLUSTERS:
-                logger.debug("Skipping match %d — cluster %d not in US West", mid, cluster)
-                continue
 
-            # --- Persist match row ---
-            radiant_win = 1 if full.get("radiant_win") else 0
-            match_row = {
-                "match_id":     full["match_id"],
-                "league_id":    full.get("leagueid", LEAGUE_ID),
-                "start_time":   full.get("start_time", 0),
-                "duration":     full.get("duration", 0),
-                "game_mode":    full.get("game_mode", 0),
-                "cluster":      full.get("cluster", 0),
-                "radiant_win":  radiant_win,
-                "radiant_score": full.get("radiant_score", 0),
-                "dire_score":   full.get("dire_score", 0),
-                "fetched_at":   datetime.now(timezone.utc).isoformat(),
-            }
-            upsert_match(match_row)
-
-            # --- Persist player rows ---
-            duration = full.get("duration", 0)
-            players = []
-            for p in full.get("players", []):
-                is_radiant = (p.get("player_slot", 0) < 128)
-                won = 1 if (is_radiant and radiant_win) or (not is_radiant and not radiant_win) else 0
-
-                players.append({
-                    "match_id":       mid,
-                    "account_id":     p.get("account_id", 0),
-                    "name":           p.get("personaname") or p.get("name") or f"Player_{p.get('account_id', '?')}",
-                    "hero_id":        p.get("hero_id", 0),
-                    "team_side":      "radiant" if is_radiant else "dire",
-                    "role_position":  _determine_role(p),
-                    "kills":          p.get("kills", 0),
-                    "deaths":         p.get("deaths", 0),
-                    "assists":        p.get("assists", 0),
-                    "gpm":            p.get("gold_per_min", 0),
-                    "xpm":            p.get("xp_per_min", 0),
-                    "last_hits":      p.get("last_hits", 0),
-                    "denies":         p.get("denies", 0),
-                    "hero_damage":    p.get("hero_damage", 0),
-                    "hero_healing":   p.get("hero_healing", 0),
-                    "gold_spent":     p.get("gold_spent", 0),
-                    "duration":       duration,
-                    "won":            won,
-                })
-
-            upsert_players(players)
-            stored += 1
-            logger.info("Stored match %d (%d players)", mid, len(players))
-
-    return stored
+if __name__ == "__main__":
+    bot.run(DISCORD_TOKEN)
