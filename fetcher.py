@@ -27,15 +27,19 @@ def _headers(use_auth: bool = True) -> dict:
     return {}
 
 
-async def _get(session: aiohttp.ClientSession, path: str, use_auth: bool = True) -> dict | list | None:
-    """Make a GET request, return parsed JSON or None on error."""
+async def _get(session: aiohttp.ClientSession, path: str, use_auth: bool = True):
     url = f"{BASE_URL}{path}"
-    async with session.get(url, headers=_headers(use_auth)) as resp:
+
+    params = None
+    if use_auth and OPENDOTA_API_KEY:
+        params = {"api_key": OPENDOTA_API_KEY}  # <-- OpenDota auth
+
+    async with session.get(url, params=params) as resp:
         if resp.status != 200:
-            logger.warning("OpenDota returned %d for %s", resp.status, url)
+            body = await resp.text()
+            logger.warning("OpenDota %d for %s | body=%s", resp.status, resp.url, body[:500])
             return None
         return await resp.json()
-
 
 def _determine_role(player: dict) -> int | None:
     """
