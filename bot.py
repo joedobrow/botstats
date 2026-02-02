@@ -23,7 +23,7 @@ tree = app_commands.CommandTree(bot)
 
 @tree.command(name="leaderboard", description="Show the weekly leaderboard sorted by a stat")
 @app_commands.describe(
-    stat="Which stat to sort by (default: Fantasy Points)",
+    stat="Which stat to sort by",
     week="Season week number (default: 1)"
 )
 @app_commands.choices(stat=[
@@ -36,7 +36,7 @@ tree = app_commands.CommandTree(bot)
     app_commands.Choice(name="Healing Done", value="hero_healing"),
     app_commands.Choice(name="XPM", value="xpm"),
 ])
-async def leaderboard(interaction: discord.Interaction, week: int = 1, stat: str = "fantasy_points"):
+async def leaderboard(interaction: discord.Interaction, stat: app_commands.Choice[str], week: int = 1):
     await interaction.response.defer()
     
     from db import get_stats_for_season_week
@@ -49,7 +49,7 @@ async def leaderboard(interaction: discord.Interaction, week: int = 1, stat: str
         await interaction.followup.send(f"⚠️ No data found for {week_label.lower()}.", ephemeral=True)
         return
     
-    embed = format_leaderboard(stats, sort_by=stat, week_label=week_label)
+    embed = format_leaderboard(stats, sort_by=stat.value, week_label=week_label)
     await interaction.followup.send(embed=embed)
 
 
