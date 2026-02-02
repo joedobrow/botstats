@@ -1,0 +1,16 @@
+app = "dota-bot"
+primary_region = "ord"  # Chicago - close to Minneapolis
+
+[build]
+
+[env]
+  # Add your environment variables in the Fly.io dashboard or via `fly secrets set`
+
+[mounts]
+  source = "dota_data"
+  destination = "/data"
+
+[[vm]]
+  memory = '256mb'
+  cpu_kind = 'shared'
+  cpus = 1
