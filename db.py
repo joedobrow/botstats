@@ -205,10 +205,10 @@ def get_stats_for_season_week(week_number: int) -> list[dict]:
                 SUM(p.assists)                  AS total_assists,
                 AVG(p.gpm)                      AS gpm,
                 AVG(p.xpm)                      AS xpm,
-                SUM(p.last_hits)                AS last_hits,
-                SUM(p.denies)                   AS denies,
-                SUM(p.hero_damage)              AS hero_damage,
-                SUM(p.hero_healing)             AS hero_healing,
+                AVG(p.last_hits)                AS last_hits,
+                AVG(p.denies)                   AS denies,
+                AVG(p.hero_damage)              AS hero_damage,
+                AVG(p.hero_healing)             AS hero_healing,
                 SUM(p.won)                      AS wins
             FROM players p
             JOIN matches m ON p.match_id = m.match_id
@@ -243,10 +243,10 @@ def get_all_time_stats() -> list[dict]:
                 SUM(p.assists)                  AS total_assists,
                 AVG(p.gpm)                      AS gpm,
                 AVG(p.xpm)                      AS xpm,
-                SUM(p.last_hits)                AS last_hits,
-                SUM(p.denies)                   AS denies,
-                SUM(p.hero_damage)              AS hero_damage,
-                SUM(p.hero_healing)             AS hero_healing,
+                AVG(p.last_hits)                AS last_hits,
+                AVG(p.denies)                   AS denies,
+                AVG(p.hero_damage)              AS hero_damage,
+                AVG(p.hero_healing)             AS hero_healing,
                 SUM(p.won)                      AS wins
             FROM players p
             JOIN matches m ON p.match_id = m.match_id

@@ -50,12 +50,12 @@ def calculate_fantasy_points(player: dict) -> float:
     kills    = player.get("total_kills", 0) / games
     deaths   = player.get("total_deaths", 0) / games
     assists  = player.get("total_assists", 0) / games
-    lh       = player.get("last_hits", 0) / games
-    denies   = player.get("denies", 0) / games
-    gpm      = player.get("gpm", 0)          # already an average from SQL AVG()
-    xpm      = player.get("xpm", 0)
-    damage   = player.get("hero_damage", 0) / games
-    healing  = player.get("hero_healing", 0) / games
+    lh       = player.get("last_hits", 0)         # already an average from SQL AVG()
+    denies   = player.get("denies", 0)            # already an average from SQL AVG()
+    gpm      = player.get("gpm", 0)               # already an average from SQL AVG()
+    xpm      = player.get("xpm", 0)               # already an average from SQL AVG()
+    damage   = player.get("hero_damage", 0)       # already an average from SQL AVG()
+    healing  = player.get("hero_healing", 0)      # already an average from SQL AVG()
     wins     = player.get("wins", 0)
 
     pts  = kills   * WEIGHTS["kills_per_game"]
