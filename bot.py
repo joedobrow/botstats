@@ -131,6 +131,31 @@ async def refresh(interaction: discord.Interaction):
         await interaction.followup.send(f"❌ Error during fetch: {e}", ephemeral=True)
 
 
+@tree.command(name="debug_weeks", description="[Debug] Show week date ranges")
+async def debug_weeks(interaction: discord.Interaction):
+    await interaction.response.defer()
+    from db import _season_week_start, _conn
+    from datetime import datetime as dt
+    
+    lines = []
+    for i in range(1, 8):
+        start, end = _season_week_start(i)
+        start_dt = dt.fromtimestamp(start).strftime("%b %d")
+        end_dt = dt.fromtimestamp(end).strftime("%b %d")
+        lines.append(f"Week {i}: {start_dt} - {end_dt}")
+    
+    # Also show what's actually in the database
+    with _conn() as conn:
+        matches = conn.execute("SELECT match_id, start_time FROM matches ORDER BY start_time").fetchall()
+    
+    lines.append(f"\n**Matches in DB:**")
+    for m in matches:
+        match_dt = dt.fromtimestamp(m["start_time"]).strftime("%b %d, %I:%M %p")
+        lines.append(f"Match {m['match_id']}: {match_dt}")
+    
+    await interaction.followup.send("\n".join(lines), ephemeral=True)
+
+
 # ---------------------------------------------------------------------------
 # Weekly auto-fetch (Monday 6:00 AM UTC)
 # ---------------------------------------------------------------------------
