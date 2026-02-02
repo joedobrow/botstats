@@ -39,18 +39,26 @@ tree = app_commands.CommandTree(bot)
 async def leaderboard(interaction: discord.Interaction, stat: app_commands.Choice[str], week: int = 1):
     await interaction.response.defer()
     
-    from db import get_stats_for_season_week
-    
-    # Use specified week (defaults to 1)
-    stats = get_stats_for_season_week(week)
-    week_label = f"Week {week}"
-    
-    if not stats:
-        await interaction.followup.send(f"⚠️ No data found for {week_label.lower()}.", ephemeral=True)
+    # Validate week parameter
+    if week < 1 or week > 52:
+        await interaction.followup.send("⚠️ Week must be between 1 and 52.", ephemeral=True)
         return
     
-    embed = format_leaderboard(stats, sort_by=stat.value, week_label=week_label)
-    await interaction.followup.send(embed=embed)
+    from db import get_stats_for_season_week
+    
+    try:
+        stats = get_stats_for_season_week(week)
+        week_label = f"Week {week}"
+        
+        if not stats:
+            await interaction.followup.send(f"⚠️ No data found for {week_label.lower()}.", ephemeral=True)
+            return
+        
+        embed = format_leaderboard(stats, sort_by=stat.value, week_label=week_label)
+        await interaction.followup.send(embed=embed)
+    except Exception as e:
+        logger.exception(f"Error in leaderboard command for week {week}")
+        await interaction.followup.send(f"❌ Error loading leaderboard: {str(e)}", ephemeral=True)
 
 
 @tree.command(name="player", description="Show detailed stats for a specific player this week")
