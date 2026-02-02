@@ -229,8 +229,24 @@ def get_stats_for_season_week(week_number: int) -> list[dict]:
 
 def get_latest_week_stats_new() -> list[dict]:
     """Return stats from the most recent week that has data."""
-    # Just get all stats and return them - there's only one week of data anyway
     with _conn() as conn:
+        # Find the most recent match
+        latest = conn.execute("SELECT MAX(start_time) as max_time FROM matches").fetchone()
+        if not latest or not latest["max_time"]:
+            return []
+        
+        latest_time = latest["max_time"]
+        # Find the Monday of the week containing that match
+        from datetime import datetime
+        dt = datetime.fromtimestamp(latest_time, tz=timezone.utc)
+        monday = dt - timedelta(days=dt.weekday())
+        monday = monday.replace(hour=0, minute=0, second=0, microsecond=0)
+        sunday = monday + timedelta(days=7) - timedelta(seconds=1)
+        
+        start_ts = int(monday.timestamp())
+        end_ts = int(sunday.timestamp())
+        
+        # Get stats for that week
         rows = conn.execute("""
             SELECT
                 p.account_id,
@@ -249,14 +265,10 @@ def get_latest_week_stats_new() -> list[dict]:
                 SUM(p.won)                      AS wins
             FROM players p
             JOIN matches m ON p.match_id = m.match_id
-            WHERE m.match_id IN (
-                SELECT match_id FROM matches 
-                ORDER BY start_time DESC 
-                LIMIT 10
-            )
+            WHERE m.start_time BETWEEN ? AND ?
             GROUP BY p.account_id
             ORDER BY gpm DESC
-        """).fetchall()
+        """, (start_ts, end_ts)).fetchall()
 
     results = []
     for r in rows:
