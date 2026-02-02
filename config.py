@@ -21,7 +21,10 @@ OPENDOTA_API_KEY: str | None = os.environ.get("OPENDOTA_API_KEY")
 # ---------------------------------------------------------------------------
 
 # Season start date (used for week numbering). Format: "YYYY-MM-DD"
-SEASON_START_DATE: str = os.environ.get("SEASON_START_DATE", "2026-01-24")
+SEASON_START_DATE: str = os.environ.get("SEASON_START_DATE", "2026-01-19")
+
+# Admin user ID - only this user can run /refresh command
+ADMIN_USER_ID: int | None = int(os.environ["ADMIN_USER_ID"]) if os.environ.get("ADMIN_USER_ID") else None
 
 # ---------------------------------------------------------------------------
 # Dota 2 constants
