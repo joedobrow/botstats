@@ -57,7 +57,7 @@ async def leaderboard(interaction: discord.Interaction, stat: app_commands.Choic
             week_label = f"Week {week}"
         
         if not stats:
-            await interaction.followup.send(f"⚠️ No data found for {week_label.lower()}.", ephemeral=True)
+            await interaction.followup.send(f"⚠️ No data found for {week_label.lower()}. If this seems wrong, the request may have timed out — please try again.", ephemeral=True)
             return
         
         embed = format_leaderboard(stats, sort_by=stat.value, week_label=week_label)
@@ -116,8 +116,10 @@ async def roles(interaction: discord.Interaction, week: int = 1):
             stats = get_stats_for_season_week(week)
             week_label = f"Week {week}"
         
+        logger.info(f"Roles command: week={week}, found {len(stats) if stats else 0} players")
+        
         if not stats:
-            await interaction.followup.send(f"⚠️ No data found for {week_label.lower()}.", ephemeral=True)
+            await interaction.followup.send(f"⚠️ No data found for {week_label.lower()}. If this seems wrong, the request may have timed out — please try again.", ephemeral=True)
             return
 
         # Group by role, show best player per role per stat
