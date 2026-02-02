@@ -23,8 +23,8 @@ tree = app_commands.CommandTree(bot)
 
 @tree.command(name="leaderboard", description="Show the weekly leaderboard sorted by a stat")
 @app_commands.describe(
-    stat="Which stat to sort by",
-    week="Season week number (default: 1)"
+    week="Season week number (default: 1)",
+    stat="Which stat to sort by"
 )
 @app_commands.choices(stat=[
     app_commands.Choice(name="Fantasy Points", value="fantasy_points"),
