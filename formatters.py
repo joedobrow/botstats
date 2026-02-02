@@ -129,11 +129,11 @@ def format_player_stats(p: dict, week_offset: int = 0) -> discord.Embed:
 # /roles
 # ---------------------------------------------------------------------------
 
-def format_roles_summary(stats: list[dict], week_offset: int = 0) -> discord.Embed:
+def format_roles_summary(stats: list[dict], week_label: str = "Week 1") -> discord.Embed:
     """Show the best player per role, judged by fantasy points."""
     embed = discord.Embed(
         title="🗺️  Best by Role",
-        description=f"**{_week_label(week_offset)}** — top fantasy points performer at each position",
+        description=f"**{week_label}** — top fantasy points performer at each position",
         colour=EMBED_COLOUR_PURPLE,
     )
 

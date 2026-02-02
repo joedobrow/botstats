@@ -94,20 +94,39 @@ async def player(interaction: discord.Interaction, name: str, week: int = 0):
     await interaction.followup.send(embed=embed)
 
 
-@tree.command(name="roles", description="Show stats grouped by role for this week")
-@app_commands.describe(week="Which week (0 = latest, 1 = previous, etc.)")
-async def roles(interaction: discord.Interaction, week: int = 0):
+@tree.command(name="roles", description="Show stats grouped by role")
+@app_commands.describe(week="Season week number (1, 2, 3...) or -1 for all-time")
+async def roles(interaction: discord.Interaction, week: int = 1):
     await interaction.response.defer()
     
-    stats = get_latest_week_stats(week_offset=week)
-    if not stats:
-        await interaction.followup.send("⚠️ No data found for that week.", ephemeral=True)
+    # Validate week parameter
+    if week < -1 or week == 0 or week > 52:
+        await interaction.followup.send("⚠️ Week must be between 1 and 52, or -1 for all-time.", ephemeral=True)
         return
+    
+    from db import get_stats_for_season_week, get_all_time_stats
+    
+    try:
+        if week == -1:
+            # All-time stats
+            stats = get_all_time_stats()
+            week_label = "All-Time"
+        else:
+            # Specific week
+            stats = get_stats_for_season_week(week)
+            week_label = f"Week {week}"
+        
+        if not stats:
+            await interaction.followup.send(f"⚠️ No data found for {week_label.lower()}.", ephemeral=True)
+            return
 
-    # Group by role, show best player per role per stat
-    from formatters import format_roles_summary
-    embed = format_roles_summary(stats, week_offset=week)
-    await interaction.followup.send(embed=embed)
+        # Group by role, show best player per role per stat
+        from formatters import format_roles_summary
+        embed = format_roles_summary(stats, week_label=week_label)
+        await interaction.followup.send(embed=embed)
+    except Exception as e:
+        logger.exception(f"Error in roles command for week {week}")
+        await interaction.followup.send(f"❌ Error loading roles: {str(e)}", ephemeral=True)
 
 
 @tree.command(name="matches", description="Show matches with Dotabuff links")
