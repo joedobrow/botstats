@@ -14,3 +14,7 @@ primary_region = "ord"  # Chicago - close to Minneapolis
   memory = '256mb'
   cpu_kind = 'shared'
   cpus = 1
+
+# No HTTP service - this is a Discord bot, not a web server
+[processes]
+  app = "python bot.py"
