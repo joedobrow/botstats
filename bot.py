@@ -23,7 +23,7 @@ tree = app_commands.CommandTree(bot)
 
 @tree.command(name="leaderboard", description="Show the weekly leaderboard sorted by a stat")
 @app_commands.describe(
-    week="Season week number (default: 1)",
+    week="Season week number (1, 2, 3...) or -1 for all-time",
     stat="Which stat to sort by"
 )
 @app_commands.choices(stat=[
@@ -40,15 +40,21 @@ async def leaderboard(interaction: discord.Interaction, stat: app_commands.Choic
     await interaction.response.defer()
     
     # Validate week parameter
-    if week < 1 or week > 52:
-        await interaction.followup.send("⚠️ Week must be between 1 and 52.", ephemeral=True)
+    if week < -1 or week == 0 or week > 52:
+        await interaction.followup.send("⚠️ Week must be between 1 and 52, or -1 for all-time.", ephemeral=True)
         return
     
-    from db import get_stats_for_season_week
+    from db import get_stats_for_season_week, get_all_time_stats
     
     try:
-        stats = get_stats_for_season_week(week)
-        week_label = f"Week {week}"
+        if week == -1:
+            # All-time stats
+            stats = get_all_time_stats()
+            week_label = "All-Time"
+        else:
+            # Specific week
+            stats = get_stats_for_season_week(week)
+            week_label = f"Week {week}"
         
         if not stats:
             await interaction.followup.send(f"⚠️ No data found for {week_label.lower()}.", ephemeral=True)

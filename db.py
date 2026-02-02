@@ -227,6 +227,42 @@ def get_stats_for_season_week(week_number: int) -> list[dict]:
     return results
 
 
+def get_all_time_stats() -> list[dict]:
+    """Return aggregated per-player stats across all matches in the season."""
+    from fantasy import calculate_fantasy_points
+    
+    with _conn() as conn:
+        rows = conn.execute("""
+            SELECT
+                p.account_id,
+                p.name,
+                p.role_position,
+                COUNT(*)                        AS games_played,
+                SUM(p.kills)                    AS total_kills,
+                SUM(p.deaths)                   AS total_deaths,
+                SUM(p.assists)                  AS total_assists,
+                AVG(p.gpm)                      AS gpm,
+                AVG(p.xpm)                      AS xpm,
+                SUM(p.last_hits)                AS last_hits,
+                SUM(p.denies)                   AS denies,
+                SUM(p.hero_damage)              AS hero_damage,
+                SUM(p.hero_healing)             AS hero_healing,
+                SUM(p.won)                      AS wins
+            FROM players p
+            JOIN matches m ON p.match_id = m.match_id
+            GROUP BY p.account_id
+            ORDER BY gpm DESC
+        """).fetchall()
+
+    results = []
+    for r in rows:
+        d = dict(r)
+        d["kda"] = round((d["total_kills"] + d["total_assists"]) / max(d["total_deaths"], 1), 2)
+        d["fantasy_points"] = calculate_fantasy_points(d)
+        results.append(d)
+    return results
+
+
 def get_latest_week_stats_new() -> list[dict]:
     """Return stats from the most recent week that has data."""
     from fantasy import calculate_fantasy_points
