@@ -54,7 +54,7 @@ def format_leaderboard(stats: list[dict], sort_by: str = "fantasy_points", week_
     )
 
     lines = []
-    for i, p in enumerate(sorted_players[:15]):  # top 15
+    for i, p in enumerate(sorted_players[:10]):  # top 10
         medal = MEDAL[i] if i < 3 else f"**{i+1}.**"
         val = p.get(sort_by, 0)
         # Format nicely depending on type
