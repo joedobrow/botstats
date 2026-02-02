@@ -20,17 +20,17 @@ logger = logging.getLogger(__name__)
 BASE_URL = "https://api.opendota.com/api"
 
 
-def _headers() -> dict:
-    """Return auth header if we have an API key."""
-    if OPENDOTA_API_KEY:
+def _headers(use_auth: bool = True) -> dict:
+    """Return auth header if we have an API key and use_auth is True."""
+    if use_auth and OPENDOTA_API_KEY:
         return {"Authorization": f"Bearer {OPENDOTA_API_KEY}"}
     return {}
 
 
-async def _get(session: aiohttp.ClientSession, path: str) -> dict | list | None:
+async def _get(session: aiohttp.ClientSession, path: str, use_auth: bool = True) -> dict | list | None:
     """Make a GET request, return parsed JSON or None on error."""
     url = f"{BASE_URL}{path}"
-    async with session.get(url, headers=_headers()) as resp:
+    async with session.get(url, headers=_headers(use_auth)) as resp:
         if resp.status != 200:
             logger.warning("OpenDota returned %d for %s", resp.status, url)
             return None
@@ -61,7 +61,8 @@ async def fetch_and_store_weekly_matches() -> int:
 
     async with aiohttp.ClientSession() as session:
         # --- Step 1: get league match IDs (works for amateur leagues) ---
-        match_ids = await _get(session, f"/leagues/{LEAGUE_ID}/matchIds")
+        # Don't use API key for this endpoint - it returns 400 for amateur leagues when authenticated
+        match_ids = await _get(session, f"/leagues/{LEAGUE_ID}/matchIds", use_auth=False)
         if not match_ids:
             logger.warning("No match IDs returned for league %d", LEAGUE_ID)
             return 0
@@ -81,7 +82,8 @@ async def fetch_and_store_weekly_matches() -> int:
                 logger.debug("Match %d already in DB, skipping", mid)
                 continue
 
-            full = await _get(session, f"/matches/{mid}")
+            # Use API key for match details to get higher rate limits
+            full = await _get(session, f"/matches/{mid}", use_auth=True)
             if not full:
                 logger.warning("Failed to fetch full data for match %d", mid)
                 continue
