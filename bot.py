@@ -24,7 +24,7 @@ tree = app_commands.CommandTree(bot)
 @tree.command(name="leaderboard", description="Show the weekly leaderboard sorted by a stat")
 @app_commands.describe(
     stat="Which stat to sort by",
-    week="Season week number (1 = first week, 2 = second week, etc.). Leave blank for latest."
+    week="Season week number (1 = first week, 2 = second week, etc.)."
 )
 @app_commands.choices(stat=[
     app_commands.Choice(name="Fantasy Points", value="fantasy_points"),
@@ -36,19 +36,14 @@ tree = app_commands.CommandTree(bot)
     app_commands.Choice(name="Healing Done", value="hero_healing"),
     app_commands.Choice(name="XPM", value="xpm"),
 ])
-async def leaderboard(interaction: discord.Interaction, stat: app_commands.Choice[str], week: int = None):
+async def leaderboard(interaction: discord.Interaction, stat: app_commands.Choice[str], week: int = 1):
     await interaction.response.defer()
     
-    from db import get_stats_for_season_week, get_latest_week_stats_new
+    from db import get_stats_for_season_week
     
-    if week is None:
-        # No week specified - show latest
-        stats = get_latest_week_stats_new()
-        week_label = "Latest Week"
-    else:
-        # Specific season week requested
-        stats = get_stats_for_season_week(week)
-        week_label = f"Week {week}"
+    # Use specified week (defaults to 1)
+    stats = get_stats_for_season_week(week)
+    week_label = f"Week {week}"
     
     if not stats:
         await interaction.followup.send(f"⚠️ No data found for {week_label.lower()}.", ephemeral=True)

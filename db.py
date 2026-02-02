@@ -229,6 +229,8 @@ def get_stats_for_season_week(week_number: int) -> list[dict]:
 
 def get_latest_week_stats_new() -> list[dict]:
     """Return stats from the most recent week that has data."""
+    from fantasy import calculate_fantasy_points
+    
     with _conn() as conn:
         # Find the most recent match
         latest = conn.execute("SELECT MAX(start_time) as max_time FROM matches").fetchone()
@@ -274,7 +276,6 @@ def get_latest_week_stats_new() -> list[dict]:
     for r in rows:
         d = dict(r)
         d["kda"] = round((d["total_kills"] + d["total_assists"]) / max(d["total_deaths"], 1), 2)
-        from fantasy import calculate_fantasy_points
         d["fantasy_points"] = calculate_fantasy_points(d)
         results.append(d)
     return results
