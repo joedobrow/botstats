@@ -24,7 +24,7 @@ tree = app_commands.CommandTree(bot)
 @tree.command(name="leaderboard", description="Show the weekly leaderboard sorted by a stat")
 @app_commands.describe(
     stat="Which stat to sort by",
-    week="Which week (0 = latest, 1 = previous, etc.)"
+    week="Season week number (1 = first week, 2 = second week, etc.). Leave blank for latest."
 )
 @app_commands.choices(stat=[
     app_commands.Choice(name="Fantasy Points", value="fantasy_points"),
@@ -36,14 +36,25 @@ tree = app_commands.CommandTree(bot)
     app_commands.Choice(name="Healing Done", value="hero_healing"),
     app_commands.Choice(name="XPM", value="xpm"),
 ])
-async def leaderboard(interaction: discord.Interaction, stat: app_commands.Choice[str], week: int = 0):
+async def leaderboard(interaction: discord.Interaction, stat: app_commands.Choice[str], week: int = None):
     await interaction.response.defer()
     
-    stats = get_latest_week_stats(week_offset=week)
+    from db import get_stats_for_season_week, get_latest_week_stats_new
+    
+    if week is None:
+        # No week specified - show latest
+        stats = get_latest_week_stats_new()
+        week_label = "Latest Week"
+    else:
+        # Specific season week requested
+        stats = get_stats_for_season_week(week)
+        week_label = f"Week {week}"
+    
     if not stats:
-        await interaction.followup.send("⚠️ No data found for that week. Try `/leaderboard` with no week argument for the latest.", ephemeral=True)
+        await interaction.followup.send(f"⚠️ No data found for {week_label.lower()}.", ephemeral=True)
         return
-    embed = format_leaderboard(stats, sort_by=stat.value, week_offset=week)
+    
+    embed = format_leaderboard(stats, sort_by=stat.value, week_label=week_label)
     await interaction.followup.send(embed=embed)
 
 
@@ -129,31 +140,6 @@ async def refresh(interaction: discord.Interaction):
     except Exception as e:
         logger.exception("Refresh failed")
         await interaction.followup.send(f"❌ Error during fetch: {e}", ephemeral=True)
-
-
-@tree.command(name="debug_weeks", description="[Debug] Show week date ranges")
-async def debug_weeks(interaction: discord.Interaction):
-    await interaction.response.defer()
-    from db import _season_week_start, _conn
-    from datetime import datetime as dt
-    
-    lines = []
-    for i in range(1, 8):
-        start, end = _season_week_start(i)
-        start_dt = dt.fromtimestamp(start).strftime("%b %d")
-        end_dt = dt.fromtimestamp(end).strftime("%b %d")
-        lines.append(f"Week {i}: {start_dt} - {end_dt}")
-    
-    # Also show what's actually in the database
-    with _conn() as conn:
-        matches = conn.execute("SELECT match_id, start_time FROM matches ORDER BY start_time").fetchall()
-    
-    lines.append(f"\n**Matches in DB:**")
-    for m in matches:
-        match_dt = dt.fromtimestamp(m["start_time"]).strftime("%b %d, %I:%M %p")
-        lines.append(f"Match {m['match_id']}: {match_dt}")
-    
-    await interaction.followup.send("\n".join(lines), ephemeral=True)
 
 
 # ---------------------------------------------------------------------------

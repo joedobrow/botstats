@@ -43,13 +43,13 @@ def _sort_key(player: dict, sort_by: str) -> float:
 # /leaderboard
 # ---------------------------------------------------------------------------
 
-def format_leaderboard(stats: list[dict], sort_by: str = "fantasy_points", week_offset: int = 0) -> discord.Embed:
+def format_leaderboard(stats: list[dict], sort_by: str = "fantasy_points", week_label: str = "Latest Week") -> discord.Embed:
     label = STAT_LABELS.get(sort_by, sort_by)
     sorted_players = sorted(stats, key=lambda p: _sort_key(p, sort_by), reverse=True)
 
     embed = discord.Embed(
         title=f"📊 Leaderboard — {label}",
-        description=f"**{_week_label(week_offset)}** · {len(stats)} players across all matches",
+        description=f"**{week_label}** · {len(stats)} players across all matches",
         colour=EMBED_COLOUR_GOLD,
     )
 

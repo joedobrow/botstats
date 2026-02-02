@@ -190,6 +190,93 @@ def get_latest_week_stats(week_offset: int = 0) -> list[dict]:
     return results
 
 
+def get_stats_for_season_week(week_number: int) -> list[dict]:
+    """Return aggregated per-player stats for a specific season week."""
+    start, end = _season_week_start(week_number)
+    with _conn() as conn:
+        rows = conn.execute("""
+            SELECT
+                p.account_id,
+                p.name,
+                p.role_position,
+                COUNT(*)                        AS games_played,
+                SUM(p.kills)                    AS total_kills,
+                SUM(p.deaths)                   AS total_deaths,
+                SUM(p.assists)                  AS total_assists,
+                AVG(p.gpm)                      AS gpm,
+                AVG(p.xpm)                      AS xpm,
+                SUM(p.last_hits)                AS last_hits,
+                SUM(p.denies)                   AS denies,
+                SUM(p.hero_damage)              AS hero_damage,
+                SUM(p.hero_healing)             AS hero_healing,
+                SUM(p.won)                      AS wins
+            FROM players p
+            JOIN matches m ON p.match_id = m.match_id
+            WHERE m.start_time BETWEEN :start AND :end
+            GROUP BY p.account_id
+            ORDER BY gpm DESC
+        """, {"start": start, "end": end}).fetchall()
+
+    results = []
+    for r in rows:
+        d = dict(r)
+        d["kda"] = round((d["total_kills"] + d["total_assists"]) / max(d["total_deaths"], 1), 2)
+        from fantasy import calculate_fantasy_points
+        d["fantasy_points"] = calculate_fantasy_points(d)
+        results.append(d)
+    return results
+
+
+def get_latest_week_stats_new() -> list[dict]:
+    """Return stats from the most recent week that has data."""
+    with _conn() as conn:
+        # Find the most recent match
+        latest = conn.execute("SELECT MAX(start_time) as max_time FROM matches").fetchone()
+        if not latest or not latest["max_time"]:
+            return []
+        
+        latest_time = latest["max_time"]
+        # Find the Monday of the week containing that match
+        from datetime import datetime
+        dt = datetime.fromtimestamp(latest_time, tz=timezone.utc)
+        monday = dt - timedelta(days=dt.weekday())
+        monday = monday.replace(hour=0, minute=0, second=0, microsecond=0)
+        sunday = monday + timedelta(days=7) - timedelta(seconds=1)
+        
+        # Get stats for that week
+        rows = conn.execute("""
+            SELECT
+                p.account_id,
+                p.name,
+                p.role_position,
+                COUNT(*)                        AS games_played,
+                SUM(p.kills)                    AS total_kills,
+                SUM(p.deaths)                   AS total_deaths,
+                SUM(p.assists)                  AS total_assists,
+                AVG(p.gpm)                      AS gpm,
+                AVG(p.xpm)                      AS xpm,
+                SUM(p.last_hits)                AS last_hits,
+                SUM(p.denies)                   AS denies,
+                SUM(p.hero_damage)              AS hero_damage,
+                SUM(p.hero_healing)             AS hero_healing,
+                SUM(p.won)                      AS wins
+            FROM players p
+            JOIN matches m ON p.match_id = m.match_id
+            WHERE m.start_time BETWEEN :start AND :end
+            GROUP BY p.account_id
+            ORDER BY gpm DESC
+        """, {"start": int(monday.timestamp()), "end": int(sunday.timestamp())}).fetchall()
+
+    results = []
+    for r in rows:
+        d = dict(r)
+        d["kda"] = round((d["total_kills"] + d["total_assists"]) / max(d["total_deaths"], 1), 2)
+        from fantasy import calculate_fantasy_points
+        d["fantasy_points"] = calculate_fantasy_points(d)
+        results.append(d)
+    return results
+
+
 def get_all_weeks() -> list[dict]:
     """Return a list of distinct weeks that have data, with match counts."""
     with _conn() as conn:
