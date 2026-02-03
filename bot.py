@@ -24,7 +24,8 @@ tree = app_commands.CommandTree(bot)
 @tree.command(name="leaderboard", description="Show the weekly leaderboard sorted by a stat")
 @app_commands.describe(
     week="Season week number (1, 2, 3...) or -1 for all-time",
-    stat="Which stat to sort by"
+    stat="Which stat to sort by",
+    pos="Filter by position (1-5, optional)"
 )
 @app_commands.choices(stat=[
     app_commands.Choice(name="Fantasy Points", value="fantasy_points"),
@@ -35,8 +36,14 @@ tree = app_commands.CommandTree(bot)
     app_commands.Choice(name="Damage Dealt", value="hero_damage"),
     app_commands.Choice(name="Healing Done", value="hero_healing"),
     app_commands.Choice(name="XPM", value="xpm"),
+], pos=[
+    app_commands.Choice(name="Position 1 (Safe Lane)", value=1),
+    app_commands.Choice(name="Position 2 (Mid)", value=2),
+    app_commands.Choice(name="Position 3 (Off Lane)", value=3),
+    app_commands.Choice(name="Position 4 (Roaming)", value=4),
+    app_commands.Choice(name="Position 5 (Hard Support)", value=5),
 ])
-async def leaderboard(interaction: discord.Interaction, stat: app_commands.Choice[str], week: int = 1):
+async def leaderboard(interaction: discord.Interaction, stat: app_commands.Choice[str], week: int = 1, pos: int = None):
     await interaction.response.defer()
     
     # Validate week parameter
@@ -55,6 +62,11 @@ async def leaderboard(interaction: discord.Interaction, stat: app_commands.Choic
             # Specific week
             stats = get_stats_for_season_week(week)
             week_label = f"Week {week}"
+        
+        # Filter by position if specified
+        if pos is not None:
+            stats = [s for s in stats if s.get("role_position") == pos]
+            week_label += f" (Position {pos})"
         
         if not stats:
             await interaction.followup.send(f"⚠️ No data found for {week_label.lower()}. If this seems wrong, the request may have timed out — please try again.", ephemeral=True)
