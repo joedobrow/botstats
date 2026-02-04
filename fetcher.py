@@ -27,33 +27,31 @@ def _headers(use_auth: bool = True) -> dict:
     return {}
 
 
-async def _get(session: aiohttp.ClientSession, path: str, use_auth: bool = True):
+async def _get(session: aiohttp.ClientSession, path: str, use_auth: bool = True) -> dict | list | None:
+    """Make a GET request, return parsed JSON or None on error."""
     url = f"{BASE_URL}{path}"
-
-    params = None
-    if use_auth and OPENDOTA_API_KEY:
-        params = {"api_key": OPENDOTA_API_KEY}  # <-- OpenDota auth
-
-    async with session.get(url, params=params) as resp:
+    async with session.get(url, headers=_headers(use_auth)) as resp:
         if resp.status != 200:
-            body = await resp.text()
-            logger.warning("OpenDota %d for %s | body=%s", resp.status, resp.url, body[:500])
+            logger.warning("OpenDota returned %d for %s", resp.status, url)
             return None
         return await resp.json()
+
 
 def _determine_role(player: dict) -> int | None:
     """
     Determine positional role (1-5) from a player object.
 
-    OpenDota's player_slot encodes side + position:
-        Radiant: slots 0-4  → positions 1-5
-        Dire:    slots 128-132 → positions 1-5
+    OpenDota provides 'lane_role' which directly maps to position:
+        1 = Safe Lane (Position 1)
+        2 = Mid (Position 2)
+        3 = Off Lane (Position 3)
+        4 = Jungle/Roaming (Position 4)
+        5 = Hard Support (Position 5)
     """
-    slot = player.get("player_slot", 0)
-    if slot < 128:
-        return slot + 1       # Radiant: 0→1, 1→2, …, 4→5
-    else:
-        return slot - 128 + 1 # Dire: 128→1, 129→2, …, 132→5
+    lane_role = player.get("lane_role")
+    if lane_role in [1, 2, 3, 4, 5]:
+        return lane_role
+    return None  # Unknown/unassigned role
 
 
 async def fetch_and_store_weekly_matches() -> int:
@@ -65,7 +63,6 @@ async def fetch_and_store_weekly_matches() -> int:
 
     async with aiohttp.ClientSession() as session:
         # --- Step 1: get league match IDs (works for amateur leagues) ---
-        # Don't use API key for this endpoint - it returns 400 for amateur leagues when authenticated
         match_ids = await _get(session, f"/leagues/{LEAGUE_ID}/matchIds", use_auth=False)
         if not match_ids:
             logger.warning("No match IDs returned for league %d", LEAGUE_ID)
@@ -86,8 +83,12 @@ async def fetch_and_store_weekly_matches() -> int:
                 logger.debug("Match %d already in DB, skipping", mid)
                 continue
 
-            # Use API key for match details to get higher rate limits
-            full = await _get(session, f"/matches/{mid}", use_auth=True)
+            # Don't use API key - causes 400s for amateur league matches
+            # Add small delay to avoid hitting rate limits (60 req/min = 1 per second)
+            import asyncio
+            await asyncio.sleep(1.1)
+            
+            full = await _get(session, f"/matches/{mid}", use_auth=False)
             if not full:
                 logger.warning("Failed to fetch full data for match %d", mid)
                 continue
