@@ -331,6 +331,31 @@ def get_all_weeks() -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def get_latest_season_week() -> int | None:
+    """Return the latest season week number that has data, or None if no data."""
+    from config import SEASON_START_DATE
+    from datetime import datetime
+
+    with _conn() as conn:
+        row = conn.execute("""
+            SELECT MAX(start_time) AS latest_time FROM matches
+        """).fetchone()
+
+    if not row or not row["latest_time"]:
+        return None
+
+    # Calculate which season week this timestamp falls into
+    season_start = datetime.strptime(SEASON_START_DATE, "%Y-%m-%d")
+    season_start = season_start.replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=timezone.utc)
+    season_monday = season_start - timedelta(days=season_start.weekday())
+
+    latest_dt = datetime.fromtimestamp(row["latest_time"], tz=timezone.utc)
+    days_since_start = (latest_dt - season_monday).days
+    week_number = (days_since_start // 7) + 1
+
+    return max(1, week_number)
+
+
 def get_matches_for_week(week_offset: int = 0) -> list[dict]:
     """Return all matches for a given week with basic info."""
     start, end = _week_start(week_offset)

@@ -177,15 +177,14 @@ async def matches(interaction: discord.Interaction, week: int = None):
 async def summary(interaction: discord.Interaction):
     await interaction.response.defer()
 
-    from db import get_stats_for_season_week, get_all_time_stats, get_all_weeks
+    from db import get_stats_for_season_week, get_all_time_stats, get_latest_season_week
     from formatters import format_compact_leaderboard, EMBED_COLOUR_GOLD, EMBED_COLOUR_BLUE
     from config import ROLE_LABELS
 
     try:
         # Get the latest week number
-        weeks = get_all_weeks()
-        if weeks:
-            latest_week = max(weeks)
+        latest_week = get_latest_season_week()
+        if latest_week:
             week_stats = get_stats_for_season_week(latest_week)
             week_label = f"Week {latest_week}"
         else:
