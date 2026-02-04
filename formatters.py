@@ -72,7 +72,8 @@ def format_leaderboard(stats: list[dict], sort_by: str = "fantasy_points", week_
         else:
             player_link = f"**{p['name']}**"
 
-        lines.append(f"{medal} {player_link} — {val_str}")
+        games = p.get("games_played", 0)
+        lines.append(f"{medal} {player_link} — {val_str} — {games} game{'s' if games != 1 else ''}")
 
     embed.add_field(name="\u200b", value="\n".join(lines) or "No data.", inline=False)
 
