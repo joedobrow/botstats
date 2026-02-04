@@ -166,10 +166,10 @@ def get_latest_week_stats(week_offset: int = 0) -> list[dict]:
                 SUM(p.assists)                  AS total_assists,
                 AVG(p.gpm)                      AS gpm,
                 AVG(p.xpm)                      AS xpm,
-                SUM(p.last_hits)                AS last_hits,
-                SUM(p.denies)                   AS denies,
-                SUM(p.hero_damage)              AS hero_damage,
-                SUM(p.hero_healing)             AS hero_healing,
+                AVG(p.last_hits)                AS last_hits,
+                AVG(p.denies)                   AS denies,
+                AVG(p.hero_damage)              AS hero_damage,
+                AVG(p.hero_healing)             AS hero_healing,
                 SUM(p.won)                      AS wins
             FROM players p
             JOIN matches m ON p.match_id = m.match_id
@@ -296,10 +296,10 @@ def get_latest_week_stats_new() -> list[dict]:
                 SUM(p.assists)                  AS total_assists,
                 AVG(p.gpm)                      AS gpm,
                 AVG(p.xpm)                      AS xpm,
-                SUM(p.last_hits)                AS last_hits,
-                SUM(p.denies)                   AS denies,
-                SUM(p.hero_damage)              AS hero_damage,
-                SUM(p.hero_healing)             AS hero_healing,
+                AVG(p.last_hits)                AS last_hits,
+                AVG(p.denies)                   AS denies,
+                AVG(p.hero_damage)              AS hero_damage,
+                AVG(p.hero_healing)             AS hero_healing,
                 SUM(p.won)                      AS wins
             FROM players p
             JOIN matches m ON p.match_id = m.match_id
@@ -399,6 +399,14 @@ def get_latest_matches() -> list[dict]:
             ORDER BY start_time DESC
         """, {"start": int(monday.timestamp()), "end": int(sunday.timestamp())}).fetchall()
     return [dict(r) for r in rows]
+
+
+def nuke_data():
+    """Delete all rows from players and matches tables."""
+    with _conn() as conn:
+        conn.execute("DELETE FROM players")
+        conn.execute("DELETE FROM matches")
+    logger.info("All data nuked from players and matches tables.")
 
 
 def match_exists(match_id: int) -> bool:

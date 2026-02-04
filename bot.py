@@ -4,7 +4,7 @@ from discord.ext import tasks
 import logging
 from datetime import datetime, timezone, timedelta
 
-from config import DISCORD_TOKEN, LEAGUE_ID, STATS_CHANNEL_ID
+from config import DISCORD_TOKEN, LEAGUE_ID, STATS_CHANNEL_ID, ADMIN_USER_ID
 from fetcher import fetch_and_store_weekly_matches
 from db import get_latest_week_stats, get_all_weeks, init_db
 from formatters import format_leaderboard, format_player_stats, format_weekly_summary
@@ -182,6 +182,23 @@ async def refresh(interaction: discord.Interaction):
     except Exception as e:
         logger.exception("Refresh failed")
         await interaction.followup.send(f"❌ Error during fetch: {e}", ephemeral=True)
+
+
+@tree.command(name="nuke", description="[Owner] Wipe all data and re-fetch from OpenDota")
+async def nuke(interaction: discord.Interaction):
+    # Restrict to bot owner only (ADMIN_USER_ID), not server admins
+    if ADMIN_USER_ID is None or interaction.user.id != ADMIN_USER_ID:
+        await interaction.response.send_message("⚠️ Only the bot owner can use this command.", ephemeral=True)
+        return
+    await interaction.response.defer(ephemeral=True)
+    try:
+        from db import nuke_data
+        nuke_data()
+        count = await fetch_and_store_weekly_matches()
+        await interaction.followup.send(f"✅ Data wiped and re-fetched {count} match(es).", ephemeral=True)
+    except Exception as e:
+        logger.exception("Nuke failed")
+        await interaction.followup.send(f"❌ Error during nuke: {e}", ephemeral=True)
 
 
 # ---------------------------------------------------------------------------
