@@ -84,14 +84,14 @@ def format_leaderboard(stats: list[dict], sort_by: str = "fantasy_points", week_
 # /player
 # ---------------------------------------------------------------------------
 
-def format_player_stats(p: dict, week_offset: int = 0) -> discord.Embed:
+def format_player_stats(p: dict, week_label: str = "All-Time") -> discord.Embed:
     role_str = ROLE_LABELS.get(p.get("role_position"), "Unknown Role")
     games = p.get("games_played", 0)
     wins  = p.get("wins", 0)
 
     embed = discord.Embed(
         title=f"🎮 {p['name']}",
-        description=f"{role_str} · {_week_label(week_offset)} · {games} game(s) played · {wins} win(s)",
+        description=f"{role_str} · {week_label} · {games} game(s) played · {wins} win(s)",
         colour=EMBED_COLOUR_BLUE,
     )
 

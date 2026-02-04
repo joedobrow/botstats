@@ -21,9 +21,9 @@ tree = app_commands.CommandTree(bot)
 # Slash commands
 # ---------------------------------------------------------------------------
 
-@tree.command(name="leaderboard", description="Show the weekly leaderboard sorted by a stat")
+@tree.command(name="leaderboard", description="Show the leaderboard sorted by a stat")
 @app_commands.describe(
-    week="Season week number (1, 2, 3...) or -1 for all-time",
+    week="Season week number (1, 2, 3...) or -1 for all-time. Leave blank for all-time.",
     stat="Which stat to sort by",
     pos="Filter by position (1-5, optional)"
 )
@@ -43,35 +43,30 @@ tree = app_commands.CommandTree(bot)
     app_commands.Choice(name="Position 4 (Roaming)", value=4),
     app_commands.Choice(name="Position 5 (Hard Support)", value=5),
 ])
-async def leaderboard(interaction: discord.Interaction, stat: app_commands.Choice[str], week: int = 1, pos: int = None):
+async def leaderboard(interaction: discord.Interaction, stat: app_commands.Choice[str], week: int = None, pos: int = None):
     await interaction.response.defer()
-    
-    # Validate week parameter
-    if week < -1 or week == 0 or week > 52:
-        await interaction.followup.send("⚠️ Week must be between 1 and 52, or -1 for all-time.", ephemeral=True)
-        return
-    
+
     from db import get_stats_for_season_week, get_all_time_stats
-    
+
     try:
-        if week == -1:
-            # All-time stats
+        if week is None or week == -1:
+            # All-time stats (default)
             stats = get_all_time_stats()
             week_label = "All-Time"
         else:
-            # Specific week
+            # Specific season week (0, 1, 2, ...)
             stats = get_stats_for_season_week(week)
             week_label = f"Week {week}"
-        
+
         # Filter by position if specified
         if pos is not None:
             stats = [s for s in stats if s.get("role_position") == pos]
             week_label += f" (Position {pos})"
-        
+
         if not stats:
             await interaction.followup.send(f"⚠️ No data found for {week_label.lower()}. If this seems wrong, the request may have timed out — please try again.", ephemeral=True)
             return
-        
+
         embed = format_leaderboard(stats, sort_by=stat.value, week_label=week_label)
         await interaction.followup.send(embed=embed)
     except Exception as e:
@@ -79,57 +74,62 @@ async def leaderboard(interaction: discord.Interaction, stat: app_commands.Choic
         await interaction.followup.send(f"❌ Error loading leaderboard: {str(e)}", ephemeral=True)
 
 
-@tree.command(name="player", description="Show detailed stats for a specific player this week")
+@tree.command(name="player", description="Show detailed stats for a specific player")
 @app_commands.describe(
     name="Player name (partial match is fine)",
-    week="Which week (0 = latest, 1 = previous, etc.)"
+    week="Season week number (1, 2, 3...) or -1 for all-time. Leave blank for all-time."
 )
-async def player(interaction: discord.Interaction, name: str, week: int = 0):
+async def player(interaction: discord.Interaction, name: str, week: int = None):
     await interaction.response.defer()
-    
-    stats = get_latest_week_stats(week_offset=week)
-    if not stats:
-        await interaction.followup.send("⚠️ No data found for that week.", ephemeral=True)
-        return
 
-    # Case-insensitive partial match
-    matches = [p for p in stats if name.lower() in p["name"].lower()]
-    if not matches:
-        await interaction.followup.send(f"⚠️ No player matching \"{name}\" found this week.", ephemeral=True)
-        return
-    if len(matches) > 1:
-        names = ", ".join(f"`{p['name']}`" for p in matches[:10])
-        await interaction.followup.send(f"Multiple matches found: {names}\nPlease be more specific.", ephemeral=True)
-        return
-
-    embed = format_player_stats(matches[0], week_offset=week)
-    await interaction.followup.send(embed=embed)
-
-
-@tree.command(name="roles", description="Show stats grouped by role")
-@app_commands.describe(week="Season week number (1, 2, 3...) or -1 for all-time")
-async def roles(interaction: discord.Interaction, week: int = 1):
-    await interaction.response.defer()
-    
-    # Validate week parameter
-    if week < -1 or week == 0 or week > 52:
-        await interaction.followup.send("⚠️ Week must be between 1 and 52, or -1 for all-time.", ephemeral=True)
-        return
-    
     from db import get_stats_for_season_week, get_all_time_stats
-    
+
     try:
-        if week == -1:
-            # All-time stats
+        if week is None or week == -1:
             stats = get_all_time_stats()
             week_label = "All-Time"
         else:
-            # Specific week
             stats = get_stats_for_season_week(week)
             week_label = f"Week {week}"
-        
+
+        if not stats:
+            await interaction.followup.send(f"⚠️ No data found for {week_label.lower()}.", ephemeral=True)
+            return
+
+        # Case-insensitive partial match
+        matches = [p for p in stats if name.lower() in p["name"].lower()]
+        if not matches:
+            await interaction.followup.send(f"⚠️ No player matching \"{name}\" found for {week_label.lower()}.", ephemeral=True)
+            return
+        if len(matches) > 1:
+            names = ", ".join(f"`{p['name']}`" for p in matches[:10])
+            await interaction.followup.send(f"Multiple matches found: {names}\nPlease be more specific.", ephemeral=True)
+            return
+
+        embed = format_player_stats(matches[0], week_label=week_label)
+        await interaction.followup.send(embed=embed)
+    except Exception as e:
+        logger.exception(f"Error in player command for week {week}")
+        await interaction.followup.send(f"❌ Error loading player stats: {str(e)}", ephemeral=True)
+
+
+@tree.command(name="roles", description="Show stats grouped by role")
+@app_commands.describe(week="Season week number (1, 2, 3...) or -1 for all-time. Leave blank for all-time.")
+async def roles(interaction: discord.Interaction, week: int = None):
+    await interaction.response.defer()
+
+    from db import get_stats_for_season_week, get_all_time_stats
+
+    try:
+        if week is None or week == -1:
+            stats = get_all_time_stats()
+            week_label = "All-Time"
+        else:
+            stats = get_stats_for_season_week(week)
+            week_label = f"Week {week}"
+
         logger.info(f"Roles command: week={week}, found {len(stats) if stats else 0} players")
-        
+
         if not stats:
             await interaction.followup.send(f"⚠️ No data found for {week_label.lower()}. If this seems wrong, the request may have timed out — please try again.", ephemeral=True)
             return
@@ -144,28 +144,32 @@ async def roles(interaction: discord.Interaction, week: int = 1):
 
 
 @tree.command(name="matches", description="Show matches with Dotabuff links")
-@app_commands.describe(week="Season week number (1 = first week, 2 = second week, etc.). Leave blank for latest.")
+@app_commands.describe(week="Season week number (1, 2, 3...) or -1 for all matches. Leave blank for latest week.")
 async def matches(interaction: discord.Interaction, week: int = None):
     # Defer immediately to avoid 3-second timeout
     await interaction.response.defer()
-    
-    from db import get_matches_for_season_week, get_latest_matches
-    
+
+    from db import get_matches_for_season_week, get_latest_matches, get_all_matches
+
     if week is None:
         # No week specified - show latest
-        matches = get_latest_matches()
+        match_list = get_latest_matches()
         week_label = "Latest Week"
+    elif week == -1:
+        # All matches
+        match_list = get_all_matches()
+        week_label = "All Matches"
     else:
         # Specific season week requested
-        matches = get_matches_for_season_week(week)
+        match_list = get_matches_for_season_week(week)
         week_label = f"Week {week}"
-    
-    if not matches:
+
+    if not match_list:
         await interaction.followup.send(f"⚠️ No matches found for {week_label.lower()}.", ephemeral=True)
         return
 
     from formatters import format_matches_list
-    embed = format_matches_list(matches, week_label=week_label)
+    embed = format_matches_list(match_list, week_label=week_label)
     await interaction.followup.send(embed=embed)
 
 

@@ -401,6 +401,23 @@ def get_latest_matches() -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def get_all_matches() -> list[dict]:
+    """Return all matches across the entire season."""
+    with _conn() as conn:
+        rows = conn.execute("""
+            SELECT
+                match_id,
+                start_time,
+                duration,
+                radiant_win,
+                radiant_score,
+                dire_score
+            FROM matches
+            ORDER BY start_time DESC
+        """).fetchall()
+    return [dict(r) for r in rows]
+
+
 def nuke_data():
     """Delete all rows from players and matches tables."""
     with _conn() as conn:
