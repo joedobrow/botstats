@@ -35,13 +35,15 @@ ADMIN_USER_ID: int | None = int(os.environ["ADMIN_USER_ID"]) if os.environ.get("
 EXCLUDED_GAME_MODES: set[int] = {18}
 
 # OpenDota cluster IDs that correspond to US West servers.
-# Dota 2 uses numeric cluster IDs; these are the known US West clusters.
-# If your league uses a different cluster, add it here.
+# Source: https://api.opendota.com/api/constants/cluster
+# Region 1 = US West, Region 2 = US East
 US_WEST_CLUSTERS: set[int] = {
-    118,  # US West (common for lobbies)
-    131,  # US West (Seattle)
-    132,  # US West (Los Angeles)
-    133,  # US West
+    111,  # US West
+    112,  # US West
+    113,  # US West
+    114,  # US West
+    117,  # US West
+    118,  # US West
 }
 
 # Dota 2 role labels mapped to the player_slot positions OpenDota returns.
