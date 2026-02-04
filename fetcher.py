@@ -37,21 +37,74 @@ async def _get(session: aiohttp.ClientSession, path: str, use_auth: bool = True)
         return await resp.json()
 
 
-def _determine_role(player: dict) -> int | None:
+def _assign_team_roles(team_players: list[dict]) -> dict[int, int]:
     """
-    Determine positional role (1-5) from a player object.
+    Assign positions 1-5 to a team of 5 players using lane_role + GPM heuristic.
 
-    OpenDota provides 'lane_role' which directly maps to position:
-        1 = Safe Lane (Position 1)
-        2 = Mid (Position 2)
-        3 = Off Lane (Position 3)
-        4 = Jungle/Roaming (Position 4)
-        5 = Hard Support (Position 5)
+    OpenDota's lane_role only gives us lane info (1=safe, 2=mid, 3=off, 4=jungle).
+    It does NOT distinguish pos 4 vs 5. We use GPM within shared lanes to split
+    cores from supports:
+        - lane_role 2 (mid)       → Position 2
+        - lane_role 3 (off lane)  → Position 3 (highest GPM), Position 4 (lower GPM)
+        - lane_role 1 (safe lane) → Position 1 (highest GPM), Position 5 (lower GPM)
+        - lane_role 4 (jungle)    → fills remaining slots by GPM
+        - Anyone left over        → fills remaining slots by GPM
+
+    Returns a dict mapping player_slot → position (1-5).
     """
-    lane_role = player.get("lane_role")
-    if lane_role in [1, 2, 3, 4, 5]:
-        return lane_role
-    return None  # Unknown/unassigned role
+    if len(team_players) != 5:
+        # Can't assign roles if we don't have exactly 5 players
+        return {p.get("player_slot", 0): None for p in team_players}
+
+    assigned: dict[int, int] = {}     # player_slot → position
+    remaining_players = list(team_players)
+    taken_positions: set[int] = set()
+
+    # --- Mid lane (lane_role=2) → Position 2 ---
+    mid_players = [p for p in remaining_players if p.get("lane_role") == 2]
+    if mid_players:
+        # Pick the one with highest GPM if multiple
+        mid = max(mid_players, key=lambda p: p.get("gold_per_min", 0))
+        assigned[mid.get("player_slot", 0)] = 2
+        taken_positions.add(2)
+        remaining_players.remove(mid)
+
+    # --- Off lane (lane_role=3) → Position 3 (core), Position 4 (support) ---
+    off_players = sorted(
+        [p for p in remaining_players if p.get("lane_role") == 3],
+        key=lambda p: p.get("gold_per_min", 0), reverse=True,
+    )
+    for i, p in enumerate(off_players):
+        if i == 0 and 3 not in taken_positions:
+            assigned[p.get("player_slot", 0)] = 3
+            taken_positions.add(3)
+        elif 4 not in taken_positions:
+            assigned[p.get("player_slot", 0)] = 4
+            taken_positions.add(4)
+        remaining_players.remove(p)
+
+    # --- Safe lane (lane_role=1) → Position 1 (carry), Position 5 (support) ---
+    safe_players = sorted(
+        [p for p in remaining_players if p.get("lane_role") == 1],
+        key=lambda p: p.get("gold_per_min", 0), reverse=True,
+    )
+    for i, p in enumerate(safe_players):
+        if i == 0 and 1 not in taken_positions:
+            assigned[p.get("player_slot", 0)] = 1
+            taken_positions.add(1)
+        elif 5 not in taken_positions:
+            assigned[p.get("player_slot", 0)] = 5
+            taken_positions.add(5)
+        remaining_players.remove(p)
+
+    # --- Jungle / roaming (lane_role=4) and anyone left → fill remaining slots ---
+    # Sort by GPM descending, assign to remaining positions in farm-priority order
+    remaining_players.sort(key=lambda p: p.get("gold_per_min", 0), reverse=True)
+    open_positions = sorted(set(range(1, 6)) - taken_positions)
+    for p, pos in zip(remaining_players, open_positions):
+        assigned[p.get("player_slot", 0)] = pos
+
+    return assigned
 
 
 async def fetch_and_store_weekly_matches() -> int:
@@ -125,9 +178,19 @@ async def fetch_and_store_weekly_matches() -> int:
 
             # --- Persist player rows ---
             duration = full.get("duration", 0)
+            all_players = full.get("players", [])
+
+            # Assign roles per team (need full team context for GPM heuristic)
+            radiant_team = [p for p in all_players if p.get("player_slot", 0) < 128]
+            dire_team = [p for p in all_players if p.get("player_slot", 0) >= 128]
+            role_map = {}
+            role_map.update(_assign_team_roles(radiant_team))
+            role_map.update(_assign_team_roles(dire_team))
+
             players = []
-            for p in full.get("players", []):
-                is_radiant = (p.get("player_slot", 0) < 128)
+            for p in all_players:
+                slot = p.get("player_slot", 0)
+                is_radiant = slot < 128
                 won = 1 if (is_radiant and radiant_win) or (not is_radiant and not radiant_win) else 0
 
                 players.append({
@@ -136,7 +199,7 @@ async def fetch_and_store_weekly_matches() -> int:
                     "name":           p.get("personaname") or p.get("name") or f"Player_{p.get('account_id', '?')}",
                     "hero_id":        p.get("hero_id", 0),
                     "team_side":      "radiant" if is_radiant else "dire",
-                    "role_position":  _determine_role(p),
+                    "role_position":  role_map.get(slot),
                     "kills":          p.get("kills", 0),
                     "deaths":         p.get("deaths", 0),
                     "assists":        p.get("assists", 0),
