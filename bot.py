@@ -177,7 +177,8 @@ async def matches(interaction: discord.Interaction, week: int = None):
 async def tipjar(interaction: discord.Interaction):
     await interaction.response.send_message(
         "If you're enjoying the bot, consider tipping the creator!\n"
-        "https://venmo.com/Joe-Dobrow"
+        "https://venmo.com/Joe-Dobrow",
+        ephemeral=True,
     )
 
 
