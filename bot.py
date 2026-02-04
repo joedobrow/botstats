@@ -173,6 +173,14 @@ async def matches(interaction: discord.Interaction, week: int = None):
     await interaction.followup.send(embed=embed)
 
 
+@tree.command(name="tipjar", description="Support the bot creator")
+async def tipjar(interaction: discord.Interaction):
+    await interaction.response.send_message(
+        "If you're enjoying the bot, consider tipping the creator!\n"
+        "https://venmo.com/Joe-Dobrow"
+    )
+
+
 @tree.command(name="refresh", description="[Admin] Manually trigger a data fetch from OpenDota")
 async def refresh(interaction: discord.Interaction):
     # Only allow the guild owner or admins
