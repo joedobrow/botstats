@@ -188,7 +188,7 @@ async def refresh(interaction: discord.Interaction):
 async def nuke(interaction: discord.Interaction):
     # Restrict to bot owner only (ADMIN_USER_ID), not server admins
     if ADMIN_USER_ID is None or interaction.user.id != ADMIN_USER_ID:
-        await interaction.response.send_message("⚠️ Only the bot owner can use this command.", ephemeral=True)
+        await interaction.response.send_message("hahaa nice try loser", ephemeral=True)
         return
     await interaction.response.defer(ephemeral=True)
     try:
