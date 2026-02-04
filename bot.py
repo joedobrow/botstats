@@ -173,6 +173,58 @@ async def matches(interaction: discord.Interaction, week: int = None):
     await interaction.followup.send(embed=embed)
 
 
+@tree.command(name="summary", description="Show fantasy point leaderboards by position for latest week and all-time")
+async def summary(interaction: discord.Interaction):
+    await interaction.response.defer()
+
+    from db import get_stats_for_season_week, get_all_time_stats, get_all_weeks
+    from formatters import format_compact_leaderboard, EMBED_COLOUR_GOLD, EMBED_COLOUR_BLUE
+    from config import ROLE_LABELS
+
+    try:
+        # Get the latest week number
+        weeks = get_all_weeks()
+        if weeks:
+            latest_week = max(weeks)
+            week_stats = get_stats_for_season_week(latest_week)
+            week_label = f"Week {latest_week}"
+        else:
+            week_stats = []
+            week_label = "Latest Week"
+
+        all_time_stats = get_all_time_stats()
+
+        # Create embeds
+        embeds = []
+
+        # Latest week embed
+        week_embed = discord.Embed(
+            title=f"📊 {week_label} — Fantasy Points by Position",
+            colour=EMBED_COLOUR_GOLD,
+        )
+        for pos in [1, 2, 3, 4, 5]:
+            label = ROLE_LABELS.get(pos, f"Pos {pos}")
+            content = format_compact_leaderboard(week_stats, pos, "fantasy_points")
+            week_embed.add_field(name=label, value=content, inline=True)
+        embeds.append(week_embed)
+
+        # All-time embed
+        alltime_embed = discord.Embed(
+            title="📊 All-Time — Fantasy Points by Position",
+            colour=EMBED_COLOUR_BLUE,
+        )
+        for pos in [1, 2, 3, 4, 5]:
+            label = ROLE_LABELS.get(pos, f"Pos {pos}")
+            content = format_compact_leaderboard(all_time_stats, pos, "fantasy_points")
+            alltime_embed.add_field(name=label, value=content, inline=True)
+        embeds.append(alltime_embed)
+
+        await interaction.followup.send(embeds=embeds)
+    except Exception as e:
+        logger.exception("Error in summary command")
+        await interaction.followup.send(f"❌ Error loading summary: {str(e)}", ephemeral=True)
+
+
 @tree.command(name="tipjar", description="Support the bot creator")
 async def tipjar(interaction: discord.Interaction):
     await interaction.response.send_message(

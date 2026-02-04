@@ -209,6 +209,32 @@ def format_weekly_summary(stats: list[dict]) -> discord.Embed:
 
 
 # ---------------------------------------------------------------------------
+# /summary (compact leaderboard for embedding multiple in one message)
+# ---------------------------------------------------------------------------
+
+def format_compact_leaderboard(stats: list[dict], pos: int, sort_by: str = "fantasy_points") -> str:
+    """Return a compact text block for a single position's top 3 players."""
+    # Filter by position
+    filtered = [s for s in stats if s.get("role_position") == pos]
+    if not filtered:
+        return "*No data*"
+
+    sorted_players = sorted(filtered, key=lambda p: _sort_key(p, sort_by), reverse=True)
+
+    lines = []
+    for i, p in enumerate(sorted_players[:3]):  # top 3 only
+        medal = MEDAL[i]
+        val = p.get(sort_by, 0)
+        if sort_by == "fantasy_points":
+            val_str = f"{val:.1f}"
+        else:
+            val_str = f"{val:.1f}"
+        lines.append(f"{medal} {p['name']} — {val_str}")
+
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
 # /matches
 # ---------------------------------------------------------------------------
 
