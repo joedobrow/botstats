@@ -37,18 +37,33 @@ async def _get(session: aiohttp.ClientSession, path: str, use_auth: bool = True)
         return await resp.json()
 
 
+def _farm_priority(player: dict) -> float:
+    """
+    Return a farm-priority score for sorting cores vs supports.
+
+    Uses CS at 10 minutes (lh_t[10]) when available — this is the cleanest
+    signal for distinguishing cores from supports in the laning phase.
+    Falls back to GPM when parsed replay data isn't available.
+    """
+    lh_t = player.get("lh_t")
+    if lh_t and len(lh_t) > 10:
+        return lh_t[10]
+    return player.get("gold_per_min", 0)
+
+
 def _assign_team_roles(team_players: list[dict]) -> dict[int, int]:
     """
-    Assign positions 1-5 to a team of 5 players using lane_role + GPM heuristic.
+    Assign positions 1-5 to a team of 5 players using lane_role + CS@10 heuristic.
 
     OpenDota's lane_role only gives us lane info (1=safe, 2=mid, 3=off, 4=jungle).
-    It does NOT distinguish pos 4 vs 5. We use GPM within shared lanes to split
-    cores from supports:
+    It does NOT distinguish pos 4 vs 5. We use CS at 10 minutes (lh_t[10]) within
+    shared lanes to split cores from supports, falling back to GPM when parsed
+    replay data isn't available:
         - lane_role 2 (mid)       → Position 2
-        - lane_role 3 (off lane)  → Position 3 (highest GPM), Position 4 (lower GPM)
-        - lane_role 1 (safe lane) → Position 1 (highest GPM), Position 5 (lower GPM)
-        - lane_role 4 (jungle)    → fills remaining slots by GPM
-        - Anyone left over        → fills remaining slots by GPM
+        - lane_role 3 (off lane)  → Position 3 (highest CS@10), Position 4 (lower)
+        - lane_role 1 (safe lane) → Position 1 (highest CS@10), Position 5 (lower)
+        - lane_role 4 (jungle)    → fills remaining slots by CS@10
+        - Anyone left over        → fills remaining slots by CS@10
 
     Returns a dict mapping player_slot → position (1-5).
     """
@@ -63,8 +78,7 @@ def _assign_team_roles(team_players: list[dict]) -> dict[int, int]:
     # --- Mid lane (lane_role=2) → Position 2 ---
     mid_players = [p for p in remaining_players if p.get("lane_role") == 2]
     if mid_players:
-        # Pick the one with highest GPM if multiple
-        mid = max(mid_players, key=lambda p: p.get("gold_per_min", 0))
+        mid = max(mid_players, key=_farm_priority)
         assigned[mid.get("player_slot", 0)] = 2
         taken_positions.add(2)
         remaining_players.remove(mid)
@@ -72,7 +86,7 @@ def _assign_team_roles(team_players: list[dict]) -> dict[int, int]:
     # --- Off lane (lane_role=3) → Position 3 (core), Position 4 (support) ---
     off_players = sorted(
         [p for p in remaining_players if p.get("lane_role") == 3],
-        key=lambda p: p.get("gold_per_min", 0), reverse=True,
+        key=_farm_priority, reverse=True,
     )
     for i, p in enumerate(off_players):
         if i == 0 and 3 not in taken_positions:
@@ -86,7 +100,7 @@ def _assign_team_roles(team_players: list[dict]) -> dict[int, int]:
     # --- Safe lane (lane_role=1) → Position 1 (carry), Position 5 (support) ---
     safe_players = sorted(
         [p for p in remaining_players if p.get("lane_role") == 1],
-        key=lambda p: p.get("gold_per_min", 0), reverse=True,
+        key=_farm_priority, reverse=True,
     )
     for i, p in enumerate(safe_players):
         if i == 0 and 1 not in taken_positions:
@@ -98,8 +112,7 @@ def _assign_team_roles(team_players: list[dict]) -> dict[int, int]:
         remaining_players.remove(p)
 
     # --- Jungle / roaming (lane_role=4) and anyone left → fill remaining slots ---
-    # Sort by GPM descending, assign to remaining positions in farm-priority order
-    remaining_players.sort(key=lambda p: p.get("gold_per_min", 0), reverse=True)
+    remaining_players.sort(key=_farm_priority, reverse=True)
     open_positions = sorted(set(range(1, 6)) - taken_positions)
     for p, pos in zip(remaining_players, open_positions):
         assigned[p.get("player_slot", 0)] = pos
