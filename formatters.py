@@ -89,9 +89,14 @@ def format_player_stats(p: dict, week_label: str = "All-Time") -> discord.Embed:
     role_str = ROLE_LABELS.get(p.get("role_position"), "Unknown Role")
     games = p.get("games_played", 0)
     wins  = p.get("wins", 0)
+    account_id = p.get("account_id", 0)
+
+    # Build Dotabuff URL if we have an account ID
+    dotabuff_url = f"https://www.dotabuff.com/players/{account_id}" if account_id else None
 
     embed = discord.Embed(
         title=f"🎮 {p['name']}",
+        url=dotabuff_url,
         description=f"{role_str} · {week_label} · {games} game(s) played · {wins} win(s)",
         colour=EMBED_COLOUR_BLUE,
     )
