@@ -130,15 +130,35 @@ def upsert_chat_messages(messages: list[dict]):
         """, messages)
 
 
+# Common boring messages to filter out from /quote
+BORING_MESSAGES = {
+    # Pre-game pleasantries
+    "gl", "hf", "glhf", "gl hf", "hfhf", "hf hf", "gg hf", "glgl", "gl gl",
+    "good luck", "have fun", "good luck have fun",
+    # Post-game
+    "gg", "ggwp", "gg wp", "gege", "ge", "bg",
+    # Pause-related
+    "g", "g?", "go", "go?", "rdy", "rdy?", "ready", "ready?", "r?", "r",
+    "1", "1?", "sec", "1 sec", "wait", "w8", "pause", "unpause",
+    # Single characters / short stuff
+    "?", "!", ".", "ok", "k", "ty", "thx", "thanks", "np", "mb", "my bad",
+}
+
+
 def get_random_quote() -> dict | None:
-    """Return a random chat message from the database."""
+    """Return a random chat message from the database, filtering out boring ones."""
+    # Build SQL to exclude boring messages (case-insensitive)
+    placeholders = ", ".join("?" for _ in BORING_MESSAGES)
+
     with _conn() as conn:
-        row = conn.execute("""
+        row = conn.execute(f"""
             SELECT cm.message, cm.player_name, cm.time, cm.match_id
             FROM chat_messages cm
+            WHERE LOWER(TRIM(cm.message)) NOT IN ({placeholders})
+              AND LENGTH(TRIM(cm.message)) > 2
             ORDER BY RANDOM()
             LIMIT 1
-        """).fetchone()
+        """, list(BORING_MESSAGES)).fetchone()
     return dict(row) if row else None
 
 
