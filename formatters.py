@@ -246,31 +246,62 @@ def format_compact_leaderboard(stats: list[dict], pos: int, sort_by: str = "fant
 def format_matches_list(matches: list[dict], week_label: str = "Latest Week") -> discord.Embed:
     """Format a list of matches with Dotabuff links."""
     from datetime import datetime
-    
+
     embed = discord.Embed(
         title=f"🎮 Matches — {week_label}",
         description=f"{len(matches)} match(es) found",
         colour=EMBED_COLOUR_BLUE,
     )
-    
+
     lines = []
     for m in matches:
         match_id = m["match_id"]
         # Convert unix timestamp to readable date
         match_time = datetime.fromtimestamp(m["start_time"]).strftime("%b %d, %I:%M %p")
         duration_min = m["duration"] // 60
-        
+
         winner = "Radiant" if m["radiant_win"] else "Dire"
         score = f"{m['radiant_score']}-{m['dire_score']}"
-        
+
         dotabuff_link = f"https://www.dotabuff.com/matches/{match_id}"
         opendota_link = f"https://www.opendota.com/matches/{match_id}"
-        
+
         lines.append(
             f"**{match_time}** ({duration_min}m) — {winner} won {score}\n"
             f"[Dotabuff]({dotabuff_link}) · [OpenDota]({opendota_link})"
         )
-    
-    embed.add_field(name="\u200b", value="\n\n".join(lines) or "No matches.", inline=False)
+
+    # Split into multiple fields if content is too long (Discord limit: 1024 chars per field)
+    if not lines:
+        embed.add_field(name="\u200b", value="No matches.", inline=False)
+    else:
+        current_chunk = []
+        current_length = 0
+        field_num = 1
+
+        for line in lines:
+            line_length = len(line) + 2  # +2 for the "\n\n" separator
+            if current_length + line_length > 1000 and current_chunk:
+                # Add current chunk as a field and start a new one
+                embed.add_field(
+                    name=f"Matches" if field_num == 1 else "\u200b",
+                    value="\n\n".join(current_chunk),
+                    inline=False
+                )
+                current_chunk = [line]
+                current_length = len(line)
+                field_num += 1
+            else:
+                current_chunk.append(line)
+                current_length += line_length
+
+        # Add the last chunk
+        if current_chunk:
+            embed.add_field(
+                name=f"Matches" if field_num == 1 else "\u200b",
+                value="\n\n".join(current_chunk),
+                inline=False
+            )
+
     embed.set_footer(text="Click the links to view full match details")
     return embed
