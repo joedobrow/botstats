@@ -70,6 +70,17 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_players_match   ON players(match_id);
             CREATE INDEX IF NOT EXISTS idx_players_account ON players(account_id);
             CREATE INDEX IF NOT EXISTS idx_matches_start   ON matches(start_time);
+
+            CREATE TABLE IF NOT EXISTS chat_messages (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                match_id        INTEGER NOT NULL REFERENCES matches(match_id),
+                player_slot     INTEGER NOT NULL,
+                player_name     TEXT,
+                time            INTEGER NOT NULL,   -- seconds into match (can be negative for pre-game)
+                message         TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_chat_match ON chat_messages(match_id);
         """)
     logger.info("Database initialised at %s", DB_PATH)
 
@@ -104,6 +115,31 @@ def upsert_players(players: list[dict]):
                  :kills, :deaths, :assists, :gpm, :xpm, :last_hits, :denies,
                  :hero_damage, :hero_healing, :gold_spent, :duration, :won)
         """, players)
+
+
+def upsert_chat_messages(messages: list[dict]):
+    """Insert chat messages. Uses INSERT OR IGNORE to avoid duplicates."""
+    if not messages:
+        return
+    with _conn() as conn:
+        conn.executemany("""
+            INSERT OR IGNORE INTO chat_messages
+                (match_id, player_slot, player_name, time, message)
+            VALUES
+                (:match_id, :player_slot, :player_name, :time, :message)
+        """, messages)
+
+
+def get_random_quote() -> dict | None:
+    """Return a random chat message from the database."""
+    with _conn() as conn:
+        row = conn.execute("""
+            SELECT cm.message, cm.player_name, cm.time, cm.match_id
+            FROM chat_messages cm
+            ORDER BY RANDOM()
+            LIMIT 1
+        """).fetchone()
+    return dict(row) if row else None
 
 
 # ---------------------------------------------------------------------------

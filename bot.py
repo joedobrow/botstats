@@ -224,6 +224,33 @@ async def summary(interaction: discord.Interaction):
         await interaction.followup.send(f"❌ Error loading summary: {str(e)}", ephemeral=True)
 
 
+@tree.command(name="quote", description="Display a random chat message from league matches")
+async def quote(interaction: discord.Interaction):
+    from db import get_random_quote
+
+    quote_data = get_random_quote()
+    if not quote_data:
+        await interaction.response.send_message("No chat messages found yet. Try again after a `/nuke`!", ephemeral=True)
+        return
+
+    player_name = quote_data.get("player_name", "Unknown")
+    message = quote_data.get("message", "")
+    match_id = quote_data.get("match_id", 0)
+    time_secs = quote_data.get("time", 0)
+
+    # Format time as MM:SS (can be negative for pre-game)
+    sign = "-" if time_secs < 0 else ""
+    abs_time = abs(time_secs)
+    time_str = f"{sign}{abs_time // 60}:{abs_time % 60:02d}"
+
+    dotabuff_link = f"https://www.dotabuff.com/matches/{match_id}"
+
+    await interaction.response.send_message(
+        f"💬 **\"{message}\"**\n"
+        f"— *{player_name}* at {time_str} ([match]({dotabuff_link}))"
+    )
+
+
 @tree.command(name="tipjar", description="Support the bot creator")
 async def tipjar(interaction: discord.Interaction):
     await interaction.response.send_message(

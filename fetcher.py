@@ -13,7 +13,7 @@ import logging
 from datetime import datetime, timezone
 
 from config import LEAGUE_ID, OPENDOTA_API_KEY, EXCLUDED_GAME_MODES, US_WEST_CLUSTERS
-from db import upsert_match, upsert_players, match_exists
+from db import upsert_match, upsert_players, upsert_chat_messages, match_exists
 
 logger = logging.getLogger(__name__)
 
@@ -228,6 +228,28 @@ async def fetch_and_store_weekly_matches() -> int:
                 })
 
             upsert_players(players)
+
+            # --- Persist chat messages (typed only, not chatwheel) ---
+            chat_data = full.get("chat", [])
+            # Build a map of player_slot -> player_name for this match
+            slot_to_name = {p.get("player_slot", 0): p.get("personaname") or p.get("name") or "Unknown" for p in all_players}
+
+            chat_messages = []
+            for msg in chat_data:
+                if msg.get("type") == "chat":  # Only typed messages, not chatwheel
+                    slot = msg.get("player_slot", msg.get("slot", 0))
+                    chat_messages.append({
+                        "match_id": mid,
+                        "player_slot": slot,
+                        "player_name": slot_to_name.get(slot, "Unknown"),
+                        "time": msg.get("time", 0),
+                        "message": msg.get("key", ""),
+                    })
+
+            if chat_messages:
+                upsert_chat_messages(chat_messages)
+                logger.info("Stored %d chat messages for match %d", len(chat_messages), mid)
+
             stored += 1
             logger.info("Stored match %d (%d players)", mid, len(players))
 
