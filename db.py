@@ -130,36 +130,54 @@ def upsert_chat_messages(messages: list[dict]):
         """, messages)
 
 
-# Common boring messages to filter out from /quote
+# Common boring messages to filter out from /quote (lowercase, no punctuation)
 BORING_MESSAGES = {
     # Pre-game pleasantries
     "gl", "hf", "glhf", "gl hf", "hfhf", "hf hf", "gg hf", "glgl", "gl gl",
-    "good luck", "have fun", "good luck have fun",
+    "good luck", "have fun", "good luck have fun", "gwr",
     # Post-game
-    "gg", "ggwp", "gg wp", "gege", "ge", "bg",
+    "gg", "ggwp", "gg wp", "gege", "ge", "bg", "ggs",
     # Pause-related
-    "g", "g?", "go", "go?", "rdy", "rdy?", "ready", "ready?", "r?", "r",
-    "1", "1?", "sec", "1 sec", "wait", "w8", "pause", "unpause",
+    "g", "go", "rdy", "ready", "r", "sec", "1 sec", "wait", "w8", "pause", "unpause",
+    "1", "2", "3", "4", "5",
     # Single characters / short stuff
-    "?", "!", ".", "ok", "k", "ty", "thx", "thanks", "np", "mb", "my bad",
+    "ok", "k", "ty", "thx", "thanks", "np", "mb", "my bad", "lol", "lmao", "xd",
+    "yes", "no", "y", "n", "hi", "hey", "hello", "bye", "cya",
 }
+
+
+def _normalize_message(msg: str) -> str:
+    """Normalize a message for comparison: lowercase, strip punctuation/emotes."""
+    import re
+    # Lowercase
+    msg = msg.lower().strip()
+    # Remove common punctuation and emotes
+    msg = re.sub(r'[!?.,;:\'"()]+', '', msg)  # punctuation
+    msg = re.sub(r'[:;][dDpP3)(\]\[]+', '', msg)  # text emotes like :D :P ;) etc
+    msg = re.sub(r'[xX]+[dD]+', '', msg)  # xD, XD, xd variations
+    msg = re.sub(r'\s+', ' ', msg).strip()  # collapse whitespace
+    return msg
 
 
 def get_random_quote() -> dict | None:
     """Return a random chat message from the database, filtering out boring ones."""
-    # Build SQL to exclude boring messages (case-insensitive)
-    placeholders = ", ".join("?" for _ in BORING_MESSAGES)
-
     with _conn() as conn:
-        row = conn.execute(f"""
+        # Fetch a batch of random candidates and filter in Python
+        # (SQLite doesn't have good regex support for normalization)
+        rows = conn.execute("""
             SELECT cm.message, cm.player_name, cm.time, cm.match_id
             FROM chat_messages cm
-            WHERE LOWER(TRIM(cm.message)) NOT IN ({placeholders})
-              AND LENGTH(TRIM(cm.message)) > 2
+            WHERE LENGTH(TRIM(cm.message)) > 2
             ORDER BY RANDOM()
-            LIMIT 1
-        """, list(BORING_MESSAGES)).fetchone()
-    return dict(row) if row else None
+            LIMIT 100
+        """).fetchall()
+
+    for row in rows:
+        normalized = _normalize_message(row["message"])
+        if normalized and normalized not in BORING_MESSAGES and len(normalized) > 2:
+            return dict(row)
+
+    return None
 
 
 # ---------------------------------------------------------------------------
