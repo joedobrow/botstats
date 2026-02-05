@@ -43,20 +43,25 @@ XPM_BASELINE = 400   # XPM below this doesn't score bonus points
 def calculate_fantasy_points(player: dict) -> float:
     """
     Given an aggregated player dict (as returned by db.get_latest_week_stats),
-    compute and return the fantasy point total.
+    compute and return the fantasy point total as a PER-GAME AVERAGE.
+
+    Players with more games are NOT rewarded — this is purely skill-based.
     """
     games = max(player.get("games_played", 1), 1)  # avoid div-by-zero
 
+    # Convert totals to per-game averages
     kills    = player.get("total_kills", 0) / games
     deaths   = player.get("total_deaths", 0) / games
     assists  = player.get("total_assists", 0) / games
-    lh       = player.get("last_hits", 0)         # already an average from SQL AVG()
-    denies   = player.get("denies", 0)            # already an average from SQL AVG()
-    gpm      = player.get("gpm", 0)               # already an average from SQL AVG()
-    xpm      = player.get("xpm", 0)               # already an average from SQL AVG()
-    damage   = player.get("hero_damage", 0)       # already an average from SQL AVG()
-    healing  = player.get("hero_healing", 0)      # already an average from SQL AVG()
-    wins     = player.get("wins", 0)
+    wins     = player.get("wins", 0) / games  # win rate (0 to 1)
+
+    # These are already per-game averages from SQL AVG()
+    lh       = player.get("last_hits", 0)
+    denies   = player.get("denies", 0)
+    gpm      = player.get("gpm", 0)
+    xpm      = player.get("xpm", 0)
+    damage   = player.get("hero_damage", 0)
+    healing  = player.get("hero_healing", 0)
 
     pts  = kills   * WEIGHTS["kills_per_game"]
     pts += deaths  * WEIGHTS["deaths_per_game"]
@@ -67,10 +72,6 @@ def calculate_fantasy_points(player: dict) -> float:
     pts += max(xpm - XPM_BASELINE, 0) / 100 * WEIGHTS["xpm_bonus_per_100"]
     pts += damage  / 100 * WEIGHTS["damage_per_100"]
     pts += healing / 100 * WEIGHTS["healing_per_100"]
-    pts += wins    * WEIGHTS["win_bonus"]
-
-    # Scale to total (multiply back by games so total fantasy points grow with
-    # more games, but the per-game formula keeps it fair)
-    pts *= games
+    pts += wins    * WEIGHTS["win_bonus"]  # now per-game (win rate * bonus)
 
     return round(pts, 1)
