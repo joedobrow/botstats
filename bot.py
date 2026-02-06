@@ -4,9 +4,9 @@ from discord.ext import tasks
 import logging
 from datetime import datetime, timezone, timedelta
 
-from config import DISCORD_TOKEN, LEAGUE_ID, STATS_CHANNEL_ID, ADMIN_USER_ID
-from fetcher import fetch_and_store_weekly_matches
-from db import get_latest_week_stats, get_all_weeks, init_db
+from config import DISCORD_TOKEN, ADMIN_USER_ID, REGION_CLUSTERS, GAME_MODE_FILTERS
+from fetcher import fetch_and_store_matches_for_division
+from db import init_db, get_division, upsert_division, get_all_divisions
 from formatters import format_leaderboard, format_player_stats, format_weekly_summary
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -18,8 +18,116 @@ tree = app_commands.CommandTree(bot)
 
 
 # ---------------------------------------------------------------------------
+# Helper to check division config
+# ---------------------------------------------------------------------------
+
+def _require_division(interaction: discord.Interaction):
+    """Get division for this guild, or None if not configured."""
+    return get_division(interaction.guild_id)
+
+
+# ---------------------------------------------------------------------------
 # Slash commands
 # ---------------------------------------------------------------------------
+
+@tree.command(name="config", description="[Admin] Configure this server's division settings")
+@app_commands.describe(
+    league="OpenDota league ID (find it in the league URL)",
+    region="Server region for filtering matches",
+    mode="Game mode filter",
+    season_start="Season start date (YYYY-MM-DD format)"
+)
+@app_commands.choices(
+    region=[
+        app_commands.Choice(name="US West", value="us_west"),
+        app_commands.Choice(name="US East", value="us_east"),
+    ],
+    mode=[
+        app_commands.Choice(name="Captain's Mode (exclude Ability Draft)", value="cm"),
+        app_commands.Choice(name="Ability Draft only", value="ad"),
+    ]
+)
+async def config(
+    interaction: discord.Interaction,
+    league: int = None,
+    region: str = None,
+    mode: str = None,
+    season_start: str = None
+):
+    # Only server admins or bot owner can configure
+    is_admin = interaction.user.guild_permissions.administrator
+    is_owner = ADMIN_USER_ID and interaction.user.id == ADMIN_USER_ID
+    if not is_admin and not is_owner:
+        await interaction.response.send_message("⚠️ Only server admins can configure divisions.", ephemeral=True)
+        return
+
+    guild_id = interaction.guild_id
+    current = get_division(guild_id)
+
+    # If no parameters, show current config
+    if league is None and region is None and mode is None and season_start is None:
+        if current:
+            region_display = "US West" if current["region"] == "us_west" else "US East"
+            mode_display = "Captain's Mode" if current["game_mode"] == "cm" else "Ability Draft"
+            await interaction.response.send_message(
+                f"**Current Division Config**\n"
+                f"League ID: `{current['league_id']}`\n"
+                f"Region: `{region_display}`\n"
+                f"Mode: `{mode_display}`\n"
+                f"Season Start: `{current['season_start']}`",
+                ephemeral=True
+            )
+        else:
+            await interaction.response.send_message(
+                "No division configured for this server.\n"
+                "Use `/config league:<id> region:<region> mode:<mode> season_start:<date>` to set up.",
+                ephemeral=True
+            )
+        return
+
+    # Creating or updating - need all fields for new config
+    if not current:
+        # New config - all fields required
+        if not all([league, region, mode, season_start]):
+            await interaction.response.send_message(
+                "⚠️ For initial setup, all fields are required:\n"
+                "`/config league:<id> region:<us_west|us_east> mode:<cm|ad> season_start:<YYYY-MM-DD>`",
+                ephemeral=True
+            )
+            return
+    else:
+        # Updating - use existing values for missing fields
+        league = league or current["league_id"]
+        region = region or current["region"]
+        mode = mode or current["game_mode"]
+        season_start = season_start or current["season_start"]
+
+    # Validate season_start format
+    try:
+        datetime.strptime(season_start, "%Y-%m-%d")
+    except ValueError:
+        await interaction.response.send_message(
+            "⚠️ Invalid date format. Use YYYY-MM-DD (e.g., 2026-01-26)",
+            ephemeral=True
+        )
+        return
+
+    # Save config
+    upsert_division(guild_id, league, region, mode, season_start)
+
+    region_display = "US West" if region == "us_west" else "US East"
+    mode_display = "Captain's Mode" if mode == "cm" else "Ability Draft"
+
+    await interaction.response.send_message(
+        f"✅ Division configured!\n"
+        f"League ID: `{league}`\n"
+        f"Region: `{region_display}`\n"
+        f"Mode: `{mode_display}`\n"
+        f"Season Start: `{season_start}`\n\n"
+        f"Run `/refresh` to fetch match data.",
+        ephemeral=True
+    )
+
 
 @tree.command(name="leaderboard", description="Show the leaderboard sorted by a stat")
 @app_commands.describe(
@@ -46,16 +154,24 @@ tree = app_commands.CommandTree(bot)
 async def leaderboard(interaction: discord.Interaction, stat: app_commands.Choice[str], week: int = None, pos: int = None):
     await interaction.response.defer()
 
+    division = _require_division(interaction)
+    if not division:
+        await interaction.followup.send("⚠️ No division configured. Ask an admin to run `/config` first.", ephemeral=True)
+        return
+
+    guild_id = interaction.guild_id
+    season_start = division["season_start"]
+
     from db import get_stats_for_season_week, get_all_time_stats
 
     try:
         if week is None or week == -1:
             # All-time stats (default)
-            stats = get_all_time_stats()
+            stats = get_all_time_stats(guild_id)
             week_label = "All-Time"
         else:
             # Specific season week (0, 1, 2, ...)
-            stats = get_stats_for_season_week(week)
+            stats = get_stats_for_season_week(guild_id, week, season_start)
             week_label = f"Week {week}"
 
         # Filter by position if specified
@@ -82,14 +198,22 @@ async def leaderboard(interaction: discord.Interaction, stat: app_commands.Choic
 async def player(interaction: discord.Interaction, name: str, week: int = None):
     await interaction.response.defer()
 
+    division = _require_division(interaction)
+    if not division:
+        await interaction.followup.send("⚠️ No division configured. Ask an admin to run `/config` first.", ephemeral=True)
+        return
+
+    guild_id = interaction.guild_id
+    season_start = division["season_start"]
+
     from db import get_stats_for_season_week, get_all_time_stats
 
     try:
         if week is None or week == -1:
-            stats = get_all_time_stats()
+            stats = get_all_time_stats(guild_id)
             week_label = "All-Time"
         else:
-            stats = get_stats_for_season_week(week)
+            stats = get_stats_for_season_week(guild_id, week, season_start)
             week_label = f"Week {week}"
 
         if not stats:
@@ -118,14 +242,22 @@ async def player(interaction: discord.Interaction, name: str, week: int = None):
 async def roles(interaction: discord.Interaction, week: int = None):
     await interaction.response.defer()
 
+    division = _require_division(interaction)
+    if not division:
+        await interaction.followup.send("⚠️ No division configured. Ask an admin to run `/config` first.", ephemeral=True)
+        return
+
+    guild_id = interaction.guild_id
+    season_start = division["season_start"]
+
     from db import get_stats_for_season_week, get_all_time_stats
 
     try:
         if week is None or week == -1:
-            stats = get_all_time_stats()
+            stats = get_all_time_stats(guild_id)
             week_label = "All-Time"
         else:
-            stats = get_stats_for_season_week(week)
+            stats = get_stats_for_season_week(guild_id, week, season_start)
             week_label = f"Week {week}"
 
         logger.info(f"Roles command: week={week}, found {len(stats) if stats else 0} players")
@@ -149,19 +281,27 @@ async def matches(interaction: discord.Interaction, week: int = None):
     # Defer immediately to avoid 3-second timeout
     await interaction.response.defer()
 
+    division = _require_division(interaction)
+    if not division:
+        await interaction.followup.send("⚠️ No division configured. Ask an admin to run `/config` first.", ephemeral=True)
+        return
+
+    guild_id = interaction.guild_id
+    season_start = division["season_start"]
+
     from db import get_matches_for_season_week, get_latest_matches, get_all_matches
 
     if week is None:
         # No week specified - show latest
-        match_list = get_latest_matches()
+        match_list = get_latest_matches(guild_id)
         week_label = "Latest Week"
     elif week == -1:
         # All matches
-        match_list = get_all_matches()
+        match_list = get_all_matches(guild_id)
         week_label = "All Matches"
     else:
         # Specific season week requested
-        match_list = get_matches_for_season_week(week)
+        match_list = get_matches_for_season_week(guild_id, week, season_start)
         week_label = f"Week {week}"
 
     if not match_list:
@@ -177,21 +317,29 @@ async def matches(interaction: discord.Interaction, week: int = None):
 async def summary(interaction: discord.Interaction):
     await interaction.response.defer()
 
+    division = _require_division(interaction)
+    if not division:
+        await interaction.followup.send("⚠️ No division configured. Ask an admin to run `/config` first.", ephemeral=True)
+        return
+
+    guild_id = interaction.guild_id
+    season_start = division["season_start"]
+
     from db import get_stats_for_season_week, get_all_time_stats, get_latest_season_week
     from formatters import format_compact_leaderboard, EMBED_COLOUR_GOLD, EMBED_COLOUR_BLUE
     from config import ROLE_LABELS
 
     try:
         # Get the latest week number
-        latest_week = get_latest_season_week()
+        latest_week = get_latest_season_week(guild_id, season_start)
         if latest_week:
-            week_stats = get_stats_for_season_week(latest_week)
+            week_stats = get_stats_for_season_week(guild_id, latest_week, season_start)
             week_label = f"Week {latest_week}"
         else:
             week_stats = []
             week_label = "Latest Week"
 
-        all_time_stats = get_all_time_stats()
+        all_time_stats = get_all_time_stats(guild_id)
 
         # Create embeds
         embeds = []
@@ -226,11 +374,16 @@ async def summary(interaction: discord.Interaction):
 
 @tree.command(name="quote", description="Display a random chat message from league matches")
 async def quote(interaction: discord.Interaction):
+    division = _require_division(interaction)
+    if not division:
+        await interaction.response.send_message("⚠️ No division configured. Ask an admin to run `/config` first.", ephemeral=True)
+        return
+
     from db import get_random_quote
 
-    quote_data = get_random_quote()
+    quote_data = get_random_quote(interaction.guild_id)
     if not quote_data:
-        await interaction.response.send_message("No chat messages found yet. Try again after a `/nuke`!", ephemeral=True)
+        await interaction.response.send_message("No chat messages found yet. Try again after a `/refresh`!", ephemeral=True)
         return
 
     player_name = quote_data.get("player_name", "Unknown")
@@ -266,26 +419,40 @@ async def refresh(interaction: discord.Interaction):
     if not interaction.user.guild_permissions.administrator:
         await interaction.response.send_message("⚠️ Only admins can use this command.", ephemeral=True)
         return
+
+    division = _require_division(interaction)
+    if not division:
+        await interaction.response.send_message("⚠️ No division configured. Use `/config` first.", ephemeral=True)
+        return
+
     await interaction.response.send_message("⏳ Fetching match data...", ephemeral=True)
     try:
-        count = await fetch_and_store_weekly_matches()
+        count = await fetch_and_store_matches_for_division(interaction.guild_id)
         await interaction.followup.send(f"✅ Done! Fetched and stored {count} match(es).", ephemeral=True)
     except Exception as e:
         logger.exception("Refresh failed")
         await interaction.followup.send(f"❌ Error during fetch: {e}", ephemeral=True)
 
 
-@tree.command(name="nuke", description="[Owner] Wipe all data and re-fetch from OpenDota")
+@tree.command(name="nuke", description="[Admin] Wipe all data for this server and re-fetch")
 async def nuke(interaction: discord.Interaction):
-    # Restrict to bot owner only (ADMIN_USER_ID), not server admins
-    if ADMIN_USER_ID is None or interaction.user.id != ADMIN_USER_ID:
+    # Server admins or bot owner can nuke their own server's data
+    is_admin = interaction.user.guild_permissions.administrator
+    is_owner = ADMIN_USER_ID and interaction.user.id == ADMIN_USER_ID
+    if not is_admin and not is_owner:
         await interaction.response.send_message("hahaa nice try loser", ephemeral=True)
         return
+
+    division = _require_division(interaction)
+    if not division:
+        await interaction.response.send_message("⚠️ No division configured. Use `/config` first.", ephemeral=True)
+        return
+
     await interaction.response.defer(ephemeral=True)
     try:
         from db import nuke_data
-        nuke_data()
-        count = await fetch_and_store_weekly_matches()
+        nuke_data(interaction.guild_id)
+        count = await fetch_and_store_matches_for_division(interaction.guild_id)
         await interaction.followup.send(f"✅ Data wiped and re-fetched {count} match(es).", ephemeral=True)
     except Exception as e:
         logger.exception("Nuke failed")
@@ -302,21 +469,19 @@ async def weekly_fetch():
     if datetime.now(timezone.utc).weekday() != 0:
         return
     logger.info("Weekly fetch triggered (Monday 06:00 UTC)")
-    try:
-        count = await fetch_and_store_weekly_matches()
-        logger.info(f"Weekly fetch complete: {count} match(es) stored.")
 
-        # Post a summary to the configured channel if set
-        if STATS_CHANNEL_ID:
-            channel = bot.get_channel(STATS_CHANNEL_ID)
-            if channel:
-                stats = get_latest_week_stats(week_offset=0)
-                if stats:
-                    embed = format_weekly_summary(stats)
-                    await channel.send(embed=embed)
-                    logger.info("Weekly summary posted to channel.")
-    except Exception:
-        logger.exception("Weekly auto-fetch failed")
+    # Fetch for all configured divisions
+    divisions = get_all_divisions()
+    total_count = 0
+    for div in divisions:
+        try:
+            count = await fetch_and_store_matches_for_division(div["guild_id"])
+            total_count += count
+            logger.info(f"Weekly fetch for guild {div['guild_id']}: {count} match(es)")
+        except Exception:
+            logger.exception(f"Weekly fetch failed for guild {div['guild_id']}")
+
+    logger.info(f"Weekly fetch complete: {total_count} total match(es) across {len(divisions)} division(s)")
 
 
 # ---------------------------------------------------------------------------

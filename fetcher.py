@@ -2,18 +2,19 @@
 Fetcher — talks to the OpenDota API.
 
 Flow:
-  1. GET /leagues/{league_id}/matches  →  list of recent matches for the league
-  2. Filter out ability draft and non-US-West matches
-  3. For each surviving match_id, GET /matches/{match_id}  →  full player data
-  4. Persist everything to SQLite via db.py
+  1. Load division config from DB (league_id, region, game_mode)
+  2. GET /leagues/{league_id}/matches  →  list of recent matches for the league
+  3. Filter by region clusters and game mode
+  4. For each surviving match_id, GET /matches/{match_id}  →  full player data
+  5. Persist everything to SQLite via db.py
 """
 
 import aiohttp
 import logging
 from datetime import datetime, timezone
 
-from config import LEAGUE_ID, OPENDOTA_API_KEY, EXCLUDED_GAME_MODES, US_WEST_CLUSTERS
-from db import upsert_match, upsert_players, upsert_chat_messages, match_exists
+from config import OPENDOTA_API_KEY, REGION_CLUSTERS, GAME_MODE_FILTERS
+from db import upsert_match, upsert_players, upsert_chat_messages, match_exists, get_division
 
 logger = logging.getLogger(__name__)
 
@@ -120,40 +121,58 @@ def _assign_team_roles(team_players: list[dict]) -> dict[int, int]:
     return assigned
 
 
-async def fetch_and_store_weekly_matches() -> int:
+async def fetch_and_store_matches_for_division(guild_id: int) -> int:
     """
-    Main entry point.  Fetches recent league matches, filters, fetches full
-    details, and stores them.  Returns the number of NEW matches stored.
+    Fetch matches for a specific division (Discord server).
+
+    Loads division config from DB and fetches/filters accordingly.
+    Returns the number of NEW matches stored.
     """
+    division = get_division(guild_id)
+    if not division:
+        logger.warning("No division configured for guild %d", guild_id)
+        return 0
+
+    league_id = division["league_id"]
+    region = division["region"]
+    game_mode_key = division["game_mode"]
+
+    # Get cluster and game mode filters
+    allowed_clusters = REGION_CLUSTERS.get(region, set())
+    mode_filter = GAME_MODE_FILTERS.get(game_mode_key, {"include": None, "exclude": set()})
+    include_modes = mode_filter.get("include")
+    exclude_modes = mode_filter.get("exclude") or set()
+
+    logger.info(
+        "Fetching for guild %d: league=%d, region=%s, mode=%s",
+        guild_id, league_id, region, game_mode_key
+    )
+
     stored = 0
 
     async with aiohttp.ClientSession() as session:
         # --- Step 1: get league match IDs (works for amateur leagues) ---
-        match_ids = await _get(session, f"/leagues/{LEAGUE_ID}/matchIds", use_auth=False)
+        match_ids = await _get(session, f"/leagues/{league_id}/matchIds", use_auth=False)
         if not match_ids:
-            logger.warning("No match IDs returned for league %d", LEAGUE_ID)
+            logger.warning("No match IDs returned for league %d", league_id)
             return 0
 
-        logger.info("Fetched %d match IDs for league", len(match_ids))
+        logger.info("Fetched %d match IDs for league %d", len(match_ids), league_id)
 
-        # --- Step 2: we'll filter AFTER fetching full match details ---
-        # (can't filter on summary data since /matchIds only gives us IDs)
-        candidates = match_ids
-
-        # --- Step 3: fetch full details for each match ID and filter ---
-        for match_id_str in candidates:
+        # --- Step 2: fetch full details for each match ID and filter ---
+        for match_id_str in match_ids:
             mid = int(match_id_str)
 
-            # Skip if we already have this match stored
-            if match_exists(mid):
-                logger.debug("Match %d already in DB, skipping", mid)
+            # Skip if we already have this match stored for this guild
+            if match_exists(guild_id, mid):
+                logger.debug("Match %d already in DB for guild %d, skipping", mid, guild_id)
                 continue
 
             # Don't use API key - causes 400s for amateur league matches
             # Add small delay to avoid hitting rate limits (60 req/min = 1 per second)
             import asyncio
             await asyncio.sleep(1.1)
-            
+
             full = await _get(session, f"/matches/{mid}", use_auth=False)
             if not full:
                 logger.warning("Failed to fetch full data for match %d", mid)
@@ -163,21 +182,28 @@ async def fetch_and_store_weekly_matches() -> int:
             game_mode = full.get("game_mode", 0)
             cluster = full.get("cluster", 0)
 
-            if game_mode in EXCLUDED_GAME_MODES:
+            # Check game mode filter
+            if include_modes is not None and game_mode not in include_modes:
+                logger.info("FILTERED OUT: Match %d — game_mode=%d (not in include list)", mid, game_mode)
+                continue
+            if game_mode in exclude_modes:
                 logger.info("FILTERED OUT: Match %d — game_mode=%d (excluded)", mid, game_mode)
                 continue
-            if cluster not in US_WEST_CLUSTERS:
-                logger.info("FILTERED OUT: Match %d — cluster=%d (not US West)", mid, cluster)
+
+            # Check cluster/region filter
+            if cluster not in allowed_clusters:
+                logger.info("FILTERED OUT: Match %d — cluster=%d (not in %s)", mid, cluster, region)
                 continue
-            
+
             # Log matches that PASS the filter
-            logger.info("STORING: Match %d — cluster=%d, game_mode=%d", mid, cluster, game_mode)
+            logger.info("STORING: Match %d for guild %d — cluster=%d, game_mode=%d", mid, guild_id, cluster, game_mode)
 
             # --- Persist match row ---
             radiant_win = 1 if full.get("radiant_win") else 0
             match_row = {
                 "match_id":     full["match_id"],
-                "league_id":    full.get("leagueid", LEAGUE_ID),
+                "guild_id":     guild_id,
+                "league_id":    full.get("leagueid", league_id),
                 "start_time":   full.get("start_time", 0),
                 "duration":     full.get("duration", 0),
                 "game_mode":    full.get("game_mode", 0),

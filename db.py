@@ -32,8 +32,19 @@ def init_db():
     """Create tables if they don't exist. Call once at startup."""
     with _conn() as conn:
         conn.executescript("""
+            -- Division config per Discord server
+            CREATE TABLE IF NOT EXISTS divisions (
+                guild_id        INTEGER PRIMARY KEY,  -- Discord server ID
+                league_id       INTEGER NOT NULL,
+                region          TEXT NOT NULL,        -- 'us_west' or 'us_east'
+                game_mode       TEXT NOT NULL,        -- 'cm' or 'ad'
+                season_start    TEXT NOT NULL,        -- 'YYYY-MM-DD'
+                created_at      TEXT NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS matches (
                 match_id        INTEGER PRIMARY KEY,
+                guild_id        INTEGER NOT NULL,     -- Links to division
                 league_id       INTEGER NOT NULL,
                 start_time      INTEGER NOT NULL,   -- unix timestamp
                 duration        INTEGER NOT NULL,   -- seconds
@@ -70,6 +81,7 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_players_match   ON players(match_id);
             CREATE INDEX IF NOT EXISTS idx_players_account ON players(account_id);
             CREATE INDEX IF NOT EXISTS idx_matches_start   ON matches(start_time);
+            CREATE INDEX IF NOT EXISTS idx_matches_guild   ON matches(guild_id);
 
             CREATE TABLE IF NOT EXISTS chat_messages (
                 id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -86,6 +98,40 @@ def init_db():
 
 
 # ---------------------------------------------------------------------------
+# Division management
+# ---------------------------------------------------------------------------
+
+def get_division(guild_id: int) -> dict | None:
+    """Get division config for a guild, or None if not configured."""
+    with _conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM divisions WHERE guild_id = ?", (guild_id,)
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def upsert_division(guild_id: int, league_id: int, region: str, game_mode: str, season_start: str):
+    """Create or update a division config."""
+    with _conn() as conn:
+        conn.execute("""
+            INSERT INTO divisions (guild_id, league_id, region, game_mode, season_start, created_at)
+            VALUES (?, ?, ?, ?, ?, datetime('now'))
+            ON CONFLICT(guild_id) DO UPDATE SET
+                league_id = excluded.league_id,
+                region = excluded.region,
+                game_mode = excluded.game_mode,
+                season_start = excluded.season_start
+        """, (guild_id, league_id, region, game_mode, season_start))
+
+
+def get_all_divisions() -> list[dict]:
+    """Get all configured divisions."""
+    with _conn() as conn:
+        rows = conn.execute("SELECT * FROM divisions").fetchall()
+    return [dict(r) for r in rows]
+
+
+# ---------------------------------------------------------------------------
 # Write
 # ---------------------------------------------------------------------------
 
@@ -94,9 +140,9 @@ def upsert_match(match: dict):
     with _conn() as conn:
         conn.execute("""
             INSERT OR IGNORE INTO matches
-                (match_id, league_id, start_time, duration, game_mode, cluster,
+                (match_id, guild_id, league_id, start_time, duration, game_mode, cluster,
                  radiant_win, radiant_score, dire_score, fetched_at)
-            VALUES (:match_id, :league_id, :start_time, :duration, :game_mode,
+            VALUES (:match_id, :guild_id, :league_id, :start_time, :duration, :game_mode,
                     :cluster, :radiant_win, :radiant_score, :dire_score, :fetched_at)
         """, match)
 
@@ -159,7 +205,7 @@ def _normalize_message(msg: str) -> str:
     return msg
 
 
-def get_random_quote() -> dict | None:
+def get_random_quote(guild_id: int) -> dict | None:
     """Return a random chat message from the database, filtering out boring ones."""
     with _conn() as conn:
         # Fetch a batch of random candidates and filter in Python
@@ -167,10 +213,12 @@ def get_random_quote() -> dict | None:
         rows = conn.execute("""
             SELECT cm.message, cm.player_name, cm.time, cm.match_id
             FROM chat_messages cm
-            WHERE LENGTH(TRIM(cm.message)) > 2
+            JOIN matches m ON cm.match_id = m.match_id
+            WHERE m.guild_id = ?
+              AND LENGTH(TRIM(cm.message)) > 2
             ORDER BY RANDOM()
             LIMIT 100
-        """).fetchall()
+        """, (guild_id,)).fetchall()
 
     for row in rows:
         normalized = _normalize_message(row["message"])
@@ -200,29 +248,27 @@ def _week_start(week_offset: int = 0) -> tuple[int, int]:
     return int(monday.timestamp()), int(sunday_end.timestamp())
 
 
-def _season_week_start(week_number: int) -> tuple[int, int]:
+def _season_week_start(week_number: int, season_start_date: str) -> tuple[int, int]:
     """Return (start_unix, end_unix) for a specific season week.
-    
-    week_number=1 means the first week of the season (starting from SEASON_START_DATE).
+
+    week_number=1 means the first week of the season.
+    season_start_date is a string in 'YYYY-MM-DD' format.
     """
-    from config import SEASON_START_DATE
-    from datetime import datetime
-    
     # Parse season start date
-    season_start = datetime.strptime(SEASON_START_DATE, "%Y-%m-%d")
+    season_start = datetime.strptime(season_start_date, "%Y-%m-%d")
     season_start = season_start.replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=timezone.utc)
-    
+
     # Find the Monday of the week containing season start
     season_monday = season_start - timedelta(days=season_start.weekday())
-    
+
     # Calculate the start of the requested week (week_number is 1-indexed)
     target_monday = season_monday + timedelta(weeks=week_number - 1)
     target_sunday = target_monday + timedelta(days=7) - timedelta(seconds=1)
-    
+
     return int(target_monday.timestamp()), int(target_sunday.timestamp())
 
 
-def get_latest_week_stats(week_offset: int = 0) -> list[dict]:
+def get_latest_week_stats(guild_id: int, week_offset: int = 0) -> list[dict]:
     """Return aggregated per-player stats for the given week.
 
     Each dict contains all raw totals plus computed kda and fantasy_points.
@@ -247,10 +293,11 @@ def get_latest_week_stats(week_offset: int = 0) -> list[dict]:
                 SUM(p.won)                      AS wins
             FROM players p
             JOIN matches m ON p.match_id = m.match_id
-            WHERE m.start_time BETWEEN :start AND :end
+            WHERE m.guild_id = :guild_id
+              AND m.start_time BETWEEN :start AND :end
             GROUP BY p.account_id
             ORDER BY gpm DESC
-        """, {"start": start, "end": end}).fetchall()
+        """, {"guild_id": guild_id, "start": start, "end": end}).fetchall()
 
     results = []
     for r in rows:
@@ -264,9 +311,9 @@ def get_latest_week_stats(week_offset: int = 0) -> list[dict]:
     return results
 
 
-def get_stats_for_season_week(week_number: int) -> list[dict]:
+def get_stats_for_season_week(guild_id: int, week_number: int, season_start_date: str) -> list[dict]:
     """Return aggregated per-player stats for a specific season week."""
-    start, end = _season_week_start(week_number)
+    start, end = _season_week_start(week_number, season_start_date)
     with _conn() as conn:
         rows = conn.execute("""
             SELECT
@@ -286,10 +333,11 @@ def get_stats_for_season_week(week_number: int) -> list[dict]:
                 SUM(p.won)                      AS wins
             FROM players p
             JOIN matches m ON p.match_id = m.match_id
-            WHERE m.start_time BETWEEN :start AND :end
+            WHERE m.guild_id = :guild_id
+              AND m.start_time BETWEEN :start AND :end
             GROUP BY p.account_id
             ORDER BY gpm DESC
-        """, {"start": start, "end": end}).fetchall()
+        """, {"guild_id": guild_id, "start": start, "end": end}).fetchall()
 
     results = []
     for r in rows:
@@ -301,10 +349,10 @@ def get_stats_for_season_week(week_number: int) -> list[dict]:
     return results
 
 
-def get_all_time_stats() -> list[dict]:
-    """Return aggregated per-player stats across all matches in the season."""
+def get_all_time_stats(guild_id: int) -> list[dict]:
+    """Return aggregated per-player stats across all matches for a division."""
     from fantasy import calculate_fantasy_points
-    
+
     with _conn() as conn:
         rows = conn.execute("""
             SELECT
@@ -324,9 +372,10 @@ def get_all_time_stats() -> list[dict]:
                 SUM(p.won)                      AS wins
             FROM players p
             JOIN matches m ON p.match_id = m.match_id
+            WHERE m.guild_id = ?
             GROUP BY p.account_id
             ORDER BY gpm DESC
-        """).fetchall()
+        """, (guild_id,)).fetchall()
 
     results = []
     for r in rows:
@@ -337,61 +386,7 @@ def get_all_time_stats() -> list[dict]:
     return results
 
 
-def get_latest_week_stats_new() -> list[dict]:
-    """Return stats from the most recent week that has data."""
-    from fantasy import calculate_fantasy_points
-    
-    with _conn() as conn:
-        # Find the most recent match
-        latest = conn.execute("SELECT MAX(start_time) as max_time FROM matches").fetchone()
-        if not latest or not latest["max_time"]:
-            return []
-        
-        latest_time = latest["max_time"]
-        # Find the Monday of the week containing that match
-        from datetime import datetime
-        dt = datetime.fromtimestamp(latest_time, tz=timezone.utc)
-        monday = dt - timedelta(days=dt.weekday())
-        monday = monday.replace(hour=0, minute=0, second=0, microsecond=0)
-        sunday = monday + timedelta(days=7) - timedelta(seconds=1)
-        
-        start_ts = int(monday.timestamp())
-        end_ts = int(sunday.timestamp())
-        
-        # Get stats for that week
-        rows = conn.execute("""
-            SELECT
-                p.account_id,
-                p.name,
-                p.role_position,
-                COUNT(*)                        AS games_played,
-                SUM(p.kills)                    AS total_kills,
-                SUM(p.deaths)                   AS total_deaths,
-                SUM(p.assists)                  AS total_assists,
-                AVG(p.gpm)                      AS gpm,
-                AVG(p.xpm)                      AS xpm,
-                AVG(p.last_hits)                AS last_hits,
-                AVG(p.denies)                   AS denies,
-                AVG(p.hero_damage)              AS hero_damage,
-                AVG(p.hero_healing)             AS hero_healing,
-                SUM(p.won)                      AS wins
-            FROM players p
-            JOIN matches m ON p.match_id = m.match_id
-            WHERE m.start_time BETWEEN ? AND ?
-            GROUP BY p.account_id
-            ORDER BY gpm DESC
-        """, (start_ts, end_ts)).fetchall()
-
-    results = []
-    for r in rows:
-        d = dict(r)
-        d["kda"] = round((d["total_kills"] + d["total_assists"]) / max(d["total_deaths"], 1), 2)
-        d["fantasy_points"] = calculate_fantasy_points(d)
-        results.append(d)
-    return results
-
-
-def get_all_weeks() -> list[dict]:
+def get_all_weeks(guild_id: int) -> list[dict]:
     """Return a list of distinct weeks that have data, with match counts."""
     with _conn() as conn:
         rows = conn.execute("""
@@ -399,27 +394,25 @@ def get_all_weeks() -> list[dict]:
                 strftime('%Y-%m-%d', start_time, 'unixepoch') AS match_date,
                 COUNT(*) AS match_count
             FROM matches
+            WHERE guild_id = ?
             GROUP BY date(start_time, 'unixepoch', 'weekday 1')
             ORDER BY match_date DESC
-        """).fetchall()
+        """, (guild_id,)).fetchall()
     return [dict(r) for r in rows]
 
 
-def get_latest_season_week() -> int | None:
+def get_latest_season_week(guild_id: int, season_start_date: str) -> int | None:
     """Return the latest season week number that has data, or None if no data."""
-    from config import SEASON_START_DATE
-    from datetime import datetime
-
     with _conn() as conn:
         row = conn.execute("""
-            SELECT MAX(start_time) AS latest_time FROM matches
-        """).fetchone()
+            SELECT MAX(start_time) AS latest_time FROM matches WHERE guild_id = ?
+        """, (guild_id,)).fetchone()
 
     if not row or not row["latest_time"]:
         return None
 
     # Calculate which season week this timestamp falls into
-    season_start = datetime.strptime(SEASON_START_DATE, "%Y-%m-%d")
+    season_start = datetime.strptime(season_start_date, "%Y-%m-%d")
     season_start = season_start.replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=timezone.utc)
     season_monday = season_start - timedelta(days=season_start.weekday())
 
@@ -430,7 +423,7 @@ def get_latest_season_week() -> int | None:
     return max(1, week_number)
 
 
-def get_matches_for_week(week_offset: int = 0) -> list[dict]:
+def get_matches_for_week(guild_id: int, week_offset: int = 0) -> list[dict]:
     """Return all matches for a given week with basic info."""
     start, end = _week_start(week_offset)
     with _conn() as conn:
@@ -443,15 +436,16 @@ def get_matches_for_week(week_offset: int = 0) -> list[dict]:
                 radiant_score,
                 dire_score
             FROM matches
-            WHERE start_time BETWEEN :start AND :end
+            WHERE guild_id = :guild_id
+              AND start_time BETWEEN :start AND :end
             ORDER BY start_time DESC
-        """, {"start": start, "end": end}).fetchall()
+        """, {"guild_id": guild_id, "start": start, "end": end}).fetchall()
     return [dict(r) for r in rows]
 
 
-def get_matches_for_season_week(week_number: int) -> list[dict]:
+def get_matches_for_season_week(guild_id: int, week_number: int, season_start_date: str) -> list[dict]:
     """Return all matches for a specific season week (1-indexed)."""
-    start, end = _season_week_start(week_number)
+    start, end = _season_week_start(week_number, season_start_date)
     with _conn() as conn:
         rows = conn.execute("""
             SELECT
@@ -462,29 +456,32 @@ def get_matches_for_season_week(week_number: int) -> list[dict]:
                 radiant_score,
                 dire_score
             FROM matches
-            WHERE start_time BETWEEN :start AND :end
+            WHERE guild_id = :guild_id
+              AND start_time BETWEEN :start AND :end
             ORDER BY start_time DESC
-        """, {"start": start, "end": end}).fetchall()
+        """, {"guild_id": guild_id, "start": start, "end": end}).fetchall()
     return [dict(r) for r in rows]
 
 
-def get_latest_matches() -> list[dict]:
-    """Return all matches from the most recent week that has data."""
+def get_latest_matches(guild_id: int) -> list[dict]:
+    """Return all matches from the most recent week that has data for a division."""
     with _conn() as conn:
-        # Find the most recent match
-        latest = conn.execute("SELECT MAX(start_time) as max_time FROM matches").fetchone()
+        # Find the most recent match for this guild
+        latest = conn.execute(
+            "SELECT MAX(start_time) as max_time FROM matches WHERE guild_id = ?",
+            (guild_id,)
+        ).fetchone()
         if not latest or not latest["max_time"]:
             return []
-        
+
         latest_time = latest["max_time"]
         # Find the Monday of the week containing that match
-        from datetime import datetime
         dt = datetime.fromtimestamp(latest_time, tz=timezone.utc)
         monday = dt - timedelta(days=dt.weekday())
         monday = monday.replace(hour=0, minute=0, second=0, microsecond=0)
         sunday = monday + timedelta(days=7) - timedelta(seconds=1)
-        
-        # Get all matches in that week
+
+        # Get all matches in that week for this guild
         rows = conn.execute("""
             SELECT
                 match_id,
@@ -494,14 +491,15 @@ def get_latest_matches() -> list[dict]:
                 radiant_score,
                 dire_score
             FROM matches
-            WHERE start_time BETWEEN :start AND :end
+            WHERE guild_id = :guild_id
+              AND start_time BETWEEN :start AND :end
             ORDER BY start_time DESC
-        """, {"start": int(monday.timestamp()), "end": int(sunday.timestamp())}).fetchall()
+        """, {"guild_id": guild_id, "start": int(monday.timestamp()), "end": int(sunday.timestamp())}).fetchall()
     return [dict(r) for r in rows]
 
 
-def get_all_matches() -> list[dict]:
-    """Return all matches across the entire season."""
+def get_all_matches(guild_id: int) -> list[dict]:
+    """Return all matches for a division."""
     with _conn() as conn:
         rows = conn.execute("""
             SELECT
@@ -512,20 +510,35 @@ def get_all_matches() -> list[dict]:
                 radiant_score,
                 dire_score
             FROM matches
+            WHERE guild_id = ?
             ORDER BY start_time DESC
-        """).fetchall()
+        """, (guild_id,)).fetchall()
     return [dict(r) for r in rows]
 
 
-def nuke_data():
-    """Delete all rows from players and matches tables."""
+def nuke_data(guild_id: int):
+    """Delete all match/player/chat data for a specific division."""
     with _conn() as conn:
-        conn.execute("DELETE FROM players")
-        conn.execute("DELETE FROM matches")
-    logger.info("All data nuked from players and matches tables.")
+        # Get match IDs for this guild to delete related data
+        match_ids = conn.execute(
+            "SELECT match_id FROM matches WHERE guild_id = ?", (guild_id,)
+        ).fetchall()
+        match_id_list = [r["match_id"] for r in match_ids]
+
+        if match_id_list:
+            placeholders = ",".join("?" for _ in match_id_list)
+            conn.execute(f"DELETE FROM players WHERE match_id IN ({placeholders})", match_id_list)
+            conn.execute(f"DELETE FROM chat_messages WHERE match_id IN ({placeholders})", match_id_list)
+
+        conn.execute("DELETE FROM matches WHERE guild_id = ?", (guild_id,))
+    logger.info("Data nuked for guild %d", guild_id)
 
 
-def match_exists(match_id: int) -> bool:
+def match_exists(guild_id: int, match_id: int) -> bool:
+    """Check if a match exists for a specific guild."""
     with _conn() as conn:
-        row = conn.execute("SELECT 1 FROM matches WHERE match_id = ?", (match_id,)).fetchone()
+        row = conn.execute(
+            "SELECT 1 FROM matches WHERE guild_id = ? AND match_id = ?",
+            (guild_id, match_id)
+        ).fetchone()
     return row is not None

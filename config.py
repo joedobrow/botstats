@@ -7,43 +7,31 @@ import os
 # ---------------------------------------------------------------------------
 
 DISCORD_TOKEN: str = os.environ["DISCORD_TOKEN"]
-# Your OpenDota league ID (integer). Replace with your actual league ID.
-LEAGUE_ID: int = int(os.environ.get("LEAGUE_ID", "0"))
-# Optional: a channel ID (integer) where the bot auto-posts weekly summaries.
-# Leave unset or set to 0 to disable auto-posting.
-STATS_CHANNEL_ID: int | None = int(os.environ["STATS_CHANNEL_ID"]) if os.environ.get("STATS_CHANNEL_ID") else None
+
 # Optional: your OpenDota API key. Free tier works without one but has lower
 # rate limits (60 req/min, 50k/month). Get one at https://www.opendota.com/api-keys
 OPENDOTA_API_KEY: str | None = os.environ.get("OPENDOTA_API_KEY")
 
-# ---------------------------------------------------------------------------
-# Season configuration
-# ---------------------------------------------------------------------------
-
-# Season start date (used for week numbering). Format: "YYYY-MM-DD"
-SEASON_START_DATE: str = os.environ.get("SEASON_START_DATE", "2026-01-26")
-
-# Admin user ID - only this user can run /refresh command
+# Bot owner user ID - can configure any division and nuke any data
 ADMIN_USER_ID: int | None = int(os.environ["ADMIN_USER_ID"]) if os.environ.get("ADMIN_USER_ID") else None
 
 # ---------------------------------------------------------------------------
 # Dota 2 constants
 # ---------------------------------------------------------------------------
 
-# OpenDota game_mode values we want to EXCLUDE.
-# 18 = Ability Draft. Add more here if needed.
-EXCLUDED_GAME_MODES: set[int] = {18}
-
-# OpenDota cluster IDs that correspond to US West servers.
+# Region cluster mappings (from OpenDota API constants)
 # Source: https://api.opendota.com/api/constants/cluster
-# Region 1 = US West, Region 2 = US East
-US_WEST_CLUSTERS: set[int] = {
-    111,  # US West
-    112,  # US West
-    113,  # US West
-    114,  # US West
-    117,  # US West
-    118,  # US West
+REGION_CLUSTERS: dict[str, set[int]] = {
+    "us_west": {111, 112, 113, 114, 117, 118},
+    "us_east": {121, 122, 123, 124},
+}
+
+# Game mode configurations
+# 'cm' = Captain's Mode (mode 2) - exclude Ability Draft
+# 'ad' = Ability Draft (mode 18) - only include Ability Draft
+GAME_MODE_FILTERS: dict[str, dict] = {
+    "cm": {"include": None, "exclude": {18}},  # All modes except Ability Draft
+    "ad": {"include": {18}, "exclude": None},  # Only Ability Draft
 }
 
 # Dota 2 role labels mapped to the player_slot positions OpenDota returns.
