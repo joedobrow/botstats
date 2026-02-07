@@ -44,7 +44,7 @@ def init_db():
 
             CREATE TABLE IF NOT EXISTS matches (
                 match_id        INTEGER PRIMARY KEY,
-                guild_id        INTEGER NOT NULL,     -- Links to division
+                guild_id        INTEGER NOT NULL DEFAULT 0,  -- Links to division
                 league_id       INTEGER NOT NULL,
                 start_time      INTEGER NOT NULL,   -- unix timestamp
                 duration        INTEGER NOT NULL,   -- seconds
@@ -55,6 +55,16 @@ def init_db():
                 dire_score      INTEGER NOT NULL,
                 fetched_at      TEXT NOT NULL        -- ISO timestamp of when we stored it
             );
+        """)
+
+        # --- Migration: add guild_id column to existing matches table if missing ---
+        cursor = conn.execute("PRAGMA table_info(matches)")
+        columns = [row[1] for row in cursor.fetchall()]
+        if "guild_id" not in columns:
+            logger.info("Migrating: adding guild_id column to matches table")
+            conn.execute("ALTER TABLE matches ADD COLUMN guild_id INTEGER NOT NULL DEFAULT 0")
+
+        conn.executescript("""
 
             CREATE TABLE IF NOT EXISTS players (
                 id              INTEGER PRIMARY KEY AUTOINCREMENT,
