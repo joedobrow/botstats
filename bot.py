@@ -492,20 +492,23 @@ async def on_message(message: discord.Message):
     if message.author.bot or not message.guild:
         return
 
-    scold_channel_id = get_scold_channel(message.guild.id)
-    if not scold_channel_id or message.channel.id != scold_channel_id:
-        return
+    # --- "badmin" correction (all channels) ---
+    if "badmin" in message.content.lower():
+        await message.reply("I think you meant to say 'goodmin'")
 
-    try:
-        await message.delete()
-        await message.channel.send(
-            f"{message.author.mention} {random.choice(SCOLD_MESSAGES)}",
-            delete_after=5,
-        )
-    except discord.Forbidden:
-        logger.warning("Missing permissions to delete message in scold channel %d", scold_channel_id)
-    except Exception:
-        logger.exception("Error in scold channel handler")
+    # --- Scold channel (delete + scold) ---
+    scold_channel_id = get_scold_channel(message.guild.id)
+    if scold_channel_id and message.channel.id == scold_channel_id:
+        try:
+            await message.delete()
+            await message.channel.send(
+                f"{message.author.mention} {random.choice(SCOLD_MESSAGES)}",
+                delete_after=5,
+            )
+        except discord.Forbidden:
+            logger.warning("Missing permissions to delete message in scold channel %d", scold_channel_id)
+        except Exception:
+            logger.exception("Error in scold channel handler")
 
 
 # ---------------------------------------------------------------------------
