@@ -64,6 +64,13 @@ def init_db():
             logger.info("Migrating: adding guild_id column to matches table")
             conn.execute("ALTER TABLE matches ADD COLUMN guild_id INTEGER NOT NULL DEFAULT 0")
 
+        # --- Migration: add scold_channel_id column to divisions if missing ---
+        cursor = conn.execute("PRAGMA table_info(divisions)")
+        div_columns = [row[1] for row in cursor.fetchall()]
+        if "scold_channel_id" not in div_columns:
+            logger.info("Migrating: adding scold_channel_id column to divisions table")
+            conn.execute("ALTER TABLE divisions ADD COLUMN scold_channel_id INTEGER DEFAULT NULL")
+
         conn.executescript("""
 
             CREATE TABLE IF NOT EXISTS players (
@@ -120,18 +127,19 @@ def get_division(guild_id: int) -> dict | None:
     return dict(row) if row else None
 
 
-def upsert_division(guild_id: int, league_id: int, region: str, game_mode: str, season_start: str):
+def upsert_division(guild_id: int, league_id: int, region: str, game_mode: str, season_start: str, scold_channel_id: int | None = None):
     """Create or update a division config."""
     with _conn() as conn:
         conn.execute("""
-            INSERT INTO divisions (guild_id, league_id, region, game_mode, season_start, created_at)
-            VALUES (?, ?, ?, ?, ?, datetime('now'))
+            INSERT INTO divisions (guild_id, league_id, region, game_mode, season_start, scold_channel_id, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
             ON CONFLICT(guild_id) DO UPDATE SET
                 league_id = excluded.league_id,
                 region = excluded.region,
                 game_mode = excluded.game_mode,
-                season_start = excluded.season_start
-        """, (guild_id, league_id, region, game_mode, season_start))
+                season_start = excluded.season_start,
+                scold_channel_id = excluded.scold_channel_id
+        """, (guild_id, league_id, region, game_mode, season_start, scold_channel_id))
 
 
 def get_all_divisions() -> list[dict]:
@@ -139,6 +147,17 @@ def get_all_divisions() -> list[dict]:
     with _conn() as conn:
         rows = conn.execute("SELECT * FROM divisions").fetchall()
     return [dict(r) for r in rows]
+
+
+def get_scold_channel(guild_id: int) -> int | None:
+    """Get the scold channel ID for a guild, or None if not set."""
+    with _conn() as conn:
+        row = conn.execute(
+            "SELECT scold_channel_id FROM divisions WHERE guild_id = ?", (guild_id,)
+        ).fetchone()
+    if row and row["scold_channel_id"]:
+        return row["scold_channel_id"]
+    return None
 
 
 # ---------------------------------------------------------------------------

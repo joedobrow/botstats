@@ -6,13 +6,14 @@ from datetime import datetime, timezone, timedelta
 
 from config import DISCORD_TOKEN, ADMIN_USER_ID, REGION_CLUSTERS, GAME_MODE_FILTERS
 from fetcher import fetch_and_store_matches_for_division
-from db import init_db, get_division, upsert_division, get_all_divisions
+from db import init_db, get_division, upsert_division, get_all_divisions, get_scold_channel
 from formatters import format_leaderboard, format_player_stats, format_weekly_summary
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
 intents = discord.Intents.default()
+intents.message_content = True
 bot = discord.Client(intents=intents)
 tree = app_commands.CommandTree(bot)
 
@@ -35,7 +36,8 @@ def _require_division(interaction: discord.Interaction):
     league="OpenDota league ID (find it in the league URL)",
     region="Server region for filtering matches",
     mode="Game mode filter",
-    season_start="Season start date (YYYY-MM-DD format)"
+    season_start="Season start date (YYYY-MM-DD format)",
+    scold_channel="Channel where all messages get deleted with a scolding reply"
 )
 @app_commands.choices(
     region=[
@@ -52,7 +54,8 @@ async def config(
     league: int = None,
     region: str = None,
     mode: str = None,
-    season_start: str = None
+    season_start: str = None,
+    scold_channel: discord.TextChannel = None
 ):
     # Only server admins or bot owner can configure
     is_admin = interaction.user.guild_permissions.administrator
@@ -65,16 +68,18 @@ async def config(
     current = get_division(guild_id)
 
     # If no parameters, show current config
-    if league is None and region is None and mode is None and season_start is None:
+    if league is None and region is None and mode is None and season_start is None and scold_channel is None:
         if current:
             region_display = "US West" if current["region"] == "us_west" else "US East"
             mode_display = "Captain's Mode" if current["game_mode"] == "cm" else "Ability Draft"
+            scold_display = f"<#{current['scold_channel_id']}>" if current.get("scold_channel_id") else "None"
             await interaction.response.send_message(
                 f"**Current Division Config**\n"
                 f"League ID: `{current['league_id']}`\n"
                 f"Region: `{region_display}`\n"
                 f"Mode: `{mode_display}`\n"
-                f"Season Start: `{current['season_start']}`",
+                f"Season Start: `{current['season_start']}`\n"
+                f"Scold Channel: {scold_display}",
                 ephemeral=True
             )
         else:
@@ -102,6 +107,9 @@ async def config(
         mode = mode or current["game_mode"]
         season_start = season_start or current["season_start"]
 
+    # Resolve scold channel ID (use provided, or keep existing)
+    scold_channel_id = scold_channel.id if scold_channel else (current.get("scold_channel_id") if current else None)
+
     # Validate season_start format
     try:
         datetime.strptime(season_start, "%Y-%m-%d")
@@ -113,17 +121,19 @@ async def config(
         return
 
     # Save config
-    upsert_division(guild_id, league, region, mode, season_start)
+    upsert_division(guild_id, league, region, mode, season_start, scold_channel_id)
 
     region_display = "US West" if region == "us_west" else "US East"
     mode_display = "Captain's Mode" if mode == "cm" else "Ability Draft"
+    scold_display = f"<#{scold_channel_id}>" if scold_channel_id else "None"
 
     await interaction.response.send_message(
         f"✅ Division configured!\n"
         f"League ID: `{league}`\n"
         f"Region: `{region_display}`\n"
         f"Mode: `{mode_display}`\n"
-        f"Season Start: `{season_start}`\n\n"
+        f"Season Start: `{season_start}`\n"
+        f"Scold Channel: {scold_display}\n\n"
         f"Run `/refresh` to fetch match data.",
         ephemeral=True
     )
@@ -457,6 +467,45 @@ async def nuke(interaction: discord.Interaction):
     except Exception as e:
         logger.exception("Nuke failed")
         await interaction.followup.send(f"❌ Error during nuke: {e}", ephemeral=True)
+
+
+# ---------------------------------------------------------------------------
+# Scold channel — delete messages and reply with a scolding
+# ---------------------------------------------------------------------------
+
+import random
+
+SCOLD_MESSAGES = [
+    "No posting here. Your message has been deleted.",
+    "This channel is read-only. Nice try though.",
+    "Nope. Message deleted.",
+    "You can look, but you can't post.",
+    "This is a no-posting zone. Message removed.",
+    "Not here. Your message has been banished.",
+    "Read-only channel. Your message didn't make it.",
+    "Denied. This channel is for viewing only.",
+]
+
+
+@bot.event
+async def on_message(message: discord.Message):
+    if message.author.bot or not message.guild:
+        return
+
+    scold_channel_id = get_scold_channel(message.guild.id)
+    if not scold_channel_id or message.channel.id != scold_channel_id:
+        return
+
+    try:
+        await message.delete()
+        await message.channel.send(
+            f"{message.author.mention} {random.choice(SCOLD_MESSAGES)}",
+            delete_after=5,
+        )
+    except discord.Forbidden:
+        logger.warning("Missing permissions to delete message in scold channel %d", scold_channel_id)
+    except Exception:
+        logger.exception("Error in scold channel handler")
 
 
 # ---------------------------------------------------------------------------
