@@ -224,6 +224,23 @@ async def build_ad_data() -> Optional[dict]:
         if not abilities_out:
             continue
 
+        # Append the hero model as a draftable "ability" (same as original)
+        model_pick = None
+        if model:
+            pp = model.get("avgPickPosition")
+            if isinstance(pp, (int, float)):
+                model_pick = round(pp, 2)
+
+        # Only add if hero name isn't already in the list
+        if all(a["name"] != hero_name for a in abilities_out):
+            abilities_out.append({
+                "id": None,
+                "name": hero_name,
+                "img": hero_img,
+                "win_pct": body_winrate,
+                "pick_num": model_pick,
+            })
+
         data_compact[hero_name] = {
             "hero_id": hero_id,
             "hero_img": hero_img,
@@ -233,13 +250,8 @@ async def build_ad_data() -> Optional[dict]:
 
         # HS entry for the hero model
         if model:
-            model_win = body_winrate
-            model_pick = None
-            pp = model.get("avgPickPosition")
-            if isinstance(pp, (int, float)):
-                model_pick = round(pp, 2)
             hs_stats[hero_name] = {
-                "win_pct": model_win,
+                "win_pct": body_winrate,
                 "pick_num": model_pick,
             }
 
