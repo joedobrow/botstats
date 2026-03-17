@@ -414,6 +414,47 @@ async def quote(interaction: discord.Interaction):
     )
 
 
+@tree.command(name="draftorder", description="Show the Ability Draft pick order for a match")
+@app_commands.describe(match_id="The Dota 2 match ID (from Windrun or Dotabuff)")
+async def draftorder(interaction: discord.Interaction, match_id: str):
+    await interaction.response.defer()
+
+    # Validate match ID
+    try:
+        mid = int(match_id.strip())
+    except ValueError:
+        await interaction.followup.send("⚠️ Invalid match ID. Please provide a numeric match ID.", ephemeral=True)
+        return
+
+    from windrun import fetch_match
+    from draftorder import generate_draft_image
+
+    try:
+        match_data = await fetch_match(mid)
+        if not match_data:
+            await interaction.followup.send(
+                f"⚠️ Could not fetch match `{mid}` from Windrun. "
+                "The match may not exist or the API may be down.",
+                ephemeral=True,
+            )
+            return
+
+        if not match_data.get("picks"):
+            await interaction.followup.send(
+                f"⚠️ Match `{mid}` has no draft data. Is this an Ability Draft game?",
+                ephemeral=True,
+            )
+            return
+
+        image_bytes = await generate_draft_image(match_data)
+        file = discord.File(image_bytes, filename=f"draft_{mid}.png")
+        await interaction.followup.send(file=file)
+
+    except Exception as e:
+        logger.exception("Error in draftorder command for match %s", match_id)
+        await interaction.followup.send(f"❌ Error generating draft order: {e}", ephemeral=True)
+
+
 @tree.command(name="tipjar", description="Support the bot creator")
 async def tipjar(interaction: discord.Interaction):
     await interaction.response.send_message(
@@ -543,16 +584,23 @@ async def weekly_fetch():
 @bot.event
 async def on_ready():
     logger.info(f"Logged in as {bot.user} (ID: {bot.user.id})")
-    
+
     # Initialize database
     init_db()
-    
+
     try:
         synced = await tree.sync()
         logger.info(f"Synced {len(synced)} slash command(s).")
     except Exception:
         logger.exception("Failed to sync commands")
     weekly_fetch.start()
+
+    # Start the AD helper web server
+    try:
+        from botstats.server import start_web_server
+        await start_web_server()
+    except Exception:
+        logger.exception("Failed to start AD helper web server")
 
 
 if __name__ == "__main__":

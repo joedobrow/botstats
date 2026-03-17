@@ -15,6 +15,17 @@ primary_region = "ord"  # Chicago - close to Minneapolis
   cpu_kind = 'shared'
   cpus = 1
 
-# No HTTP service - this is a Discord bot, not a web server
 [processes]
   app = "python bot.py"
+
+[[services]]
+  internal_port = 8080
+  protocol = "tcp"
+
+  [[services.ports]]
+    port = 80
+    handlers = ["http"]
+
+  [[services.ports]]
+    port = 443
+    handlers = ["tls", "http"]
