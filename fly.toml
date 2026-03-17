@@ -21,6 +21,7 @@ primary_region = "ord"  # Chicago - close to Minneapolis
 [[services]]
   internal_port = 8080
   protocol = "tcp"
+  processes = ["app"]
 
   [[services.ports]]
     port = 80
