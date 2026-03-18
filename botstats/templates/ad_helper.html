@@ -438,7 +438,7 @@ function renderTables(){
     if (r.kind !== "ability" && r.kind !== "model") continue;
     if (hidden.has(canon(r.ability))) continue;
     all.push(r);
-    if (r.kind === "model") { carry.push(r); both.push(r); support.push(r); }
+    if (r.kind === "model") { both.push(r); }
     else if (r.role === "carry") carry.push(r);
     else if (r.role === "both") both.push(r);
     else if (r.role === "support") support.push(r);
