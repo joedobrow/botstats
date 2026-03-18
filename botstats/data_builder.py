@@ -231,8 +231,9 @@ async def build_ad_data() -> Optional[dict]:
             if isinstance(pp, (int, float)):
                 model_pick = round(pp, 2)
 
-        # Only add if hero name isn't already in the list
-        if all(a["name"] != hero_name for a in abilities_out):
+        # Only add if hero model isn't already in the list (check id=None, not name,
+        # because some heroes have an ability with the same name, e.g. Doom)
+        if all(a["id"] is not None for a in abilities_out):
             abilities_out.append({
                 "id": None,
                 "name": hero_name,
