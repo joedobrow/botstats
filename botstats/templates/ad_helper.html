@@ -257,6 +257,7 @@ function collectAbilities() {
     });
 
     for (const a of (H.abilities||[])) {
+      if (a.id === null) continue;  // skip model entries, handled above
       const key = a.name;
       if (!map.has(key)) map.set(key, { kind:"ability", ability:a.name, from:[], pick:null, win:null, img:a.img||null, role:null });
       const row = map.get(key);
