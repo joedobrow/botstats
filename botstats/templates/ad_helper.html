@@ -435,10 +435,11 @@ function renderTables(){
   const all = [];
   const carry = [], both = [], support = [];
   for (const r of rows) {
-    if (r.kind !== "ability") continue;
+    if (r.kind !== "ability" && r.kind !== "model") continue;
     if (hidden.has(canon(r.ability))) continue;
     all.push(r);
-    if (r.role === "carry") carry.push(r);
+    if (r.kind === "model") { carry.push(r); both.push(r); support.push(r); }
+    else if (r.role === "carry") carry.push(r);
     else if (r.role === "both") both.push(r);
     else if (r.role === "support") support.push(r);
   }
