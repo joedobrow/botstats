@@ -65,11 +65,11 @@ async def fetch_ability_high_skill() -> Optional[list[dict]]:
     if not data:
         return None
 
-    # Navigate: data -> data -> allData -> abilityStats
+    # Navigate: data -> data -> highSkillData -> abilityStats
     inner = data.get("data", {})
     if isinstance(inner, dict):
-        all_data = inner.get("allData", inner)
-        stats = all_data.get("abilityStats", [])
+        hs_data = inner.get("highSkillData", inner)
+        stats = hs_data.get("abilityStats", [])
         if isinstance(stats, list) and stats:
             return stats
 
