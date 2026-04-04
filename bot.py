@@ -178,7 +178,7 @@ async def leaderboard(interaction: discord.Interaction, stat: app_commands.Choic
     try:
         if week is None or week == -1:
             # All-time stats (default)
-            stats = get_all_time_stats(guild_id)
+            stats = get_all_time_stats(guild_id, season_start)
             week_label = "All-Time"
         else:
             # Specific season week (0, 1, 2, ...)
@@ -221,7 +221,7 @@ async def player(interaction: discord.Interaction, name: str, week: int = None):
 
     try:
         if week is None or week == -1:
-            stats = get_all_time_stats(guild_id)
+            stats = get_all_time_stats(guild_id, season_start)
             week_label = "All-Time"
         else:
             stats = get_stats_for_season_week(guild_id, week, season_start)
@@ -265,7 +265,7 @@ async def roles(interaction: discord.Interaction, week: int = None):
 
     try:
         if week is None or week == -1:
-            stats = get_all_time_stats(guild_id)
+            stats = get_all_time_stats(guild_id, season_start)
             week_label = "All-Time"
         else:
             stats = get_stats_for_season_week(guild_id, week, season_start)
@@ -350,7 +350,7 @@ async def summary(interaction: discord.Interaction):
             week_stats = []
             week_label = "Latest Week"
 
-        all_time_stats = get_all_time_stats(guild_id)
+        all_time_stats = get_all_time_stats(guild_id, season_start)
 
         # Create embeds
         embeds = []

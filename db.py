@@ -400,9 +400,21 @@ def get_stats_for_season_week(guild_id: int, week_number: int, season_start_date
     return results
 
 
-def get_all_time_stats(guild_id: int) -> list[dict]:
-    """Return aggregated per-player stats across all matches for a division."""
+def get_all_time_stats(guild_id: int, season_start_date: str = None) -> list[dict]:
+    """Return aggregated per-player stats across all matches for a division.
+
+    If season_start_date is provided, only includes matches from that date onwards.
+    """
     from fantasy import calculate_fantasy_points
+
+    # Calculate season start timestamp if provided
+    if season_start_date:
+        season_start = datetime.strptime(season_start_date, "%Y-%m-%d")
+        season_start = season_start.replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=timezone.utc)
+        season_monday = season_start - timedelta(days=season_start.weekday())
+        start_ts = int(season_monday.timestamp())
+    else:
+        start_ts = 0
 
     with _conn() as conn:
         rows = conn.execute("""
@@ -428,9 +440,10 @@ def get_all_time_stats(guild_id: int) -> list[dict]:
             FROM players p
             JOIN matches m ON p.match_id = m.match_id
             WHERE m.guild_id = ?
+              AND m.start_time >= ?
             GROUP BY p.account_id
             ORDER BY gpm DESC
-        """, (guild_id,)).fetchall()
+        """, (guild_id, start_ts)).fetchall()
 
     results = []
     for r in rows:
