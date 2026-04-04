@@ -251,6 +251,10 @@ async def fetch_and_store_matches_for_division(guild_id: int) -> int:
                     "gold_spent":     p.get("gold_spent", 0),
                     "duration":       duration,
                     "won":            won,
+                    "obs_placed":     p.get("obs_placed", 0) or 0,
+                    "sen_placed":     p.get("sen_placed", 0) or 0,
+                    "observer_kills": p.get("observer_kills", 0) or 0,
+                    "sentry_kills":   p.get("sentry_kills", 0) or 0,
                 })
 
             upsert_players(players)

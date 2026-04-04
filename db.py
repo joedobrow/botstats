@@ -64,6 +64,14 @@ def init_db():
             logger.info("Migrating: adding guild_id column to matches table")
             conn.execute("ALTER TABLE matches ADD COLUMN guild_id INTEGER NOT NULL DEFAULT 0")
 
+        # --- Migration: add ward columns to players if missing ---
+        cursor = conn.execute("PRAGMA table_info(players)")
+        player_columns = [row[1] for row in cursor.fetchall()]
+        for col in ["obs_placed", "sen_placed", "observer_kills", "sentry_kills"]:
+            if col not in player_columns:
+                logger.info("Migrating: adding %s column to players table", col)
+                conn.execute(f"ALTER TABLE players ADD COLUMN {col} INTEGER DEFAULT 0")
+
         # --- Migration: add scold_channel_id column to divisions if missing ---
         cursor = conn.execute("PRAGMA table_info(divisions)")
         div_columns = [row[1] for row in cursor.fetchall()]
@@ -92,7 +100,11 @@ def init_db():
                 hero_healing    INTEGER DEFAULT 0,
                 gold_spent      INTEGER DEFAULT 0,
                 duration        INTEGER DEFAULT 0,  -- match duration (seconds), duplicated for convenience
-                won             INTEGER DEFAULT 0   -- 1 if this player's team won
+                won             INTEGER DEFAULT 0,  -- 1 if this player's team won
+                obs_placed      INTEGER DEFAULT 0,
+                sen_placed      INTEGER DEFAULT 0,
+                observer_kills  INTEGER DEFAULT 0,
+                sentry_kills    INTEGER DEFAULT 0
             );
 
             CREATE INDEX IF NOT EXISTS idx_players_match   ON players(match_id);
@@ -184,11 +196,13 @@ def upsert_players(players: list[dict]):
             INSERT OR IGNORE INTO players
                 (match_id, account_id, name, hero_id, team_side, role_position,
                  kills, deaths, assists, gpm, xpm, last_hits, denies,
-                 hero_damage, hero_healing, gold_spent, duration, won)
+                 hero_damage, hero_healing, gold_spent, duration, won,
+                 obs_placed, sen_placed, observer_kills, sentry_kills)
             VALUES
                 (:match_id, :account_id, :name, :hero_id, :team_side, :role_position,
                  :kills, :deaths, :assists, :gpm, :xpm, :last_hits, :denies,
-                 :hero_damage, :hero_healing, :gold_spent, :duration, :won)
+                 :hero_damage, :hero_healing, :gold_spent, :duration, :won,
+                 :obs_placed, :sen_placed, :observer_kills, :sentry_kills)
         """, players)
 
 
@@ -319,6 +333,10 @@ def get_latest_week_stats(guild_id: int, week_offset: int = 0) -> list[dict]:
                 AVG(p.denies)                   AS denies,
                 AVG(p.hero_damage)              AS hero_damage,
                 AVG(p.hero_healing)             AS hero_healing,
+                AVG(p.obs_placed)               AS obs_placed,
+                AVG(p.sen_placed)               AS sen_placed,
+                AVG(p.observer_kills)           AS observer_kills,
+                AVG(p.sentry_kills)             AS sentry_kills,
                 SUM(p.won)                      AS wins
             FROM players p
             JOIN matches m ON p.match_id = m.match_id
@@ -359,6 +377,10 @@ def get_stats_for_season_week(guild_id: int, week_number: int, season_start_date
                 AVG(p.denies)                   AS denies,
                 AVG(p.hero_damage)              AS hero_damage,
                 AVG(p.hero_healing)             AS hero_healing,
+                AVG(p.obs_placed)               AS obs_placed,
+                AVG(p.sen_placed)               AS sen_placed,
+                AVG(p.observer_kills)           AS observer_kills,
+                AVG(p.sentry_kills)             AS sentry_kills,
                 SUM(p.won)                      AS wins
             FROM players p
             JOIN matches m ON p.match_id = m.match_id
@@ -398,6 +420,10 @@ def get_all_time_stats(guild_id: int) -> list[dict]:
                 AVG(p.denies)                   AS denies,
                 AVG(p.hero_damage)              AS hero_damage,
                 AVG(p.hero_healing)             AS hero_healing,
+                AVG(p.obs_placed)               AS obs_placed,
+                AVG(p.sen_placed)               AS sen_placed,
+                AVG(p.observer_kills)           AS observer_kills,
+                AVG(p.sentry_kills)             AS sentry_kills,
                 SUM(p.won)                      AS wins
             FROM players p
             JOIN matches m ON p.match_id = m.match_id

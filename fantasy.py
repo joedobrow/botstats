@@ -11,14 +11,17 @@ games aren't unfairly penalised (or rewarded) just by game count.
 Scoring breakdown (per game played):
     Kills           +3.0  pts each
     Deaths          -2.5  pts each
-    Assists         +1.5  pts each
+    Assists         +2.0  pts each
     Last Hits       +0.02 pts each  (rewards farming)
     Denies          +0.5  pts each  (high-impact deny)
-    GPM             +0.5  pts per 100 GPM above 300 (baseline farming)
-    XPM             +0.3  pts per 100 XPM above 400
-    Hero Damage     +0.01 pts per 100 damage
-    Hero Healing    +0.02 pts per 100 healing (supports get love)
-    Win Bonus       +5.0  pts per win
+    GPM             +2.0  pts per 100 GPM above 300 (baseline farming)
+    XPM             +1.8  pts per 100 XPM above 400
+    Hero Damage     +0.05 pts per 100 damage
+    Hero Healing    +0.08 pts per 100 healing (supports get love)
+    Obs Placed      +0.5  pts each  (vision wins games)
+    Sen Placed      +0.5  pts each  (dewarding)
+    Obs Kills       +1.0  pts each  (deward bonus)
+    Sen Kills       +1.0  pts each  (deward bonus)
 
 Total is then rounded to 1 decimal place.
 """
@@ -26,14 +29,17 @@ Total is then rounded to 1 decimal place.
 WEIGHTS = {
     "kills_per_game":       3.0,
     "deaths_per_game":     -2.5,
-    "assists_per_game":     1.5,
+    "assists_per_game":     2.0,
     "last_hits_per_game":   0.02,
     "denies_per_game":      0.5,
-    "gpm_bonus_per_100":    2.0,   # per 100 GPM above GPM_BASELINE (was 0.5, now 4x)
-    "xpm_bonus_per_100":    1.8,   # per 100 XPM above XPM_BASELINE (was 0.3, now 6x)
-    "damage_per_100":       0.05,  # (was 0.01, now 5x)
-    "healing_per_100":      0.08,  # (was 0.02, now 4x)
-    "win_bonus":            5.0,
+    "gpm_bonus_per_100":    2.0,   # per 100 GPM above GPM_BASELINE
+    "xpm_bonus_per_100":    1.8,   # per 100 XPM above XPM_BASELINE
+    "damage_per_100":       0.05,
+    "healing_per_100":      0.08,
+    "obs_placed_per_game":  0.5,
+    "sen_placed_per_game":  0.5,
+    "obs_kills_per_game":   1.0,
+    "sen_kills_per_game":   1.0,
 }
 
 GPM_BASELINE = 300   # GPM below this doesn't score bonus points
@@ -53,15 +59,18 @@ def calculate_fantasy_points(player: dict) -> float:
     kills    = player.get("total_kills", 0) / games
     deaths   = player.get("total_deaths", 0) / games
     assists  = player.get("total_assists", 0) / games
-    wins     = player.get("wins", 0) / games  # win rate (0 to 1)
 
     # These are already per-game averages from SQL AVG()
-    lh       = player.get("last_hits", 0)
-    denies   = player.get("denies", 0)
-    gpm      = player.get("gpm", 0)
-    xpm      = player.get("xpm", 0)
-    damage   = player.get("hero_damage", 0)
-    healing  = player.get("hero_healing", 0)
+    lh         = player.get("last_hits", 0)
+    denies     = player.get("denies", 0)
+    gpm        = player.get("gpm", 0)
+    xpm        = player.get("xpm", 0)
+    damage     = player.get("hero_damage", 0)
+    healing    = player.get("hero_healing", 0)
+    obs_placed = player.get("obs_placed", 0) or 0
+    sen_placed = player.get("sen_placed", 0) or 0
+    obs_kills  = player.get("observer_kills", 0) or 0
+    sen_kills  = player.get("sentry_kills", 0) or 0
 
     pts  = kills   * WEIGHTS["kills_per_game"]
     pts += deaths  * WEIGHTS["deaths_per_game"]
@@ -70,8 +79,11 @@ def calculate_fantasy_points(player: dict) -> float:
     pts += denies  * WEIGHTS["denies_per_game"]
     pts += max(gpm - GPM_BASELINE, 0) / 100 * WEIGHTS["gpm_bonus_per_100"]
     pts += max(xpm - XPM_BASELINE, 0) / 100 * WEIGHTS["xpm_bonus_per_100"]
-    pts += damage  / 100 * WEIGHTS["damage_per_100"]
-    pts += healing / 100 * WEIGHTS["healing_per_100"]
-    pts += wins    * WEIGHTS["win_bonus"]  # now per-game (win rate * bonus)
+    pts += damage     / 100 * WEIGHTS["damage_per_100"]
+    pts += healing    / 100 * WEIGHTS["healing_per_100"]
+    pts += obs_placed * WEIGHTS["obs_placed_per_game"]
+    pts += sen_placed * WEIGHTS["sen_placed_per_game"]
+    pts += obs_kills  * WEIGHTS["obs_kills_per_game"]
+    pts += sen_kills  * WEIGHTS["sen_kills_per_game"]
 
     return round(pts, 1)
