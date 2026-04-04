@@ -79,9 +79,24 @@
   <div class="card" style="margin-top:12px;">
     <h2 style="display:flex; align-items:center; justify-content:space-between;">
       <span>Abilities</span>
-      <button id="restoreBtn" class="small" title="Show all hidden abilities">Restore removed</button>
+      <span style="display:flex; gap:8px;">
+        <button id="viewToggle" class="small">Show All</button>
+        <button id="restoreBtn" class="small" title="Show all hidden abilities">Restore removed</button>
+      </span>
     </h2>
-    <div class="triplet">
+    <div id="allView" style="display:none;">
+      <table id="tblAll">
+        <thead><tr>
+          <th data-key="ability">Ability</th>
+          <th data-key="good">Goody</th>
+          <th data-key="pick">Pick #</th>
+          <th data-key="win">Win %</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+      <div class="footer" id="countAll"></div>
+    </div>
+    <div class="triplet" id="splitView">
       <div class="col-third">
         <div class="muted small">Carry</div>
         <table id="tblCarry">
@@ -144,6 +159,10 @@ const hint = $("selHint");
 const tblC = $("tblCarry"), theadC = tblC.querySelector("thead"), tbodyC = tblC.querySelector("tbody"), countC = $("countCarry");
 const tblB = $("tblBoth"),  theadB = tblB.querySelector("thead"), tbodyB = tblB.querySelector("tbody"), countB = $("countBoth");
 const tblS = $("tblSupport"), theadS = tblS.querySelector("thead"), tbodyS = tblS.querySelector("tbody"), countS = $("countSupport");
+const tblA = $("tblAll"), theadA = tblA.querySelector("thead"), tbodyA = tblA.querySelector("tbody"), countA = $("countAll");
+const splitView = $("splitView"), allView = $("allView"), viewToggle = $("viewToggle");
+let showAll = false;
+viewToggle.onclick = () => { showAll = !showAll; viewToggle.textContent = showAll ? "Split View" : "Show All"; splitView.style.display = showAll ? "none" : "flex"; allView.style.display = showAll ? "block" : "none"; renderTables(); };
 
 try { localStorage.removeItem("ad_hidden_abilities"); } catch (e) {}
 const hidden = new Set();
@@ -278,6 +297,7 @@ function makeSortState(defaultKey, defaultDir){ return { key:defaultKey, dir:def
 const sortC = makeSortState("good", "desc");
 const sortB = makeSortState("good", "desc");
 const sortS = makeSortState("good", "desc");
+const sortA = makeSortState("good", "desc");
 
 function bindSort(thead, state, renderFn){
   thead.addEventListener("click",(e)=>{
@@ -293,6 +313,7 @@ function bindSort(thead, state, renderFn){
 bindSort(tblC.querySelector("thead"), sortC, renderTables);
 bindSort(tblB.querySelector("thead"), sortB, renderTables);
 bindSort(tblS.querySelector("thead"), sortS, renderTables);
+bindSort(tblA.querySelector("thead"), sortA, renderTables);
 
 // -------- Realtime (Supabase) --------
 const SUPA_URL = "https://subxkjymwzzroctziiro.supabase.co";
@@ -408,7 +429,7 @@ function render(){
 }
 window.removeHero = (h)=>{ sel.delete(h); render(); };
 
-[tbodyC, tbodyB, tbodyS].forEach(tb=>{
+[tbodyC, tbodyB, tbodyS, tbodyA].forEach(tb=>{
   tb.addEventListener("click", (e)=>{
     const btn = e.target.closest(".delBtn");
     if (!btn) return;
@@ -472,16 +493,19 @@ function renderTables(){
   };
 
   carry.sort(cmp(sortC)); both.sort(cmp(sortB)); support.sort(cmp(sortS));
+  const allSorted = [...all].sort(cmp(sortA));
 
   tbodyC.innerHTML = carry.map(r=>rowAbilityHtml(r)).join("");
   tbodyB.innerHTML = both.map(r=>rowAbilityHtml(r)).join("");
   tbodyS.innerHTML = support.map(r=>rowAbilityHtml(r)).join("");
+  tbodyA.innerHTML = allSorted.map(r=>rowAbilityHtml(r)).join("");
 
   countC.textContent = `${carry.length} rows`;
   countB.textContent = `${both.length} rows`;
   countS.textContent = `${support.length} rows`;
+  countA.textContent = `${allSorted.length} rows`;
 
-  [ [theadC, sortC], [theadB, sortB], [theadS, sortS] ].forEach(([th, st])=>{
+  [ [theadC, sortC], [theadB, sortB], [theadS, sortS], [theadA, sortA] ].forEach(([th, st])=>{
     th.querySelectorAll("th").forEach(el=>el.classList.remove("sort-asc","sort-desc"));
     const el = th.querySelector(`th[data-key="${st.key}"]`);
     if (el) el.classList.add(st.dir==="asc"?"sort-asc":"sort-desc");
