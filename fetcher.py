@@ -190,8 +190,8 @@ async def fetch_and_store_matches_for_division(guild_id: int) -> int:
                 logger.info("FILTERED OUT: Match %d — game_mode=%d (excluded)", mid, game_mode)
                 continue
 
-            # Check cluster/region filter (allow cluster 0 through — "unknown" region)
-            if cluster != 0 and cluster not in allowed_clusters:
+            # Check cluster/region filter (None means "any region", skip filter)
+            if allowed_clusters is not None and cluster != 0 and cluster not in allowed_clusters:
                 logger.info("FILTERED OUT: Match %d — cluster=%d (not in %s)", mid, cluster, region)
                 continue
 

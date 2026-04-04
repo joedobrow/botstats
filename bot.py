@@ -43,6 +43,7 @@ def _require_division(interaction: discord.Interaction):
     region=[
         app_commands.Choice(name="US West", value="us_west"),
         app_commands.Choice(name="US East", value="us_east"),
+        app_commands.Choice(name="Any Region", value="any"),
     ],
     mode=[
         app_commands.Choice(name="Captain's Mode (exclude Ability Draft)", value="cm"),
@@ -70,7 +71,7 @@ async def config(
     # If no parameters, show current config
     if league is None and region is None and mode is None and season_start is None and scold_channel is None:
         if current:
-            region_display = "US West" if current["region"] == "us_west" else "US East"
+            region_display = {"us_west": "US West", "us_east": "US East", "any": "Any Region"}.get(current["region"], current["region"])
             mode_display = "Captain's Mode" if current["game_mode"] == "cm" else "Ability Draft"
             scold_display = f"<#{current['scold_channel_id']}>" if current.get("scold_channel_id") else "None"
             await interaction.response.send_message(
@@ -123,7 +124,7 @@ async def config(
     # Save config
     upsert_division(guild_id, league, region, mode, season_start, scold_channel_id)
 
-    region_display = "US West" if region == "us_west" else "US East"
+    region_display = {"us_west": "US West", "us_east": "US East", "any": "Any Region"}.get(region, region)
     mode_display = "Captain's Mode" if mode == "cm" else "Ability Draft"
     scold_display = f"<#{scold_channel_id}>" if scold_channel_id else "None"
 

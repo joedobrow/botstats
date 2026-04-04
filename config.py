@@ -21,9 +21,10 @@ ADMIN_USER_ID: int | None = int(os.environ["ADMIN_USER_ID"]) if os.environ.get("
 
 # Region cluster mappings (from OpenDota API constants)
 # Source: https://api.opendota.com/api/constants/cluster
-REGION_CLUSTERS: dict[str, set[int]] = {
+REGION_CLUSTERS: dict[str, set[int] | None] = {
     "us_west": {111, 112, 113, 114, 117, 118},
     "us_east": {121, 122, 123, 124},
+    "any": None,
 }
 
 # Game mode configurations
