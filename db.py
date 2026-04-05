@@ -408,11 +408,13 @@ def get_all_time_stats(guild_id: int, season_start_date: str = None) -> list[dic
     from fantasy import calculate_fantasy_points
 
     # Calculate season start timestamp if provided
+    # Week 0 = one week before season_monday (since _season_week_start is 1-indexed)
     if season_start_date:
         season_start = datetime.strptime(season_start_date, "%Y-%m-%d")
         season_start = season_start.replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=timezone.utc)
         season_monday = season_start - timedelta(days=season_start.weekday())
-        start_ts = int(season_monday.timestamp())
+        week_zero_start = season_monday - timedelta(weeks=1)
+        start_ts = int(week_zero_start.timestamp())
     else:
         start_ts = 0
 
