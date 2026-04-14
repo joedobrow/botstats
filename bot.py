@@ -467,8 +467,10 @@ async def tipjar(interaction: discord.Interaction):
 
 @tree.command(name="refresh", description="[Admin] Manually trigger a data fetch from OpenDota")
 async def refresh(interaction: discord.Interaction):
-    # Only allow the guild owner or admins
-    if not interaction.user.guild_permissions.administrator:
+    # Server admins or bot owner can refresh
+    is_admin = interaction.user.guild_permissions.administrator
+    is_owner = ADMIN_USER_ID and interaction.user.id == ADMIN_USER_ID
+    if not is_admin and not is_owner:
         await interaction.response.send_message("⚠️ Only admins can use this command.", ephemeral=True)
         return
 
