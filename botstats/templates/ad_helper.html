@@ -70,6 +70,7 @@
       <div style="display:flex; gap:8px; margin-top:8px;">
         <button id="addBtn">Add</button>
         <button id="clearBtn" title="Clear all">Clear</button>
+        <button id="allBtn" title="Add every hero">All Heroes</button>
       </div>
       <div class="pills" id="selPills"></div>
       <div class="muted small" id="selHint"></div>
@@ -256,6 +257,7 @@ addBtn.onclick = () => {
   render();
 };
 clearBtn.onclick = () => { sel.clear(); render(); };
+$("allBtn").onclick = () => { for (const h of HEROES) sel.add(h); render(); };
 
 // --- Collect Abilities (for selected heroes), attach roles and pick
 function collectAbilities() {
