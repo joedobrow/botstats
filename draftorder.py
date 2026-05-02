@@ -300,15 +300,15 @@ async def generate_draft_image(match_data: dict) -> BytesIO:
     cell_width = NAME_WIDTH + (ICON_SIZE + ICON_PAD) * PICKS_PER_PLAYER + ICON_PAD
     img_width = cell_width * 2 + DIVIDER_WIDTH
     num_rows = 5  # 10 seats in 5 paired rows
-    title_height = 40
+    title_height = 52
     img_height = title_height + num_rows * ROW_HEIGHT + ICON_PAD
 
     img = Image.new("RGBA", (img_width, img_height), BG_COLOUR + (255,))
     draw = ImageDraw.Draw(img)
 
-    font = _try_load_font(14)
-    font_small = _try_load_font(13)
-    font_title = _try_load_font(18)
+    font = _try_load_font(18)
+    font_small = _try_load_font(15)
+    font_title = _try_load_font(28)
 
     # Title
     match_id = match_data.get("matchId", "?")
@@ -344,7 +344,7 @@ async def generate_draft_image(match_data: dict) -> BytesIO:
 
             # Player name
             name_x = x_start + 8
-            name_y = y + (ROW_HEIGHT - 14) // 2
+            name_y = y + (ROW_HEIGHT - 18) // 2
             # Truncate name if too long
             display_name = seat["player_name"]
             if len(display_name) > 12:
@@ -354,7 +354,7 @@ async def generate_draft_image(match_data: dict) -> BytesIO:
             # KDA line
             kda_str = f"{seat['kills']}/{seat['deaths']}/{seat['assists']}"
             draw.text(
-                (name_x, name_y - 13),
+                (name_x, name_y - 17),
                 kda_str,
                 fill=HEADER_COLOUR,
                 font=font_small,
