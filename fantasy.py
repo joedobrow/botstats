@@ -16,14 +16,15 @@ Scoring breakdown (per game played):
     GPM                     +0.002 per GPM (no baseline)
     XPM                     +0.001 per XPM (no baseline)  [tweak: not in pyopendota]
     Tower Kills             +1.0   each
-    Roshan Kills            +1.0   each
-    First Blood             +4.0   if claimed
+    Roshan Kills            +0.5   each
+    First Blood             +2.0   if claimed
     Teamfight Participation +3.0   × participation rate (0–1)
     Stuns                   +0.05  per second of stun
-    Obs Placed              +0.5   each
-    Sen Placed              +0.5   each
-    Obs/Sen Kills           +0.1   each                    [tweak: pyopendota has 0]
-    Camp Stacks             +0.5   each
+    Obs Placed              +0.1   each
+    Sen Placed               0     (not scored)
+    Obs Kills               +0.4   each
+    Sen Kills               +0.2   each
+    Camp Stacks             +0.1   each
     Rune Pickups            +0.25  each
     Denies                  +0.02  each                    [tweak: not in pyopendota]
     Hero Healing            +0.008 per 100                 [tweak: not in pyopendota]
@@ -41,15 +42,15 @@ WEIGHTS = {
     "gpm":                          0.002,
     "xpm":                          0.001,  # tweak: not in pyopendota
     "tower_kills_per_game":         1.0,
-    "roshans_killed_per_game":      1.0,
-    "firstblood_claimed_per_game":  4.0,
+    "roshans_killed_per_game":      0.5,
+    "firstblood_claimed_per_game":  2.0,
     "teamfight_participation":      3.0,
     "stuns_per_game":               0.05,
-    "obs_placed_per_game":          0.5,
-    "sen_placed_per_game":          0.5,
-    "obs_kills_per_game":           0.1,   # tweak: pyopendota has 0
-    "sen_kills_per_game":           0.1,   # tweak: pyopendota has 0
-    "camps_stacked_per_game":       0.5,
+    "obs_placed_per_game":          0.1,
+    "sen_placed_per_game":          0.0,
+    "obs_kills_per_game":           0.4,
+    "sen_kills_per_game":           0.2,
+    "camps_stacked_per_game":       0.1,
     "rune_pickups_per_game":        0.25,
     "denies_per_game":              0.02,  # tweak: not in pyopendota
     "healing_per_100":              0.008, # tweak: not in pyopendota
