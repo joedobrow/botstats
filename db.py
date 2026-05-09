@@ -64,13 +64,26 @@ def init_db():
             logger.info("Migrating: adding guild_id column to matches table")
             conn.execute("ALTER TABLE matches ADD COLUMN guild_id INTEGER NOT NULL DEFAULT 0")
 
-        # --- Migration: add ward columns to players if missing ---
+        # --- Migration: add stat columns to players if missing ---
         cursor = conn.execute("PRAGMA table_info(players)")
         player_columns = [row[1] for row in cursor.fetchall()]
-        for col in ["obs_placed", "sen_placed", "observer_kills", "sentry_kills"]:
+        new_player_cols = [
+            ("obs_placed",              "INTEGER DEFAULT 0"),
+            ("sen_placed",              "INTEGER DEFAULT 0"),
+            ("observer_kills",          "INTEGER DEFAULT 0"),
+            ("sentry_kills",            "INTEGER DEFAULT 0"),
+            ("tower_kills",             "INTEGER DEFAULT 0"),
+            ("roshans_killed",          "INTEGER DEFAULT 0"),
+            ("firstblood_claimed",      "INTEGER DEFAULT 0"),
+            ("teamfight_participation", "REAL DEFAULT 0"),
+            ("stuns",                   "REAL DEFAULT 0"),
+            ("camps_stacked",           "INTEGER DEFAULT 0"),
+            ("rune_pickups",            "INTEGER DEFAULT 0"),
+        ]
+        for col, col_type in new_player_cols:
             if col not in player_columns:
                 logger.info("Migrating: adding %s column to players table", col)
-                conn.execute(f"ALTER TABLE players ADD COLUMN {col} INTEGER DEFAULT 0")
+                conn.execute(f"ALTER TABLE players ADD COLUMN {col} {col_type}")
 
         # --- Migration: add scold_channel_id column to divisions if missing ---
         cursor = conn.execute("PRAGMA table_info(divisions)")
@@ -99,12 +112,19 @@ def init_db():
                 hero_damage     INTEGER DEFAULT 0,
                 hero_healing    INTEGER DEFAULT 0,
                 gold_spent      INTEGER DEFAULT 0,
-                duration        INTEGER DEFAULT 0,  -- match duration (seconds), duplicated for convenience
-                won             INTEGER DEFAULT 0,  -- 1 if this player's team won
-                obs_placed      INTEGER DEFAULT 0,
-                sen_placed      INTEGER DEFAULT 0,
-                observer_kills  INTEGER DEFAULT 0,
-                sentry_kills    INTEGER DEFAULT 0
+                duration                INTEGER DEFAULT 0,  -- match duration (seconds), duplicated for convenience
+                won                     INTEGER DEFAULT 0,  -- 1 if this player's team won
+                obs_placed              INTEGER DEFAULT 0,
+                sen_placed              INTEGER DEFAULT 0,
+                observer_kills          INTEGER DEFAULT 0,
+                sentry_kills            INTEGER DEFAULT 0,
+                tower_kills             INTEGER DEFAULT 0,
+                roshans_killed          INTEGER DEFAULT 0,
+                firstblood_claimed      INTEGER DEFAULT 0,
+                teamfight_participation REAL DEFAULT 0,
+                stuns                   REAL DEFAULT 0,
+                camps_stacked           INTEGER DEFAULT 0,
+                rune_pickups            INTEGER DEFAULT 0
             );
 
             CREATE INDEX IF NOT EXISTS idx_players_match   ON players(match_id);
@@ -197,12 +217,16 @@ def upsert_players(players: list[dict]):
                 (match_id, account_id, name, hero_id, team_side, role_position,
                  kills, deaths, assists, gpm, xpm, last_hits, denies,
                  hero_damage, hero_healing, gold_spent, duration, won,
-                 obs_placed, sen_placed, observer_kills, sentry_kills)
+                 obs_placed, sen_placed, observer_kills, sentry_kills,
+                 tower_kills, roshans_killed, firstblood_claimed,
+                 teamfight_participation, stuns, camps_stacked, rune_pickups)
             VALUES
                 (:match_id, :account_id, :name, :hero_id, :team_side, :role_position,
                  :kills, :deaths, :assists, :gpm, :xpm, :last_hits, :denies,
                  :hero_damage, :hero_healing, :gold_spent, :duration, :won,
-                 :obs_placed, :sen_placed, :observer_kills, :sentry_kills)
+                 :obs_placed, :sen_placed, :observer_kills, :sentry_kills,
+                 :tower_kills, :roshans_killed, :firstblood_claimed,
+                 :teamfight_participation, :stuns, :camps_stacked, :rune_pickups)
         """, players)
 
 
@@ -337,6 +361,13 @@ def get_latest_week_stats(guild_id: int, week_offset: int = 0) -> list[dict]:
                 AVG(p.sen_placed)               AS sen_placed,
                 AVG(p.observer_kills)           AS observer_kills,
                 AVG(p.sentry_kills)             AS sentry_kills,
+                AVG(p.tower_kills)              AS tower_kills,
+                AVG(p.roshans_killed)           AS roshans_killed,
+                AVG(p.firstblood_claimed)       AS firstblood_claimed,
+                AVG(p.teamfight_participation)  AS teamfight_participation,
+                AVG(p.stuns)                    AS stuns,
+                AVG(p.camps_stacked)            AS camps_stacked,
+                AVG(p.rune_pickups)             AS rune_pickups,
                 SUM(p.won)                      AS wins
             FROM players p
             JOIN matches m ON p.match_id = m.match_id
@@ -381,6 +412,13 @@ def get_stats_for_season_week(guild_id: int, week_number: int, season_start_date
                 AVG(p.sen_placed)               AS sen_placed,
                 AVG(p.observer_kills)           AS observer_kills,
                 AVG(p.sentry_kills)             AS sentry_kills,
+                AVG(p.tower_kills)              AS tower_kills,
+                AVG(p.roshans_killed)           AS roshans_killed,
+                AVG(p.firstblood_claimed)       AS firstblood_claimed,
+                AVG(p.teamfight_participation)  AS teamfight_participation,
+                AVG(p.stuns)                    AS stuns,
+                AVG(p.camps_stacked)            AS camps_stacked,
+                AVG(p.rune_pickups)             AS rune_pickups,
                 SUM(p.won)                      AS wins
             FROM players p
             JOIN matches m ON p.match_id = m.match_id
@@ -438,6 +476,13 @@ def get_all_time_stats(guild_id: int, season_start_date: str = None) -> list[dic
                 AVG(p.sen_placed)               AS sen_placed,
                 AVG(p.observer_kills)           AS observer_kills,
                 AVG(p.sentry_kills)             AS sentry_kills,
+                AVG(p.tower_kills)              AS tower_kills,
+                AVG(p.roshans_killed)           AS roshans_killed,
+                AVG(p.firstblood_claimed)       AS firstblood_claimed,
+                AVG(p.teamfight_participation)  AS teamfight_participation,
+                AVG(p.stuns)                    AS stuns,
+                AVG(p.camps_stacked)            AS camps_stacked,
+                AVG(p.rune_pickups)             AS rune_pickups,
                 SUM(p.won)                      AS wins
             FROM players p
             JOIN matches m ON p.match_id = m.match_id

@@ -251,10 +251,17 @@ async def fetch_and_store_matches_for_division(guild_id: int) -> int:
                     "gold_spent":     p.get("gold_spent", 0),
                     "duration":       duration,
                     "won":            won,
-                    "obs_placed":     p.get("obs_placed", 0) or 0,
-                    "sen_placed":     p.get("sen_placed", 0) or 0,
-                    "observer_kills": p.get("observer_kills", 0) or 0,
-                    "sentry_kills":   p.get("sentry_kills", 0) or 0,
+                    "obs_placed":              p.get("obs_placed", 0) or 0,
+                    "sen_placed":              p.get("sen_placed", 0) or 0,
+                    "observer_kills":          p.get("observer_kills", 0) or 0,
+                    "sentry_kills":            p.get("sentry_kills", 0) or 0,
+                    "tower_kills":             p.get("towers_killed", 0) or 0,
+                    "roshans_killed":          p.get("roshans_killed", 0) or 0,
+                    "firstblood_claimed":      1 if p.get("firstblood_claimed") else 0,
+                    "teamfight_participation": p.get("teamfight_participation", 0) or 0,
+                    "stuns":                   p.get("stuns", 0) or 0,
+                    "camps_stacked":           p.get("camps_stacked", 0) or 0,
+                    "rune_pickups":            p.get("rune_pickups", 0) or 0,
                 })
 
             upsert_players(players)
