@@ -1,6 +1,6 @@
 # Dota 2 League Stats Discord Bot
 
-A Discord bot that automatically fetches match data from the [OpenDota API](https://docs.opendota.com/) for a specific league, filters to US West non-Ability-Draft games, and tracks per-player stats with a fantasy points leaderboard.
+A multi-guild Discord bot that pulls match data from the [OpenDota API](https://docs.opendota.com/) for a configured league, filters by region and game mode, parses Ability Draft replays via a custom Go parser, and exposes per-player stats with a tunable fantasy-points leaderboard.
 
 ---
 
@@ -8,11 +8,15 @@ A Discord bot that automatically fetches match data from the [OpenDota API](http
 
 | Feature | Details |
 |---|---|
-| **Weekly auto-fetch** | Runs every Monday at 06:00 UTC. Pulls new matches, filters, and stores them. |
-| **SQLite caching** | Match data is stored locally — no repeated API calls. |
-| **Slash commands** | `/leaderboard`, `/player`, `/roles`, `/refresh` |
-| **Fantasy points** | A tunable scoring formula that rewards kills, economy, utility, and wins. |
-| **Role tracking** | Players are mapped to positional roles (Pos 1–5) automatically. |
+| **Per-server config** | Each Discord server (guild) configures its own league, region, mode, and season start via `/config`. |
+| **Game modes** | Captain's Mode (`cm`) or Ability Draft (`ad`, game_mode 18). |
+| **Weekly auto-fetch** | Runs every Monday at 06:00 UTC. Pulls new matches and parses any new AD drafts. |
+| **SQLite caching** | Match data is stored locally on a persistent fly.io volume. |
+| **Ability Draft replays** | A bundled Go parser (`parser/`) extracts pick order from Source 2 replays; OpenDota fills in ability/hero names. |
+| **Fantasy points** | A tunable per-game scoring formula with duration normalization. See `fantasy.py`. |
+| **Draft order images** | `/draftorder <match_id>` renders the full pick sequence with ability icons. |
+| **Chat quotes** | `/quote` pulls a random non-boring in-game chat message. |
+| **Scold channel** | Optional channel where any user post gets deleted with a snarky reply. |
 
 ---
 
@@ -21,13 +25,19 @@ A Discord bot that automatically fetches match data from the [OpenDota API](http
 ```
 .
 ├── bot.py            # Discord client, slash commands, weekly scheduler
-├── config.py         # Loads env vars and constants
+├── config.py         # Loads env vars and constants (regions, modes, role labels)
 ├── db.py             # SQLite schema + read/write functions
 ├── fetcher.py        # OpenDota API calls, filtering, persistence
 ├── fantasy.py        # Fantasy points formula (tunable weights)
 ├── formatters.py     # Builds Discord Embed objects
-├── requirements.txt
-└── README.md
+├── draftorder.py     # PIL image rendering for AD pick order
+├── replay.py         # Replay download + Go parser shell-out
+├── opendota_lookup.py# Resolve picks → ability/hero names via OpenDota
+├── parser/           # Go (manta) replay parser binary source
+├── botstats/         # Lightweight web server for AD helper overlay
+├── Dockerfile        # Two-stage build: Go parser + Python bot
+├── fly.toml          # fly.io deployment config
+└── requirements.txt
 ```
 
 ---
@@ -36,10 +46,12 @@ A Discord bot that automatically fetches match data from the [OpenDota API](http
 
 ### 1. Prerequisites
 
-- Python 3.11+
-- A Discord bot token (create one at [discord.com/developers](https://discord.com/developers/applications))
-- Your league ID (visible in OpenDota or in-game)
-- *(Optional)* An OpenDota API key from [opendota.com/api-keys](https://www.opendota.com/api-keys) — free tier works without one but has lower rate limits
+- Python 3.12+
+- Go 1.23+ (only needed locally if you want to rebuild the AD parser; the Dockerfile builds it for you)
+- A Discord bot token from [discord.com/developers](https://discord.com/developers/applications)
+- A league ID (visible in OpenDota or in-game)
+- *(Optional)* An OpenDota API key from [opendota.com/api-keys](https://www.opendota.com/api-keys)
+- *(Optional)* A Steam Web API key for replay-salt fallback
 
 ### 2. Install dependencies
 
@@ -52,32 +64,22 @@ pip install -r requirements.txt
 | Variable | Required | Description |
 |---|---|---|
 | `DISCORD_TOKEN` | ✅ | Your Discord bot token |
-| `LEAGUE_ID` | ✅ | The OpenDota league ID (integer) |
-| `STATS_CHANNEL_ID` | ❌ | Discord channel ID for auto-posted weekly summaries. Omit to disable. |
-| `OPENDOTA_API_KEY` | ❌ | OpenDota API key. Omit to use the free unauthenticated tier. |
-| `DB_PATH` | ❌ | Path to the SQLite file. Defaults to `dota_stats.db` in the working directory. |
+| `ADMIN_USER_ID` | ❌ | Bot owner Discord user ID (can configure any guild, run `/nuke`) |
+| `OPENDOTA_API_KEY` | ❌ | OpenDota API key. Free tier works without one but has lower rate limits |
+| `STEAM_API_KEY` | ❌ | Steam Web API key, used as a fallback to fetch replay salts |
+| `DB_PATH` | ❌ | Path to the SQLite file. Defaults to `/data/dota_stats.db` if `/data` exists, else `dota_stats.db` |
 
-#### Running locally with a `.env` file
+### 4. Per-guild config
 
-Create a `.env` file and use [python-dotenv](https://pypi.org/project/python-dotenv/):
+League/region/mode are configured per Discord server at runtime via `/config`:
 
 ```
-DISCORD_TOKEN=your_token_here
-LEAGUE_ID=12345
-STATS_CHANNEL_ID=1234567890123456789
-OPENDOTA_API_KEY=your_key_here
+/config league:<id> region:<us_west|us_east|any> mode:<cm|ad> season_start:<YYYY-MM-DD>
 ```
 
-Then add these two lines at the very top of `bot.py`:
+You can also bind a `scold_channel` to silently delete posts there. Re-run `/config` to update.
 
-```python
-from dotenv import load_dotenv
-load_dotenv()
-```
-
-And install the extra package: `pip install python-dotenv`
-
-### 4. Run
+### 5. Run locally
 
 ```bash
 python bot.py
@@ -85,15 +87,13 @@ python bot.py
 
 ---
 
-## Hosting on Railway (Free Tier)
+## Hosting on fly.io
 
-1. Push this repo to GitHub.
-2. Go to [railway.app](https://railway.app) → **New Project → Deploy from GitHub repo**.
-3. In the service **Settings → Environment**, add your environment variables (see table above).
-4. Railway will auto-detect `requirements.txt` and build. Set the **Start command** to `python bot.py`.
-5. The bot will stay running and execute the Monday morning fetch automatically.
+The bot ships with a `Dockerfile` and `fly.toml` configured for fly.io.
 
-> **Note on SQLite + Railway:** Railway free tier uses ephemeral disks by default. Your `dota_stats.db` file will persist as long as the service isn't redeployed. If persistence across deploys is critical, consider adding a Railway PostgreSQL add-on and swapping `db.py` for a PostgreSQL connection — the interface is the same, just the connection string changes.
+1. `fly launch` (or `fly deploy` if the app already exists).
+2. Set secrets: `fly secrets set DISCORD_TOKEN=... OPENDOTA_API_KEY=... STEAM_API_KEY=... ADMIN_USER_ID=...`
+3. The `[mounts]` block in `fly.toml` provisions a persistent volume at `/data`, where SQLite lives. Don't delete it.
 
 ---
 
@@ -101,55 +101,36 @@ python bot.py
 
 | Command | Description |
 |---|---|
-| `/leaderboard <stat>` | Shows top 15 players sorted by the chosen stat (Fantasy Pts, GPM, KDA, etc.). Optional `week` param to look back. |
-| `/player <name>` | Full stat breakdown for a single player. Supports partial name matching. |
-| `/roles` | Best player at each positional role (1–5), ranked by fantasy points. |
-| `/refresh` | *(Admin only)* Manually trigger a data fetch right now. |
+| `/config` | *(Admin)* Configure this server's league, region, mode, season start, scold channel. |
+| `/leaderboard <stat> [week] [pos]` | Top players sorted by the chosen stat. Optional season week and positional filter. |
+| `/player <name> [week]` | Full stat breakdown for one player. Partial name matching. |
+| `/playerdiff <name> [week]` | Compare a player's fantasy points to the average of their same-side teammates. |
+| `/roles [week]` | Best fantasy-points player at each position (1–5). |
+| `/matches [week] [player]` | Match list with Dotabuff/OpenDota links; optional player filter. |
+| `/summary` | Compact fantasy-pts leaderboard per position for latest week + all-time. |
+| `/quote` | Random in-game chat message from a parsed match. |
+| `/draftorder <match_id>` | Render the AD pick order as an image. Triggers an on-demand replay parse if needed. |
+| `/tipjar` | Venmo link for the bot creator. |
+| `/refresh` | *(Admin)* Manually trigger a data fetch right now. |
+| `/nuke` | *(Admin)* Wipe all data for this server and re-fetch from scratch. |
 
 ---
 
 ## How Fantasy Points Work
 
-See `fantasy.py` for the full formula. In short, points are calculated **per game played** and then multiplied by games played, so everyone is on fair footing regardless of how many matches they appeared in.
-
-### Default Weights
-
-| Stat | Points |
-|---|---|
-| Kill | +3.0 |
-| Death | −2.5 |
-| Assist | +1.5 |
-| Last Hit | +0.02 |
-| Deny | +0.5 |
-| GPM (above 300 baseline) | +0.5 per 100 |
-| XPM (above 400 baseline) | +0.3 per 100 |
-| Hero Damage | +0.01 per 100 |
-| Hero Healing | +0.02 per 100 |
-| Win | +5.0 |
-
-To change these, just edit the `WEIGHTS` dict and the baseline constants at the top of `fantasy.py`.
+See `fantasy.py` for the full formula and current weights. Points are calculated as a **per-game average** (so games-played doesn't inflate scores), with a duration-normalization term that subtracts the expected pts gained purely from longer games. Re-run `analyze_duration.py` periodically to refresh the regression coefficients as more matches accumulate.
 
 ---
 
 ## Filtering Logic
 
-When the bot fetches matches for your league, it applies two filters before storing:
+Match fetches apply two filters before storing:
 
-1. **Server region** — Only matches played on US West clusters are kept. The known cluster IDs are in `config.py` under `US_WEST_CLUSTERS`. If your league ever uses a different cluster, add it there.
-2. **Game mode** — Ability Draft (mode 19) is excluded. Add more mode IDs to `EXCLUDED_GAME_MODES` in `config.py` if needed.
+1. **Server region** — Cluster IDs are grouped in `config.py` under `REGION_CLUSTERS`. `any` disables the filter.
+2. **Game mode** — `cm` includes everything *except* Ability Draft (mode 18). `ad` includes *only* Ability Draft. Edit `GAME_MODE_FILTERS` in `config.py` to add modes.
 
 ---
 
 ## Role Assignment
 
-Dota 2 doesn't have an explicit "role" field — roles are inferred from the positional slot each player occupies in the draft. The bot maps these to:
-
-| Position | Label |
-|---|---|
-| 1 | Safe Lane |
-| 2 | Mid Lane |
-| 3 | Off Lane |
-| 4 | Roaming |
-| 5 | Hard Support |
-
-This is a convention, not gospel — players can and do play off-position. The labels are just for organisation.
+Dota 2 has no explicit role field — positions are inferred from the player's slot in the draft. The labels in `config.py` (`ROLE_LABELS`) are conventional and players routinely play off-position; treat them as organizational, not gospel. In Ability Draft, "position" is largely meaningless and roles are mostly a quirk of how OpenDota reports the slot.

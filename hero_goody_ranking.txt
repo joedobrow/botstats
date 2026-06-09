@@ -1,0 +1,129 @@
+Rank | Hero                      | Avg Goody | # Abilities
+-----|---------------------------|-----------|------------
+   1 | Tidehunter                |      2.96 |   5
+   2 | Doom                      |      3.04 |   4
+   3 | Underlord                 |      3.17 |   5
+   4 | Gyrocopter                |      3.21 |   5
+   5 | Magnus                    |      3.21 |   5
+   6 | Muerta                    |      3.22 |   5
+   7 | Chaos Knight              |      3.29 |   5
+   8 | Sven                      |      3.37 |   5
+   9 | Centaur Warrunner         |      3.44 |   5
+  10 | Witch Doctor              |      3.45 |   5
+  11 | Luna                      |      3.46 |   5
+  12 | Sniper                    |      3.46 |   5
+  13 | Juggernaut                |      3.47 |   5
+  14 | Earthshaker               |      3.49 |   5
+  15 | Viper                     |      3.49 |   5
+  16 | Techies                   |      3.49 |   5
+  17 | Mars                      |      3.59 |   5
+  18 | Pudge                     |      3.61 |   5
+  19 | Mirana                    |      3.61 |   5
+  20 | Slardar                   |      3.62 |   5
+  21 | Shadow Fiend              |      3.63 |   5
+  22 | Dragon Knight             |      3.65 |   5
+  23 | Ancient Apparition        |      3.65 |   5
+  24 | Leshrac                   |      3.68 |   5
+  25 | Bloodseeker               |       3.7 |   5
+  26 | Vengeful Spirit           |       3.7 |   5
+  27 | Windranger                |      3.71 |   5
+  28 | Enchantress               |      3.71 |   5
+  29 | Jakiro                    |      3.71 |   6
+  30 | Dark Willow               |      3.72 |   5
+  31 | Death Prophet             |      3.72 |   5
+  32 | Lina                      |      3.75 |   5
+  33 | Omniknight                |      3.76 |   5
+  34 | Nyx Assassin              |      3.76 |   5
+  35 | Bounty Hunter             |      3.77 |   5
+  36 | Tiny                      |      3.79 |   5
+  37 | Razor                     |      3.79 |   5
+  38 | Lion                      |       3.8 |   5
+  39 | Dawnbreaker               |       3.8 |   5
+  40 | Bane                      |      3.83 |   5
+  41 | Wraith King               |      3.84 |   6
+  42 | Undying                   |      3.84 |   5
+  43 | Void Spirit               |      3.86 |   5
+  44 | Morphling                 |      3.88 |   3
+  45 | Huskar                    |      3.91 |   5
+  46 | Silencer                  |      3.91 |   5
+  47 | Ogre Magi                 |      3.92 |   4
+  48 | Terrorblade               |      3.93 |   5
+  49 | Medusa                    |      3.97 |   5
+  50 | Lifestealer               |      3.97 |   5
+  51 | Dark Seer                 |      3.98 |   5
+  52 | Legion Commander          |       4.0 |   5
+  53 | Hoodwink                  |       4.0 |   5
+  54 | Primal Beast              |      4.01 |   5
+  55 | Largo                     |      4.01 |   5
+  56 | Grimstroke                |      4.02 |   5
+  57 | Kunkka                    |      4.04 |   5
+  58 | Zeus                      |      4.04 |   5
+  59 | Lich                      |      4.05 |   5
+  60 | Winter Wyvern             |      4.06 |   5
+  61 | Snapfire                  |      4.06 |   5
+  62 | Drow Ranger               |      4.06 |   5
+  63 | Outworld Devourer         |      4.07 |   5
+  64 | Alchemist                 |      4.07 |   5
+  65 | Marci                     |      4.08 |   5
+  66 | Slark                     |      4.08 |   5
+  67 | Crystal Maiden            |      4.11 |   5
+  68 | Lycan                     |      4.11 |   5
+  69 | Faceless Void             |      4.15 |   6
+  70 | Monkey King               |      4.19 |   5
+  71 | Weaver                    |       4.2 |   5
+  72 | Necrophos                 |      4.24 |   5
+  73 | Treant Protector          |      4.24 |   5
+  74 | Night Stalker             |      4.27 |   5
+  75 | Axe                       |      4.29 |   5
+  76 | Skywrath Mage             |      4.31 |   5
+  77 | Warlock                   |      4.33 |   5
+  78 | Pangolier                 |      4.37 |   5
+  79 | Batrider                  |       4.4 |   5
+  80 | Spectre                   |      4.42 |   5
+  81 | Naga Siren                |      4.42 |   6
+  82 | Phantom Assassin          |      4.43 |   5
+  83 | Shadow Demon              |      4.43 |   5
+  84 | Ember Spirit              |      4.45 |   5
+  85 | Brewmaster                |      4.45 |   5
+  86 | Io                        |      4.45 |   5
+  87 | Shadow Shaman             |      4.46 |   5
+  88 | Abaddon                   |      4.49 |   5
+  89 | Queen of Pain             |      4.52 |   5
+  90 | Rubick                    |      4.53 |   4
+  91 | Phantom Lancer            |      4.55 |   5
+  92 | Tusk                      |      4.55 |   6
+  93 | Venomancer                |      4.56 |   5
+  94 | Ursa                      |      4.59 |   5
+  95 | Storm Spirit              |      4.61 |   5
+  96 | Spirit Breaker            |      4.62 |   5
+  97 | Broodmother               |      4.62 |   5
+  98 | Pugna                     |      4.62 |   5
+  99 | Clockwerk                 |      4.62 |   5
+ 100 | Nature's Prophet          |      4.63 |   5
+ 101 | Clinkz                    |      4.66 |   5
+ 102 | Enigma                    |      4.68 |   5
+ 103 | Kez                       |      4.72 |   5
+ 104 | Riki                      |      4.74 |   5
+ 105 | Timbersaw                 |      4.76 |   5
+ 106 | Anti-Mage                 |      4.79 |   5
+ 107 | Disruptor                 |       4.8 |   5
+ 108 | Elder Titan               |      4.91 |   5
+ 109 | Sand King                 |      4.93 |   5
+ 110 | Bristleback               |      4.98 |   4
+ 111 | Arc Warden                |      5.05 |   4
+ 112 | Troll Warlord             |      5.11 |   5
+ 113 | Keeper of the Light       |      5.12 |   5
+ 114 | Phoenix                   |      5.17 |   5
+ 115 | Beastmaster               |      5.25 |   5
+ 116 | Invoker                   |      5.28 |  11
+ 117 | Puck                      |      5.29 |   5
+ 118 | Templar Assassin          |       5.3 |   5
+ 119 | Oracle                    |      5.35 |   5
+ 120 | Ring Master               |      5.43 |   5
+ 121 | Earth Spirit              |      5.49 |   5
+ 122 | Dazzle                    |      5.59 |   5
+ 123 | Visage                    |      5.65 |   5
+ 124 | Chen                      |      6.11 |   5
+ 125 | Tinker                    |      6.16 |   5
+ 126 | Meepo                     |      6.42 |   4
+ 127 | Lone Druid                |      6.58 |   6

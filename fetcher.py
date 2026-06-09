@@ -14,11 +14,34 @@ import logging
 from datetime import datetime, timezone
 
 from config import OPENDOTA_API_KEY, REGION_CLUSTERS, GAME_MODE_FILTERS
-from db import upsert_match, upsert_players, upsert_chat_messages, match_exists, get_division
+from db import (
+    upsert_match, upsert_players, upsert_chat_messages, match_exists, get_division,
+    get_matches_without_drafts, get_match_replay_info, draft_exists, upsert_draft_picks,
+)
 
 logger = logging.getLogger(__name__)
 
 BASE_URL = "https://api.opendota.com/api"
+
+# OpenDota item_uses keys for the defensive items we score in fantasy points.
+# Internal item names without the "item_" prefix. Linken's Sphere is "sphere".
+DEFENSIVE_ITEM_KEYS = (
+    "pipe",            # Pipe of Insight
+    "crimson_guard",
+    "lotus_orb",
+    "glimmer_cape",
+    "force_staff",
+    "pavise",
+    "solar_crest",
+    "heavens_halberd",
+    "sphere",          # Linken's Sphere
+)
+
+
+def _sum_defensive_item_uses(player: dict) -> int:
+    """Sum item_uses across the defensive items we score."""
+    uses = player.get("item_uses") or {}
+    return sum(uses.get(k, 0) or 0 for k in DEFENSIVE_ITEM_KEYS)
 
 
 def _headers(use_auth: bool = True) -> dict:
@@ -195,6 +218,13 @@ async def fetch_and_store_matches_for_division(guild_id: int) -> int:
                 logger.info("FILTERED OUT: Match %d — cluster=%d (not in %s)", mid, cluster, region)
                 continue
 
+            # Skip remakes / bugged matches — no kills on either team means the game didn't really happen
+            radiant_score = full.get("radiant_score", 0)
+            dire_score = full.get("dire_score", 0)
+            if radiant_score == 0 and dire_score == 0:
+                logger.info("FILTERED OUT: Match %d — score 0-0 (likely remake or bugged game)", mid)
+                continue
+
             # Log matches that PASS the filter
             logger.info("STORING: Match %d for guild %d — cluster=%d, game_mode=%d", mid, guild_id, cluster, game_mode)
 
@@ -212,6 +242,7 @@ async def fetch_and_store_matches_for_division(guild_id: int) -> int:
                 "radiant_score": full.get("radiant_score", 0),
                 "dire_score":   full.get("dire_score", 0),
                 "fetched_at":   datetime.now(timezone.utc).isoformat(),
+                "replay_salt":  full.get("replay_salt", 0) or 0,
             }
             upsert_match(match_row)
 
@@ -226,17 +257,31 @@ async def fetch_and_store_matches_for_division(guild_id: int) -> int:
             role_map.update(_assign_team_roles(radiant_team))
             role_map.update(_assign_team_roles(dire_team))
 
+            # --- Compute team's first tormentor kill time from objectives ---
+            # team 2 = radiant, team 3 = dire; -1 = tormentor never taken by that team
+            team_first_tormentor: dict[int, int] = {}
+            for obj in full.get("objectives", []):
+                if obj.get("type") == "CHAT_MESSAGE_MINIBOSS_KILL":
+                    team = obj.get("team")
+                    t = obj.get("time", 0)
+                    if team and (team not in team_first_tormentor or t < team_first_tormentor[team]):
+                        team_first_tormentor[team] = t
+
             players = []
             for p in all_players:
                 slot = p.get("player_slot", 0)
                 is_radiant = slot < 128
                 won = 1 if (is_radiant and radiant_win) or (not is_radiant and not radiant_win) else 0
+                team_num = 2 if is_radiant else 3
+                killed_dict    = p.get("killed") or {}
+                ability_uses   = p.get("ability_uses") or {}
 
                 players.append({
                     "match_id":       mid,
                     "account_id":     p.get("account_id", 0),
                     "name":           p.get("personaname") or p.get("name") or f"Player_{p.get('account_id', '?')}",
                     "hero_id":        p.get("hero_id", 0),
+                    "player_slot":    slot,
                     "team_side":      "radiant" if is_radiant else "dire",
                     "role_position":  role_map.get(slot),
                     "kills":          p.get("kills", 0),
@@ -262,6 +307,10 @@ async def fetch_and_store_matches_for_division(guild_id: int) -> int:
                     "stuns":                   p.get("stuns", 0) or 0,
                     "camps_stacked":           p.get("camps_stacked", 0) or 0,
                     "rune_pickups":            p.get("rune_pickups", 0) or 0,
+                    "tormentor_kills":         killed_dict.get("npc_dota_miniboss", 0),
+                    "watcher_captures":        ability_uses.get("ability_lamp_use", 0),
+                    "team_first_tormentor_time": team_first_tormentor.get(team_num, -1),
+                    "defensive_item_uses":     _sum_defensive_item_uses(p),
                 })
 
             upsert_players(players)
@@ -289,5 +338,161 @@ async def fetch_and_store_matches_for_division(guild_id: int) -> int:
 
             stored += 1
             logger.info("Stored match %d (%d players)", mid, len(players))
+
+    return stored
+
+
+async def import_match(match_id: int, guild_id: int = 0) -> bool:
+    """
+    Fetch a single match by ID from OpenDota and store its row + players.
+    Used by on-demand /draftorder so we can render the draft image even for
+    matches outside the periodic league refresh.
+
+    Returns True if the match was stored (or already exists), False on failure.
+    """
+    if match_exists(guild_id, match_id):
+        return True
+
+    async with aiohttp.ClientSession() as session:
+        full = await _get(session, f"/matches/{match_id}", use_auth=False)
+    if not full:
+        return False
+
+    radiant_win = 1 if full.get("radiant_win") else 0
+    match_row = {
+        "match_id":     full.get("match_id", match_id),
+        "guild_id":     guild_id,
+        "league_id":    full.get("leagueid", 0),
+        "start_time":   full.get("start_time", 0),
+        "duration":     full.get("duration", 0),
+        "game_mode":    full.get("game_mode", 0),
+        "cluster":      full.get("cluster", 0),
+        "radiant_win":  radiant_win,
+        "radiant_score": full.get("radiant_score", 0),
+        "dire_score":   full.get("dire_score", 0),
+        "fetched_at":   datetime.now(timezone.utc).isoformat(),
+        "replay_salt":  full.get("replay_salt", 0) or 0,
+    }
+    upsert_match(match_row)
+
+    # Minimal player rows so /draftorder rendering has names + KDA.
+    duration = full.get("duration", 0)
+    all_players = full.get("players", [])
+    radiant_team = [p for p in all_players if p.get("player_slot", 0) < 128]
+    dire_team = [p for p in all_players if p.get("player_slot", 0) >= 128]
+    role_map = {}
+    role_map.update(_assign_team_roles(radiant_team))
+    role_map.update(_assign_team_roles(dire_team))
+
+    players = []
+    for p in all_players:
+        slot = p.get("player_slot", 0)
+        is_radiant = slot < 128
+        won = 1 if (is_radiant and radiant_win) or (not is_radiant and not radiant_win) else 0
+        players.append({
+            "match_id":     match_id,
+            "account_id":   p.get("account_id", 0),
+            "name":         p.get("personaname") or p.get("name") or f"Player_{p.get('account_id', '?')}",
+            "hero_id":      p.get("hero_id", 0),
+            "player_slot":  slot,
+            "team_side":    "radiant" if is_radiant else "dire",
+            "role_position": role_map.get(slot),
+            "kills":        p.get("kills", 0),
+            "deaths":       p.get("deaths", 0),
+            "assists":      p.get("assists", 0),
+            "gpm":          p.get("gold_per_min", 0),
+            "xpm":          p.get("xp_per_min", 0),
+            "last_hits":    p.get("last_hits", 0),
+            "denies":       p.get("denies", 0),
+            "hero_damage":  p.get("hero_damage", 0),
+            "hero_healing": p.get("hero_healing", 0),
+            "gold_spent":   p.get("gold_spent", 0),
+            "duration":     duration,
+            "won":          won,
+            "obs_placed":             p.get("obs_placed", 0) or 0,
+            "sen_placed":             p.get("sen_placed", 0) or 0,
+            "observer_kills":         p.get("observer_kills", 0) or 0,
+            "sentry_kills":           p.get("sentry_kills", 0) or 0,
+            "tower_kills":            p.get("towers_killed", 0) or 0,
+            "roshans_killed":         p.get("roshans_killed", 0) or 0,
+            "firstblood_claimed":     1 if p.get("firstblood_claimed") else 0,
+            "teamfight_participation": p.get("teamfight_participation", 0) or 0,
+            "stuns":                  p.get("stuns", 0) or 0,
+            "camps_stacked":          p.get("camps_stacked", 0) or 0,
+            "rune_pickups":           p.get("rune_pickups", 0) or 0,
+            "tormentor_kills":        (p.get("killed") or {}).get("npc_dota_miniboss", 0),
+            "watcher_captures":       (p.get("ability_uses") or {}).get("ability_lamp_use", 0),
+            "team_first_tormentor_time": -1,
+            "defensive_item_uses":    _sum_defensive_item_uses(p),
+        })
+    if players:
+        upsert_players(players)
+    return True
+
+
+async def fetch_and_store_drafts_for_guild(guild_id: int) -> int:
+    """
+    For every AD match in this guild that has no draft data yet, download the
+    replay from Valve, parse it with the Go binary, and store the picks.
+
+    Returns the number of matches for which draft picks were successfully stored.
+    Replays are downloaded one at a time to avoid hammering Valve's CDN.
+    """
+    from replay import fetch_draft_picks
+
+    match_ids = get_matches_without_drafts(guild_id)
+    if not match_ids:
+        logger.info("No matches missing draft data for guild %d", guild_id)
+        return 0
+
+    logger.info(
+        "Fetching draft picks for %d match(es) in guild %d",
+        len(match_ids), guild_id,
+    )
+
+    stored = 0
+    for match_id in match_ids:
+        cluster, replay_salt = get_match_replay_info(match_id)
+        logger.info("Processing replay for match %d (cluster=%d salt=%d)", match_id, cluster, replay_salt)
+
+        picks = await fetch_draft_picks(match_id, cluster, replay_salt)
+
+        if picks is None:
+            logger.warning("Could not get draft picks for match %d — will retry next refresh", match_id)
+            continue
+
+        if len(picks) == 0:
+            logger.warning("Match %d returned 0 picks — may not be AD or replay is unavailable", match_id)
+            # Don't store anything; we'll retry next time in case of a transient issue
+            continue
+
+        # Resolve every pick (abilities + models) via OpenDota's per-match
+        # data. We do this on EVERY match since m_n_ability_id is per-match,
+        # not stable globally. Cheap (one HTTP call) and consistent.
+        from opendota_lookup import resolve_picks_with_opendota
+        try:
+            picks = await resolve_picks_with_opendota(match_id, picks)
+        except Exception:
+            logger.exception("OpenDota resolve failed for match %d (continuing)", match_id)
+
+        # The parser emits order/player_id/type/ability_name/m_n_ability_id.
+        normalized = [
+            {
+                "pick_order":     p["order"],
+                "player_id":      p["player_id"],
+                "ability_name":   p["ability_name"],
+                "pick_type":      p.get("type", "ability"),
+                "m_n_ability_id": p.get("m_n_ability_id", 0),
+                "ability_id":     0,
+            }
+            for p in picks
+        ]
+        upsert_draft_picks(match_id, normalized)
+        stored += 1
+        logger.info("Stored %d draft picks for match %d", len(normalized), match_id)
+
+        # Small pause between replays — be polite to Valve's CDN
+        import asyncio
+        await asyncio.sleep(2)
 
     return stored

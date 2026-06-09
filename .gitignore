@@ -1,1 +1,17 @@
+# Secrets
 .env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Local databases
+*.db
+
+# macOS
+.DS_Store
+
+# Local caches / tooling
+.icon_cache/
+.claude/

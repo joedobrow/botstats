@@ -15,6 +15,8 @@ OPENDOTA_API_KEY: str | None = os.environ.get("OPENDOTA_API_KEY")
 # Bot owner user ID - can configure any division and nuke any data
 ADMIN_USER_ID: int | None = int(os.environ["ADMIN_USER_ID"]) if os.environ.get("ADMIN_USER_ID") else None
 
+STEAM_API_KEY = os.environ.get("STEAM_API_KEY", "")
+
 # ---------------------------------------------------------------------------
 # Dota 2 constants
 # ---------------------------------------------------------------------------

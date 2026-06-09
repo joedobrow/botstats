@@ -28,6 +28,17 @@ DB_PATH = os.environ.get("DB_PATH", "dota_stats.db")
 OPENDOTA_API_KEY = os.environ.get("OPENDOTA_API_KEY")
 BASE_URL = "https://api.opendota.com/api"
 
+# Keep in sync with fetcher.DEFENSIVE_ITEM_KEYS
+DEFENSIVE_ITEM_KEYS = (
+    "pipe", "crimson_guard", "lotus_orb", "glimmer_cape", "force_staff",
+    "pavise", "solar_crest", "heavens_halberd", "sphere",
+)
+
+
+def _sum_defensive_item_uses(player: dict) -> int:
+    uses = player.get("item_uses") or {}
+    return sum(uses.get(k, 0) or 0 for k in DEFENSIVE_ITEM_KEYS)
+
 
 def _conn():
     conn = sqlite3.connect(DB_PATH)
@@ -42,11 +53,25 @@ def get_all_match_ids() -> list[int]:
     return [r["match_id"] for r in rows]
 
 
-def update_players(match_id: int, players_data: list[dict]):
+def update_players(match_id: int, players_data: list[dict], objectives: list[dict]):
     """UPDATE existing player rows with the new stat columns."""
+    # Compute team first tormentor times from objectives
+    team_first_tormentor: dict[int, int] = {}
+    for obj in objectives:
+        if obj.get("type") == "CHAT_MESSAGE_MINIBOSS_KILL":
+            team = obj.get("team")
+            t = obj.get("time", 0)
+            if team and (team not in team_first_tormentor or t < team_first_tormentor[team]):
+                team_first_tormentor[team] = t
+
     with _conn() as conn:
         for p in players_data:
             slot = p.get("player_slot", 0)
+            is_radiant = slot < 128
+            team_num = 2 if is_radiant else 3
+            killed_dict  = p.get("killed") or {}
+            ability_uses = p.get("ability_uses") or {}
+
             conn.execute("""
                 UPDATE players SET
                     obs_placed              = :obs_placed,
@@ -59,7 +84,11 @@ def update_players(match_id: int, players_data: list[dict]):
                     teamfight_participation = :teamfight_participation,
                     stuns                   = :stuns,
                     camps_stacked           = :camps_stacked,
-                    rune_pickups            = :rune_pickups
+                    rune_pickups            = :rune_pickups,
+                    tormentor_kills         = :tormentor_kills,
+                    watcher_captures        = :watcher_captures,
+                    team_first_tormentor_time = :team_first_tormentor_time,
+                    defensive_item_uses     = :defensive_item_uses
                 WHERE match_id = :match_id
                   AND account_id = :account_id
             """, {
@@ -76,6 +105,10 @@ def update_players(match_id: int, players_data: list[dict]):
                 "stuns":                  p.get("stuns", 0) or 0,
                 "camps_stacked":          p.get("camps_stacked", 0) or 0,
                 "rune_pickups":           p.get("rune_pickups", 0) or 0,
+                "tormentor_kills":        killed_dict.get("npc_dota_miniboss", 0),
+                "watcher_captures":       ability_uses.get("ability_lamp_use", 0),
+                "team_first_tormentor_time": team_first_tormentor.get(team_num, -1),
+                "defensive_item_uses":    _sum_defensive_item_uses(p),
             })
 
 
@@ -111,7 +144,8 @@ async def main():
                 failed += 1
             else:
                 players = data.get("players", [])
-                update_players(match_id, players)
+                objectives = data.get("objectives", [])
+                update_players(match_id, players, objectives)
                 ok += 1
                 logger.info("  Updated %d players", len(players))
 
