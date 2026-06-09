@@ -5,7 +5,7 @@ Queries every player-match row from the DB, computes per-match fantasy points,
 then fits a linear regression: fantasy_pts ~ game_duration_minutes
 
 Run on Fly.io:
-    flyctl ssh console --app dota-bot -C "sh -c 'DB_PATH=/data/dota_stats.db python /app/analyze_duration.py'"
+    flyctl ssh console --app dota-bot -C "sh -c 'DB_PATH=/data/dota_stats.db python /app/scripts/analyze_duration.py'"
 """
 
 import sqlite3

@@ -7,3 +7,8 @@ __pycache__
 .gitignore
 README.md
 *.md
+.DS_Store
+.github
+.claude
+.icon_cache
+data

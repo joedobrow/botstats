@@ -35,6 +35,8 @@ A multi-guild Discord bot that pulls match data from the [OpenDota API](https://
 ├── opendota_lookup.py# Resolve picks → ability/hero names via OpenDota
 ├── parser/           # Go (manta) replay parser binary source
 ├── botstats/         # Lightweight web server for AD helper overlay
+├── scripts/          # One-off analysis/maintenance scripts (run from repo root)
+├── data/             # Local CSV exports and analysis data (not shipped in image)
 ├── Dockerfile        # Two-stage build: Go parser + Python bot
 ├── fly.toml          # fly.io deployment config
 └── requirements.txt

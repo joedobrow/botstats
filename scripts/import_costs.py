@@ -28,6 +28,9 @@ import logging
 import re
 import sys
 
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # repo root
+
 from db import upsert_player_costs, init_db
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")

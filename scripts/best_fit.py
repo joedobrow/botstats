@@ -1,10 +1,14 @@
 import csv
+from pathlib import Path
+
 import numpy as np
+
+DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 
 draft_mmr = []
 windrun_mmr = []
 
-with open("mmr_comparison.csv", "r") as f:
+with open(DATA_DIR / "mmr_comparison.csv", "r") as f:
     reader = csv.DictReader(f)
     for row in reader:
         draft_mmr.append(float(row["draft_mmr"]))

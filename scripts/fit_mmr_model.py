@@ -17,6 +17,10 @@ import argparse
 import logging
 import math
 
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # repo root
+
 from db import _conn, _solve_linear
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")

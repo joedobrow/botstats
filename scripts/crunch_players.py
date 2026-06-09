@@ -11,9 +11,11 @@ import json
 import re
 import time
 import urllib.request
+from pathlib import Path
 
-INPUT_FILE = "players.csv"
-OUTPUT_FILE = "players_crunched.csv"
+DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+INPUT_FILE = DATA_DIR / "players.csv"
+OUTPUT_FILE = DATA_DIR / "players_crunched.csv"
 
 WINDRUN_API_BASE = "https://api.windrun.io/api/v2"
 WINDRUN_PROFILE_BASE = "https://windrun.io/players"

@@ -38,6 +38,10 @@ from datetime import datetime, timezone
 
 import aiohttp
 
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # repo root
+
 from db import init_db, _conn
 from opendota_lookup import estimate_mmr_from_rank_tier
 

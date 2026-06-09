@@ -1,0 +1,3 @@
+# Extra deps for local analysis scripts in scripts/ (not shipped in the image).
+-r requirements.txt
+numpy
