@@ -88,7 +88,8 @@ def update_players(match_id: int, players_data: list[dict], objectives: list[dic
                     tormentor_kills         = :tormentor_kills,
                     watcher_captures        = :watcher_captures,
                     team_first_tormentor_time = :team_first_tormentor_time,
-                    defensive_item_uses     = :defensive_item_uses
+                    defensive_item_uses     = :defensive_item_uses,
+                    building_damage         = :building_damage
                 WHERE match_id = :match_id
                   AND account_id = :account_id
             """, {
@@ -109,6 +110,7 @@ def update_players(match_id: int, players_data: list[dict], objectives: list[dic
                 "watcher_captures":       ability_uses.get("ability_lamp_use", 0),
                 "team_first_tormentor_time": team_first_tormentor.get(team_num, -1),
                 "defensive_item_uses":    _sum_defensive_item_uses(p),
+                "building_damage":        p.get("tower_damage", 0) or 0,
             })
 
 

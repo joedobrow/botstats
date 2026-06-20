@@ -88,11 +88,32 @@ def init_db():
             ("team_first_tormentor_time", "INTEGER DEFAULT -1"),  # seconds; -1 = not taken
             ("player_slot",               "INTEGER DEFAULT -1"),  # 0-4 radiant, 128-132 dire
             ("defensive_item_uses",       "INTEGER DEFAULT 0"),   # sum of activations across pipe/crimson/lotus/glimmer/force/pavise/solar/halberd/sphere
+            ("building_damage",           "INTEGER DEFAULT 0"),   # damage dealt to enemy buildings (towers + barracks + throne)
         ]
         for col, col_type in new_player_cols:
             if col not in player_columns:
                 logger.info("Migrating: adding %s column to players table", col)
                 conn.execute(f"ALTER TABLE players ADD COLUMN {col} {col_type}")
+
+        # --- Migration: add nickname column to skill_overrides if missing ---
+        cursor = conn.execute("PRAGMA table_info(skill_overrides)")
+        skill_cols = [row[1] for row in cursor.fetchall()]
+        if skill_cols and "nickname" not in skill_cols:
+            logger.info("Migrating: adding nickname column to skill_overrides")
+            conn.execute("ALTER TABLE skill_overrides ADD COLUMN nickname TEXT")
+        if skill_cols and "internal_rating_override" not in skill_cols:
+            logger.info("Migrating: adding internal_rating_override column to skill_overrides")
+            conn.execute("ALTER TABLE skill_overrides ADD COLUMN internal_rating_override INTEGER")
+
+        # --- Migration: add avatar_url + ad_all_time to player_ratings_cache ---
+        cursor = conn.execute("PRAGMA table_info(player_ratings_cache)")
+        prc_cols = [row[1] for row in cursor.fetchall()]
+        if prc_cols and "avatar_url" not in prc_cols:
+            logger.info("Migrating: adding avatar_url column to player_ratings_cache")
+            conn.execute("ALTER TABLE player_ratings_cache ADD COLUMN avatar_url TEXT")
+        if prc_cols and "ad_all_time" not in prc_cols:
+            logger.info("Migrating: adding ad_all_time column to player_ratings_cache")
+            conn.execute("ALTER TABLE player_ratings_cache ADD COLUMN ad_all_time INTEGER")
 
         # --- Migration: add scold_channel_id column to divisions if missing ---
         cursor = conn.execute("PRAGMA table_info(divisions)")
@@ -181,7 +202,8 @@ def init_db():
                 watcher_captures          INTEGER DEFAULT 0,
                 team_first_tormentor_time INTEGER DEFAULT -1,
                 player_slot               INTEGER DEFAULT -1,  -- 0-4 radiant, 128-132 dire
-                defensive_item_uses       INTEGER DEFAULT 0    -- pipe/crimson/lotus/glimmer/force/pavise/solar/halberd/sphere activations
+                defensive_item_uses       INTEGER DEFAULT 0,   -- pipe/crimson/lotus/glimmer/force/pavise/solar/halberd/sphere activations
+                building_damage           INTEGER DEFAULT 0    -- damage dealt to enemy buildings (OpenDota tower_damage)
             );
 
             CREATE INDEX IF NOT EXISTS idx_players_match   ON players(match_id);
@@ -198,8 +220,10 @@ def init_db():
                 raw_windrun       REAL,
                 mmr_estimate      INTEGER,
                 ad_last_year      INTEGER,
+                ad_all_time       INTEGER,
                 ranked_last_year  INTEGER,
                 explanation       TEXT,
+                avatar_url        TEXT,
                 updated_at        TEXT NOT NULL
             );
 
@@ -207,13 +231,15 @@ def init_db():
             -- non-NA leaderboard players, or any case where the API-inferred
             -- numbers are wrong. Scope is GLOBAL (account_id is the key).
             CREATE TABLE IF NOT EXISTS skill_overrides (
-                account_id      INTEGER PRIMARY KEY,
-                windrun_rating  REAL,
-                ranked_mmr      INTEGER,
-                note            TEXT,
-                set_by_user_id  INTEGER,
-                set_by_name     TEXT,
-                set_at          TEXT NOT NULL
+                account_id              INTEGER PRIMARY KEY,
+                windrun_rating          REAL,
+                ranked_mmr              INTEGER,
+                nickname                TEXT,
+                note                    TEXT,
+                internal_rating_override INTEGER,
+                set_by_user_id          INTEGER,
+                set_by_name             TEXT,
+                set_at                  TEXT NOT NULL
             );
 
             -- Player draft costs per season. (guild_id, season_start) scopes a season;
@@ -230,6 +256,25 @@ def init_db():
 
             CREATE INDEX IF NOT EXISTS idx_player_costs_lookup
                 ON player_costs(guild_id, season_start);
+
+            -- Per-guild roster of "tracked" players. Lets /set_player add a
+            -- player to a guild even if they haven't appeared in a match yet,
+            -- so /players will surface them.
+            CREATE TABLE IF NOT EXISTS guild_roster (
+                guild_id   INTEGER NOT NULL,
+                account_id INTEGER NOT NULL,
+                added_at   TEXT NOT NULL,
+                PRIMARY KEY (guild_id, account_id)
+            );
+
+            -- Per-guild exclusion list. Used to hide alt/smurf accounts from
+            -- /players even when match history exists.
+            CREATE TABLE IF NOT EXISTS guild_exclusions (
+                guild_id     INTEGER NOT NULL,
+                account_id   INTEGER NOT NULL,
+                excluded_at  TEXT NOT NULL,
+                PRIMARY KEY (guild_id, account_id)
+            );
 
             -- Calibration sample for the ranked-MMR ↔ windrun-rating model.
             -- Populated by build_mmr_calibration.py; consumed by fit_mmr_model.py
@@ -336,7 +381,7 @@ def upsert_players(players: list[dict]):
                  tower_kills, roshans_killed, firstblood_claimed,
                  teamfight_participation, stuns, camps_stacked, rune_pickups,
                  tormentor_kills, watcher_captures, team_first_tormentor_time,
-                 player_slot, defensive_item_uses)
+                 player_slot, defensive_item_uses, building_damage)
             VALUES
                 (:match_id, :account_id, :name, :hero_id, :team_side, :role_position,
                  :kills, :deaths, :assists, :gpm, :xpm, :last_hits, :denies,
@@ -345,7 +390,7 @@ def upsert_players(players: list[dict]):
                  :tower_kills, :roshans_killed, :firstblood_claimed,
                  :teamfight_participation, :stuns, :camps_stacked, :rune_pickups,
                  :tormentor_kills, :watcher_captures, :team_first_tormentor_time,
-                 :player_slot, :defensive_item_uses)
+                 :player_slot, :defensive_item_uses, :building_damage)
         """, players)
 
 
@@ -492,10 +537,15 @@ def get_latest_week_stats(guild_id: int, week_offset: int = 0) -> list[dict]:
                 AVG(p.tormentor_kills)          AS tormentor_kills,
                 AVG(p.watcher_captures)         AS watcher_captures,
                 AVG(p.defensive_item_uses)      AS defensive_item_uses,
+                AVG(p.building_damage)          AS building_damage,
                 AVG(CASE WHEN p.team_first_tormentor_time > 0
                          THEN p.team_first_tormentor_time ELSE NULL END)
                                                 AS avg_first_tormentor_time,
                 AVG(p.duration)                 AS avg_duration,
+                AVG(CASE WHEN p.player_slot >= 0   AND p.player_slot < 128
+                         THEN p.duration ELSE NULL END) AS avg_duration_radiant,
+                AVG(CASE WHEN p.player_slot >= 128
+                         THEN p.duration ELSE NULL END) AS avg_duration_dire,
                 AVG(CAST(p.hero_damage AS REAL) / NULLIF(match_dmg.total_damage, 0))
                                                 AS avg_pct_damage,
                 SUM(p.won)                      AS wins
@@ -560,10 +610,15 @@ def get_stats_for_season_week(guild_id: int, week_number: int, season_start_date
                 AVG(p.tormentor_kills)          AS tormentor_kills,
                 AVG(p.watcher_captures)         AS watcher_captures,
                 AVG(p.defensive_item_uses)      AS defensive_item_uses,
+                AVG(p.building_damage)          AS building_damage,
                 AVG(CASE WHEN p.team_first_tormentor_time > 0
                          THEN p.team_first_tormentor_time ELSE NULL END)
                                                 AS avg_first_tormentor_time,
                 AVG(p.duration)                 AS avg_duration,
+                AVG(CASE WHEN p.player_slot >= 0   AND p.player_slot < 128
+                         THEN p.duration ELSE NULL END) AS avg_duration_radiant,
+                AVG(CASE WHEN p.player_slot >= 128
+                         THEN p.duration ELSE NULL END) AS avg_duration_dire,
                 AVG(CAST(p.hero_damage AS REAL) / NULLIF(match_dmg.total_damage, 0))
                                                 AS avg_pct_damage,
                 SUM(p.won)                      AS wins
@@ -647,10 +702,15 @@ def get_all_time_stats(guild_id: int, season_start_date: str = None) -> list[dic
                 AVG(p.tormentor_kills)          AS tormentor_kills,
                 AVG(p.watcher_captures)         AS watcher_captures,
                 AVG(p.defensive_item_uses)      AS defensive_item_uses,
+                AVG(p.building_damage)          AS building_damage,
                 AVG(CASE WHEN p.team_first_tormentor_time > 0
                          THEN p.team_first_tormentor_time ELSE NULL END)
                                                 AS avg_first_tormentor_time,
                 AVG(p.duration)                 AS avg_duration,
+                AVG(CASE WHEN p.player_slot >= 0   AND p.player_slot < 128
+                         THEN p.duration ELSE NULL END) AS avg_duration_radiant,
+                AVG(CASE WHEN p.player_slot >= 128
+                         THEN p.duration ELSE NULL END) AS avg_duration_dire,
                 AVG(CAST(p.hero_damage AS REAL) / NULLIF(match_dmg.total_damage, 0))
                                                 AS avg_pct_damage,
                 SUM(p.won)                      AS wins
@@ -716,6 +776,7 @@ def _per_match_fp(row: dict) -> float:
         "camps_stacked":           row["camps_stacked"],
         "rune_pickups":            row["rune_pickups"],
         "defensive_item_uses":     row["defensive_item_uses"],
+        "building_damage":         (row["building_damage"] if "building_damage" in row.keys() else 0) or 0,
         "avg_duration":            row["match_duration"],
     })
 
@@ -784,8 +845,8 @@ def get_guild_player_account_ids(guild_id: int) -> list[int]:
 
 def upsert_rating_cache_row(row: dict) -> None:
     """Insert/update one row in player_ratings_cache. Expects keys account_id,
-    name, internal_rating, raw_windrun, mmr_estimate, ad_last_year,
-    ranked_last_year, explanation."""
+    name, internal_rating, raw_windrun, mmr_estimate, ad_last_year, ad_all_time,
+    ranked_last_year, explanation, avatar_url."""
     from datetime import datetime, timezone
     payload = {
         "account_id":       row["account_id"],
@@ -794,44 +855,234 @@ def upsert_rating_cache_row(row: dict) -> None:
         "raw_windrun":      row.get("raw_windrun"),
         "mmr_estimate":     row.get("mmr_estimate"),
         "ad_last_year":     row.get("ad_last_year"),
+        "ad_all_time":      row.get("ad_all_time"),
         "ranked_last_year": row.get("ranked_last_year"),
         "explanation":      row.get("explanation"),
+        "avatar_url":       row.get("avatar_url"),
         "updated_at":       datetime.now(timezone.utc).isoformat(),
     }
     with _conn() as conn:
         conn.execute("""
             INSERT INTO player_ratings_cache
                 (account_id, name, internal_rating, raw_windrun, mmr_estimate,
-                 ad_last_year, ranked_last_year, explanation, updated_at)
+                 ad_last_year, ad_all_time, ranked_last_year, explanation, avatar_url, updated_at)
             VALUES (:account_id, :name, :internal_rating, :raw_windrun,
-                    :mmr_estimate, :ad_last_year, :ranked_last_year,
-                    :explanation, :updated_at)
+                    :mmr_estimate, :ad_last_year, :ad_all_time, :ranked_last_year,
+                    :explanation, :avatar_url, :updated_at)
             ON CONFLICT(account_id) DO UPDATE SET
                 name             = excluded.name,
                 internal_rating  = excluded.internal_rating,
                 raw_windrun      = excluded.raw_windrun,
                 mmr_estimate     = excluded.mmr_estimate,
                 ad_last_year     = excluded.ad_last_year,
+                ad_all_time      = excluded.ad_all_time,
                 ranked_last_year = excluded.ranked_last_year,
                 explanation      = excluded.explanation,
+                avatar_url       = COALESCE(excluded.avatar_url, player_ratings_cache.avatar_url),
                 updated_at       = excluded.updated_at
         """, payload)
 
 
-def get_guild_cached_ratings(guild_id: int) -> list[dict]:
-    """Cached rating rows for players who've appeared in this guild's matches."""
+def get_rating_cache_row(account_id: int) -> dict | None:
+    """Return a single cached rating row (with override nickname joined in),
+    or None if not present."""
     with _conn() as conn:
-        rows = conn.execute("""
-            SELECT prc.*
+        row = conn.execute("""
+            SELECT prc.*, so.nickname AS override_nickname
             FROM player_ratings_cache prc
-            WHERE prc.account_id IN (
-                SELECT DISTINCT p.account_id
-                FROM players p
-                JOIN matches m ON p.match_id = m.match_id
-                WHERE m.guild_id = ? AND p.account_id > 0
-            )
-        """, (guild_id,)).fetchall()
+            LEFT JOIN skill_overrides so ON so.account_id = prc.account_id
+            WHERE prc.account_id = ?
+        """, (account_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def compute_fantasy_adjusted_ratings(guild_id: int, season_start: str) -> dict[int, dict]:
+    """For each cached player in this guild, fit a regression line of
+    fantasy diff (boosted by winrate) vs. base internal_rating, then return a
+    per-account_id dict of fantasy-adjusted ratings.
+
+    The adjustment is the residual (actual diff − expected diff from the fit),
+    normalized so the max-magnitude residual maps to ±6%. Players without
+    match history (just added via /set_player) get no entry in the result
+    and should be shown at their base rating.
+
+    Returns: {account_id: {
+        "base_rating": int,
+        "adjusted_rating": int,
+        "diff": float, "expected": float, "residual": float, "pct": float,
+    }}
+    """
+    cached = get_guild_cached_ratings(guild_id)
+    rows = [dict(r) for r in cached]
+    if not rows:
+        return {}
+
+    stats = get_all_time_stats(guild_id, season_start)
+    diff_by_aid: dict[int, float] = {}
+    games_by_aid: dict[int, int] = {}
+    for s in stats:
+        aid = s["account_id"]
+        base_diff = s.get("diff") or 0.0
+        games = s.get("games_played") or 0
+        wins  = s.get("wins") or 0
+        wr_adj = ((wins / games) - 0.5) * 6.0 if games > 0 else 0.0
+        diff_by_aid[aid] = base_diff + wr_adj
+        games_by_aid[aid] = games
+
+    # Exclude manually-rated players from the fit: their internal_rating is
+    # artificial, so it would skew the regression line.
+    fit_data = [
+        (r["internal_rating"], diff_by_aid[r["account_id"]])
+        for r in rows
+        if r.get("internal_rating") is not None
+        and r["account_id"] in diff_by_aid
+        and r.get("rating_override") is None
+    ]
+    if len(fit_data) < 2:
+        return {}
+
+    n = len(fit_data)
+    sx  = sum(x for x, _ in fit_data)
+    sy  = sum(y for _, y in fit_data)
+    sxy = sum(x * y for x, y in fit_data)
+    sxx = sum(x * x for x, _ in fit_data)
+    denom = n * sxx - sx * sx
+    if denom != 0:
+        slope     = (n * sxy - sx * sy) / denom
+        intercept = (sy - slope * sx) / n
+    else:
+        slope, intercept = 0.0, sy / n
+
+    residuals: list[tuple[int, float, float, float, int]] = []
+    for r in rows:
+        aid = r["account_id"]
+        if r.get("internal_rating") is None or aid not in diff_by_aid:
+            continue
+        # Manually-rated players are pinned — don't apply the adjustment.
+        if r.get("rating_override") is not None:
+            continue
+        actual   = diff_by_aid[aid]
+        expected = intercept + slope * r["internal_rating"]
+        residual = actual - expected
+        residuals.append((aid, actual, expected, residual, r["internal_rating"]))
+    if not residuals:
+        return {}
+
+    max_abs = max(abs(rsd) for _, _, _, rsd, _ in residuals) or 1.0
+    # Confidence scaling: a player with N=10 league games gets full credit;
+    # below that the adjustment scales linearly down to 0 at 0 games.
+    CONFIDENCE_GAMES = 10
+    result: dict[int, dict] = {}
+    for aid, actual, expected, residual, base in residuals:
+        confidence = min(games_by_aid.get(aid, 0) / CONFIDENCE_GAMES, 1.0)
+        pct = (residual / max_abs) * 0.06 * confidence
+        result[aid] = {
+            "base_rating":     base,
+            "adjusted_rating": round(base * (1 + pct)),
+            "diff":            actual,
+            "expected":        expected,
+            "residual":        residual,
+            "pct":             pct,
+            "confidence":      confidence,
+        }
+    return result
+
+
+def get_guild_cached_ratings(guild_id: int, include_all: bool = False) -> list[dict]:
+    """Cached rating rows. By default, only players who've appeared in this
+    guild's matches. Joins skill_overrides so callers see any override-nickname
+    and rating-override inline. Excludes any account marked as excluded for
+    this guild (alt/smurf accounts).
+
+    If include_all=True, returns every cached player globally (minus this
+    guild's exclusions) — used by /players show_all:true. This is also how
+    manually-added players (via /set_player on someone without match history)
+    become visible.
+    """
+    with _conn() as conn:
+        if include_all:
+            rows = conn.execute("""
+                SELECT prc.*, so.nickname AS override_nickname,
+                       so.internal_rating_override AS rating_override
+                FROM player_ratings_cache prc
+                LEFT JOIN skill_overrides so ON so.account_id = prc.account_id
+                WHERE prc.account_id NOT IN (
+                    SELECT account_id FROM guild_exclusions WHERE guild_id = ?
+                )
+            """, (guild_id,)).fetchall()
+        else:
+            rows = conn.execute("""
+                SELECT prc.*, so.nickname AS override_nickname,
+                       so.internal_rating_override AS rating_override
+                FROM player_ratings_cache prc
+                LEFT JOIN skill_overrides so ON so.account_id = prc.account_id
+                WHERE prc.account_id IN (
+                    SELECT DISTINCT p.account_id
+                    FROM players p
+                    JOIN matches m ON p.match_id = m.match_id
+                    WHERE m.guild_id = ? AND p.account_id > 0
+                )
+                AND prc.account_id NOT IN (
+                    SELECT account_id FROM guild_exclusions WHERE guild_id = ?
+                )
+            """, (guild_id, guild_id)).fetchall()
     return [dict(r) for r in rows]
+
+
+def exclude_from_guild(guild_id: int, account_id: int) -> None:
+    """Add this account to the guild's exclusion list (for alts/smurfs)."""
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).isoformat()
+    with _conn() as conn:
+        conn.execute("""
+            INSERT INTO guild_exclusions (guild_id, account_id, excluded_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(guild_id, account_id) DO NOTHING
+        """, (guild_id, account_id, now))
+
+
+def unexclude_from_guild(guild_id: int, account_id: int) -> bool:
+    """Remove an exclusion. Returns True if a row was deleted."""
+    with _conn() as conn:
+        cur = conn.execute(
+            "DELETE FROM guild_exclusions WHERE guild_id = ? AND account_id = ?",
+            (guild_id, account_id),
+        )
+    return cur.rowcount > 0
+
+
+def add_to_guild_roster(guild_id: int, account_id: int) -> None:
+    """Mark this account_id as part of this guild's tracked roster."""
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).isoformat()
+    with _conn() as conn:
+        conn.execute("""
+            INSERT INTO guild_roster (guild_id, account_id, added_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(guild_id, account_id) DO NOTHING
+        """, (guild_id, account_id, now))
+
+
+def remove_from_guild_roster(guild_id: int, account_id: int) -> bool:
+    """Remove a manually-added roster entry. Returns True if a row was removed."""
+    with _conn() as conn:
+        cur = conn.execute(
+            "DELETE FROM guild_roster WHERE guild_id = ? AND account_id = ?",
+            (guild_id, account_id),
+        )
+    return cur.rowcount > 0
+
+
+def guild_player_has_matches(guild_id: int, account_id: int) -> bool:
+    """True if the account has at least one match in this guild's history."""
+    with _conn() as conn:
+        row = conn.execute("""
+            SELECT 1 FROM players p
+            JOIN matches m ON p.match_id = m.match_id
+            WHERE m.guild_id = ? AND p.account_id = ?
+            LIMIT 1
+        """, (guild_id, account_id)).fetchone()
+    return row is not None
 
 
 def get_skill_override(account_id: int) -> dict | None:
@@ -850,6 +1101,8 @@ def upsert_skill_override(
     note: str | None,
     set_by_user_id: int | None,
     set_by_name: str | None,
+    nickname: str | None = None,
+    internal_rating_override: int | None = None,
 ) -> None:
     """Insert or update an override. Pass None for any field to KEEP the
     existing value (partial updates). To clear an override entirely, use
@@ -859,24 +1112,28 @@ def upsert_skill_override(
         wr   = windrun_rating if windrun_rating is not None else existing.get("windrun_rating")
         rm   = ranked_mmr     if ranked_mmr     is not None else existing.get("ranked_mmr")
         nt   = note           if note           is not None else existing.get("note")
+        nk   = nickname       if nickname       is not None else existing.get("nickname")
+        ir   = internal_rating_override if internal_rating_override is not None else existing.get("internal_rating_override")
     else:
-        wr, rm, nt = windrun_rating, ranked_mmr, note
+        wr, rm, nt, nk, ir = windrun_rating, ranked_mmr, note, nickname, internal_rating_override
     from datetime import datetime, timezone
     now = datetime.now(timezone.utc).isoformat()
     with _conn() as conn:
         conn.execute("""
             INSERT INTO skill_overrides
-                (account_id, windrun_rating, ranked_mmr, note,
-                 set_by_user_id, set_by_name, set_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+                (account_id, windrun_rating, ranked_mmr, nickname, note,
+                 internal_rating_override, set_by_user_id, set_by_name, set_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(account_id) DO UPDATE SET
-                windrun_rating = excluded.windrun_rating,
-                ranked_mmr     = excluded.ranked_mmr,
-                note           = excluded.note,
-                set_by_user_id = excluded.set_by_user_id,
-                set_by_name    = excluded.set_by_name,
-                set_at         = excluded.set_at
-        """, (account_id, wr, rm, nt, set_by_user_id, set_by_name, now))
+                windrun_rating          = excluded.windrun_rating,
+                ranked_mmr              = excluded.ranked_mmr,
+                nickname                = excluded.nickname,
+                note                    = excluded.note,
+                internal_rating_override = excluded.internal_rating_override,
+                set_by_user_id          = excluded.set_by_user_id,
+                set_by_name             = excluded.set_by_name,
+                set_at                  = excluded.set_at
+        """, (account_id, wr, rm, nk, nt, ir, set_by_user_id, set_by_name, now))
 
 
 def delete_skill_override(account_id: int) -> bool:
@@ -886,6 +1143,308 @@ def delete_skill_override(account_id: int) -> bool:
             "DELETE FROM skill_overrides WHERE account_id = ?", (account_id,)
         )
         return cur.rowcount > 0
+
+
+def get_captain_account_ids(guild_id: int, season_start: str) -> dict[str, int | None]:
+    """Map each captain name from player_costs to an account_id by exact
+    case-insensitive name match against (in order):
+      1. skill_overrides.nickname
+      2. player_ratings_cache.name
+      3. players.name within this guild
+      4. players.name globally
+    Returns {captain_name: account_id_or_None}.
+    """
+    with _conn() as conn:
+        captains = [
+            r["captain"]
+            for r in conn.execute(
+                "SELECT DISTINCT captain FROM player_costs "
+                "WHERE guild_id = ? AND season_start = ? AND captain IS NOT NULL",
+                (guild_id, season_start),
+            ).fetchall()
+        ]
+        result: dict[str, int | None] = {cap: None for cap in captains}
+        for cap in captains:
+            row = conn.execute(
+                "SELECT account_id FROM skill_overrides "
+                "WHERE nickname IS NOT NULL AND LOWER(nickname) = LOWER(?)",
+                (cap,),
+            ).fetchone()
+            if row:
+                result[cap] = row["account_id"]; continue
+            row = conn.execute(
+                "SELECT account_id FROM player_ratings_cache "
+                "WHERE name IS NOT NULL AND LOWER(name) = LOWER(?)",
+                (cap,),
+            ).fetchone()
+            if row:
+                result[cap] = row["account_id"]; continue
+            row = conn.execute("""
+                SELECT DISTINCT p.account_id
+                FROM players p JOIN matches m ON p.match_id = m.match_id
+                WHERE m.guild_id = ? AND LOWER(p.name) = LOWER(?)
+                LIMIT 1
+            """, (guild_id, cap)).fetchone()
+            if row:
+                result[cap] = row["account_id"]; continue
+            row = conn.execute(
+                "SELECT DISTINCT account_id FROM players "
+                "WHERE LOWER(name) = LOWER(?) LIMIT 1",
+                (cap,),
+            ).fetchone()
+            if row:
+                result[cap] = row["account_id"]
+    return result
+
+
+def get_team_match_aggregates(guild_id: int, season_start: str) -> dict[str, dict]:
+    """Per-team stats computed match-by-match instead of per-player-row.
+
+    Algorithm:
+      1. Build each team's roster (4 drafted + captain when resolvable).
+      2. For every match in the season, split into Radiant and Dire sides.
+      3. For each team, count how many of their roster appear on each side.
+         If ≥3 → that match is a 'team-match' for them. The team's 5 players
+         for that match are *whoever was on that side* (including stand-ins).
+      4. For each team-match, compute per-match team aggregates (5-player
+         averages for per-player stats, summed totals for KDA).
+      5. Average across all of a team's team-matches.
+
+    Returns: {captain_name: {games_played, wins, gpm, xpm, kda, ..., members}}
+    games_played here counts *team matches* (not player-games), and wins is
+    a real team W-L.
+    """
+    from datetime import datetime, timezone, timedelta
+
+    if season_start:
+        season_dt = datetime.fromisoformat(season_start).replace(tzinfo=timezone.utc)
+        season_monday = season_dt - timedelta(days=season_dt.weekday())
+        week_zero_start = season_monday - timedelta(weeks=1)
+        start_ts = int(week_zero_start.timestamp())
+    else:
+        start_ts = 0
+
+    # Rosters: captain → {account_ids}
+    costs = get_player_costs(guild_id, season_start)
+    captain_aids = get_captain_account_ids(guild_id, season_start)
+    rosters: dict[str, set[int]] = {}
+    for aid, c in costs.items():
+        cap = c.get("captain")
+        if not cap:
+            continue
+        rosters.setdefault(cap, set()).add(aid)
+    for cap, cap_aid in captain_aids.items():
+        if cap_aid and cap in rosters:
+            rosters[cap].add(cap_aid)
+    if not rosters:
+        return {}
+
+    # Display-name list per team (for the roster line in the embed).
+    all_stats = {s["account_id"]: s for s in get_all_time_stats(guild_id, season_start)}
+    member_names: dict[str, list[str]] = {}
+    for cap, aids in rosters.items():
+        names = []
+        for aid in aids:
+            s = all_stats.get(aid)
+            names.append((s.get("name") if s else None) or f"Player_{aid}")
+        member_names[cap] = names
+
+    # Pull all the player-rows for this season + their match metadata.
+    with _conn() as conn:
+        rows = conn.execute("""
+            SELECT
+                p.match_id, p.account_id, p.name, p.player_slot,
+                p.kills, p.deaths, p.assists,
+                p.gpm, p.xpm, p.last_hits, p.denies,
+                p.hero_damage, p.hero_healing,
+                p.obs_placed, p.sen_placed,
+                p.observer_kills, p.sentry_kills,
+                p.tower_kills, p.roshans_killed,
+                p.firstblood_claimed, p.teamfight_participation,
+                p.stuns, p.camps_stacked, p.rune_pickups,
+                p.tormentor_kills, p.watcher_captures,
+                p.defensive_item_uses, p.building_damage,
+                p.team_first_tormentor_time,
+                m.radiant_win, m.duration AS match_duration
+            FROM players p
+            JOIN matches m ON p.match_id = m.match_id
+            WHERE m.guild_id = ? AND m.start_time >= ?
+        """, (guild_id, start_ts)).fetchall()
+
+    # Group player-rows by match → radiant/dire.
+    matches: dict[int, dict] = {}
+    for r in rows:
+        d = dict(r)
+        m = matches.setdefault(d["match_id"], {
+            "radiant": [], "dire": [],
+            "radiant_win": d["radiant_win"],
+            "duration":    d["match_duration"],
+        })
+        slot = d.get("player_slot")
+        if slot is None:
+            slot = -1
+        if 0 <= slot < 128:
+            m["radiant"].append(d)
+        elif slot >= 128:
+            m["dire"].append(d)
+
+    # Stats that sum across the 5 players (team totals per match).
+    PER_PLAYER_SUM_KEYS = (
+        "gpm", "last_hits", "denies", "hero_damage", "hero_healing",
+        "tower_kills", "observer_kills", "roshans_killed", "camps_stacked",
+        "rune_pickups", "defensive_item_uses", "tormentor_kills",
+        "watcher_captures", "building_damage",
+    )
+    # Stats kept as the 5-player average (percentages, rates, etc.).
+    PER_PLAYER_AVG_KEYS = ("teamfight_participation", "xpm")
+
+    def _per_match_team_stats(side: list[dict], duration: int) -> dict:
+        n = len(side)
+        out = {}
+        for k in PER_PLAYER_SUM_KEYS:
+            out[k] = sum((p.get(k) or 0) for p in side)
+        for k in PER_PLAYER_AVG_KEYS:
+            out[k] = sum((p.get(k) or 0) for p in side) / max(1, n)
+        tk = sum((p.get("kills") or 0)   for p in side)
+        td = sum((p.get("deaths") or 0)  for p in side)
+        ta = sum((p.get("assists") or 0) for p in side)
+        out["kda"] = (tk + ta) / max(1, td)
+        total_stuns = sum((p.get("stuns") or 0) for p in side)
+        out["stuns_per_min"] = (total_stuns * 60.0 / duration) if duration else 0
+        out["avg_duration"] = duration or 0
+        # First tormentor time: every player on the side carries the same
+        # team_first_tormentor_time, so take the first non-(-1).
+        ftt = next(
+            (p.get("team_first_tormentor_time") for p in side
+             if (p.get("team_first_tormentor_time") or -1) > 0),
+            None,
+        )
+        out["avg_first_tormentor_time"] = ftt
+        # Fantasy points per match: SUM of the 5 players' fp (team total).
+        fps = []
+        for p in side:
+            try:
+                fps.append(_per_match_fp(p))
+            except Exception:
+                pass
+        out["fantasy_points"] = sum(fps) if fps else 0
+        return out
+
+    teams: dict[str, dict] = {}
+    for cap, roster in rosters.items():
+        team_match_stats: list[dict] = []
+        wins = 0
+        for match_id, m in matches.items():
+            r_overlap = sum(1 for p in m["radiant"] if p["account_id"] in roster)
+            d_overlap = sum(1 for p in m["dire"]    if p["account_id"] in roster)
+            side, won = None, False
+            # When both sides have ≥3 of the team (rare — e.g., mixed lobby),
+            # pick the side with the higher overlap.
+            if r_overlap >= 3 and r_overlap >= d_overlap:
+                side, won = m["radiant"], bool(m["radiant_win"])
+            elif d_overlap >= 3:
+                side, won = m["dire"], not bool(m["radiant_win"])
+            if not side or len(side) != 5:
+                continue
+            team_match_stats.append(_per_match_team_stats(side, m["duration"]))
+            if won:
+                wins += 1
+
+        n = len(team_match_stats)
+        if n == 0:
+            continue
+        agg = {
+            "captain":      cap,
+            "team_size":    len(roster),
+            "games_played": n,
+            "wins":         wins,
+            "members":      member_names.get(cap, []),
+        }
+        # Average each per-match stat across team-matches.
+        all_keys: set = set()
+        for tms in team_match_stats:
+            all_keys.update(tms.keys())
+        for k in all_keys:
+            vals = [tms.get(k) for tms in team_match_stats if tms.get(k) is not None]
+            if vals:
+                agg[k] = sum(vals) / len(vals)
+        teams[cap] = agg
+    return teams
+
+
+def get_team_aggregates(guild_id: int, season_start: str) -> dict[str, dict]:
+    """Aggregate season stats by team (keyed by captain name).
+
+    Per-game stats (gpm, kda, hero_damage, etc.) are weighted-averaged by
+    games_played so high-volume players matter more. Wins and games_played
+    are summed.
+
+    Returns: {captain_name: {games_played, wins, gpm, xpm, ...}}
+    Stats that don't aggregate meaningfully (diff, value, attendance) are
+    omitted.
+    """
+    costs = get_player_costs(guild_id, season_start)
+    if not costs:
+        return {}
+    all_stats = {s["account_id"]: s for s in get_all_time_stats(guild_id, season_start)}
+
+    by_captain: dict[str, list[dict]] = {}
+    for aid, c in costs.items():
+        cap = c.get("captain")
+        if not cap:
+            continue
+        s = all_stats.get(aid)
+        if s and (s.get("games_played") or 0) > 0:
+            by_captain.setdefault(cap, []).append(s)
+
+    # Fold the captain's own stats into their team (when we can resolve the
+    # captain name to an account_id).
+    captain_aids = get_captain_account_ids(guild_id, season_start)
+    for cap, cap_aid in captain_aids.items():
+        if not cap_aid or cap not in by_captain:
+            continue
+        if any(m.get("account_id") == cap_aid for m in by_captain[cap]):
+            continue  # captain already counted (shouldn't happen, but safe)
+        s = all_stats.get(cap_aid)
+        if s and (s.get("games_played") or 0) > 0:
+            by_captain[cap].append(s)
+
+    # Per-game stats — weight by games_played.
+    AVG_KEYS = (
+        "gpm", "xpm", "last_hits", "denies", "hero_damage", "hero_healing",
+        "avg_pct_damage", "teamfight_participation", "stuns_per_min",
+        "tower_kills", "observer_kills", "roshans_killed", "camps_stacked",
+        "rune_pickups", "defensive_item_uses", "tormentor_kills",
+        "watcher_captures", "building_damage", "firstblood_claimed",
+        "fantasy_points", "avg_duration",
+    )
+
+    teams: dict[str, dict] = {}
+    for cap, members in by_captain.items():
+        total_games = sum((m.get("games_played") or 0) for m in members)
+        if total_games == 0:
+            continue
+        agg: dict = {
+            "captain":      cap,
+            "team_size":    len(members),
+            "games_played": total_games,
+            "wins":         sum((m.get("wins") or 0) for m in members),
+            "members":      [m.get("name") or f"Player_{m.get('account_id')}" for m in members],
+        }
+        for k in AVG_KEYS:
+            num = sum((m.get(k) or 0) * (m.get("games_played") or 0) for m in members)
+            agg[k] = num / total_games
+        # KDA aggregated from raw totals (not weighted of per-player KDA, which
+        # would mangle the ratio).
+        tk = sum((m.get("total_kills") or 0) for m in members)
+        td = sum((m.get("total_deaths") or 0) for m in members)
+        ta = sum((m.get("total_assists") or 0) for m in members)
+        agg["kda"] = (tk + ta) / max(1, td)
+        agg["total_kills"]   = tk
+        agg["total_deaths"]  = td
+        agg["total_assists"] = ta
+        teams[cap] = agg
+    return teams
 
 
 def get_player_costs(guild_id: int, season_start: str) -> dict[int, dict]:

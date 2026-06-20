@@ -13,12 +13,9 @@ Scoring breakdown (per game played):
                                    (0 deaths = +3.0, 15 deaths = 0, 16+ goes negative)
     Assists                 +0.25  each                    [tweak: pyopendota has 0]
     Last Hits               +0.003 each
-    GPM                     +0.002 per GPM (no baseline)
-    XPM                     +0.001 per XPM (no baseline)  [tweak: not in pyopendota]
-    Tower Kills             +1.0   each
-    Roshan Kills            +0.5   each
-    First Blood             +2.0   if claimed
-    Teamfight Participation +3.0   × participation rate (0–1)
+    GPM                     +0.003 per GPM (no baseline)
+    XPM                     +0.002 per XPM (no baseline)  [tweak: not in pyopendota]
+    Teamfight Participation +5.0   × participation rate (0–1)
     Stuns                   +0.08  per second of stun
     Obs Placed              +0.1   each
     Sen Placed               0     (not scored)
@@ -29,10 +26,15 @@ Scoring breakdown (per game played):
     Denies                  +0.02  each                    [tweak: not in pyopendota]
     Hero Healing            +0.015 per 100                 [tweak: not in pyopendota]
     Hero Damage             +0.01  per 100                 [tweak: not in pyopendota]
+    Building Damage         +0.01  per 100                 [from tower_damage]
     Defensive Item Uses     +0.05  each                    [tweak: not in pyopendota]
         — sum of pipe / crimson / lotus / glimmer / force /
           pavise / solar crest / heaven's halberd / linken's
           activations from OpenDota's item_uses
+
+    REMOVED in favor of more granular signals:
+    - Tower Kills / First Blood / Roshan Kills (zero-weight; building damage
+      now captures objective contribution).
 
 Duration normalisation:
     A linear regression over all stored matches found:
@@ -57,12 +59,9 @@ WEIGHTS = {
     "deaths_per_game":             -0.2,
     "assists_per_game":             0.25,  # tweak: pyopendota has 0
     "last_hits_per_game":           0.003,
-    "gpm":                          0.002,
-    "xpm":                          0.001,  # tweak: not in pyopendota
-    "tower_kills_per_game":         1.0,
-    "roshans_killed_per_game":      0.5,
-    "firstblood_claimed_per_game":  2.0,
-    "teamfight_participation":      3.0,
+    "gpm":                          0.003,
+    "xpm":                          0.002,  # tweak: not in pyopendota
+    "teamfight_participation":      5.0,
     "stuns_per_game":               0.08,
     "obs_placed_per_game":          0.1,
     "sen_placed_per_game":          0.0,
@@ -73,6 +72,7 @@ WEIGHTS = {
     "denies_per_game":              0.02,  # tweak: not in pyopendota
     "healing_per_100":              0.015, # tweak: not in pyopendota
     "damage_per_100":               0.01,  # tweak: not in pyopendota
+    "building_damage_per_100":      0.01,  # tower_damage from OpenDota
     "defensive_item_uses_per_game": 0.05,  # tweak: not in pyopendota
 }
 
@@ -98,13 +98,11 @@ def calculate_fantasy_points(player: dict) -> float:
     xpm                     = player.get("xpm", 0) or 0
     damage                  = player.get("hero_damage", 0) or 0
     healing                 = player.get("hero_healing", 0) or 0
+    building_damage         = player.get("building_damage", 0) or 0
     obs_placed              = player.get("obs_placed", 0) or 0
     sen_placed              = player.get("sen_placed", 0) or 0
     obs_kills               = player.get("observer_kills", 0) or 0
     sen_kills               = player.get("sentry_kills", 0) or 0
-    tower_kills             = player.get("tower_kills", 0) or 0
-    roshans_killed          = player.get("roshans_killed", 0) or 0
-    firstblood_claimed      = player.get("firstblood_claimed", 0) or 0
     teamfight_participation = player.get("teamfight_participation", 0) or 0
     stuns                   = player.get("stuns", 0) or 0
     camps_stacked           = player.get("camps_stacked", 0) or 0
@@ -119,9 +117,6 @@ def calculate_fantasy_points(player: dict) -> float:
     pts += denies                  * WEIGHTS["denies_per_game"]
     pts += gpm                     * WEIGHTS["gpm"]
     pts += xpm                     * WEIGHTS["xpm"]
-    pts += tower_kills             * WEIGHTS["tower_kills_per_game"]
-    pts += roshans_killed          * WEIGHTS["roshans_killed_per_game"]
-    pts += firstblood_claimed      * WEIGHTS["firstblood_claimed_per_game"]
     pts += teamfight_participation * WEIGHTS["teamfight_participation"]
     pts += stuns                   * WEIGHTS["stuns_per_game"]
     pts += obs_placed              * WEIGHTS["obs_placed_per_game"]
@@ -130,8 +125,9 @@ def calculate_fantasy_points(player: dict) -> float:
     pts += sen_kills               * WEIGHTS["sen_kills_per_game"]
     pts += camps_stacked           * WEIGHTS["camps_stacked_per_game"]
     pts += rune_pickups            * WEIGHTS["rune_pickups_per_game"]
-    pts += damage  / 100           * WEIGHTS["damage_per_100"]
-    pts += healing / 100           * WEIGHTS["healing_per_100"]
+    pts += damage          / 100   * WEIGHTS["damage_per_100"]
+    pts += healing         / 100   * WEIGHTS["healing_per_100"]
+    pts += building_damage / 100   * WEIGHTS["building_damage_per_100"]
     pts += defensive_item_uses     * WEIGHTS["defensive_item_uses_per_game"]
 
     # Duration normalisation: subtract the expected pts gained purely from game length.

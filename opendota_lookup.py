@@ -365,7 +365,10 @@ def estimate_mmr_from_rank_tier(
         if leaderboard_rank and leaderboard_rank >= 1:
             mmr = 12745 - 702.1 * math.log(leaderboard_rank)
             return max(lo, int(mmr))
-        return lo
+        # Non-leaderboard Immortal: NA leaderboard tops out around rank 5000
+        # (~6765 MMR), so a generic Immortal sits between the floor (5420)
+        # and that cutoff. Midpoint ≈ 6090; round to 6000.
+        return 6000
     width = hi - lo
     if stars > 0:
         # Star n covers 1/5 of the band; pick its midpoint.
@@ -404,11 +407,19 @@ async def fetch_player_game_counts(account_id: int) -> dict | None:
     try:
         async with aiohttp.ClientSession(timeout=timeout) as session:
             async def fetch_wl(url: str) -> int | None:
-                async with session.get(url) as resp:
-                    if resp.status != 200:
-                        return None
-                    j = await resp.json()
-                    return (j.get("win", 0) or 0) + (j.get("lose", 0) or 0)
+                # One retry on transient failure — OpenDota's /wl endpoints
+                # occasionally 500 or time out under load.
+                for attempt in range(2):
+                    try:
+                        async with session.get(url) as resp:
+                            if resp.status == 200:
+                                j = await resp.json()
+                                return (j.get("win", 0) or 0) + (j.get("lose", 0) or 0)
+                    except Exception:
+                        pass
+                    if attempt == 0:
+                        await asyncio.sleep(0.5)
+                return None
 
             counts = await asyncio.gather(*(fetch_wl(u) for u in urls))
         if any(c is None for c in counts):

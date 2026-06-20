@@ -311,6 +311,7 @@ async def fetch_and_store_matches_for_division(guild_id: int) -> int:
                     "watcher_captures":        ability_uses.get("ability_lamp_use", 0),
                     "team_first_tormentor_time": team_first_tormentor.get(team_num, -1),
                     "defensive_item_uses":     _sum_defensive_item_uses(p),
+                    "building_damage":         p.get("tower_damage", 0) or 0,
                 })
 
             upsert_players(players)
@@ -424,6 +425,7 @@ async def import_match(match_id: int, guild_id: int = 0) -> bool:
             "watcher_captures":       (p.get("ability_uses") or {}).get("ability_lamp_use", 0),
             "team_first_tormentor_time": -1,
             "defensive_item_uses":    _sum_defensive_item_uses(p),
+            "building_damage":        p.get("tower_damage", 0) or 0,
         })
     if players:
         upsert_players(players)

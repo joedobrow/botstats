@@ -17,6 +17,10 @@ ADMIN_USER_ID: int | None = int(os.environ["ADMIN_USER_ID"]) if os.environ.get("
 
 STEAM_API_KEY = os.environ.get("STEAM_API_KEY", "")
 
+# Channels where /lookup is open to anyone (typically admin-only Discord
+# channels). Owner can always use /lookup anywhere.
+LOOKUP_CHANNEL_IDS: set[int] = {1512177911711662272}
+
 # ---------------------------------------------------------------------------
 # Dota 2 constants
 # ---------------------------------------------------------------------------
