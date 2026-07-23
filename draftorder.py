@@ -1,9 +1,9 @@
 """
 Ability Draft order visualization.
 
-Parses windrun.io match data, resolves ability/hero icons via OpenDota
-constants + Dota 2 CDN, and generates a composite image showing the
-snake-draft pick order for all 10 seats.
+Reads draft data from windrun.io's /matches/{id} endpoint and generates a
+composite image showing the snake-draft pick order for all 10 seats. Icons
+come from OpenDota's constants + Dota 2 CDN.
 """
 
 from __future__ import annotations
@@ -11,7 +11,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
-import os
 from io import BytesIO
 from pathlib import Path
 
@@ -19,10 +18,6 @@ import aiohttp
 from PIL import Image, ImageDraw, ImageFont
 
 logger = logging.getLogger(__name__)
-
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
 
 OPENDOTA_BASE = "https://api.opendota.com/api/constants"
 CDN_BASE = "https://cdn.cloudflare.steamstatic.com"
@@ -34,7 +29,6 @@ ROW_HEIGHT = ICON_SIZE + ICON_PAD * 2
 DIVIDER_WIDTH = 40
 PICKS_PER_PLAYER = 5
 
-# Colours
 BG_COLOUR = (30, 30, 36)
 RADIANT_ACCENT = (60, 120, 60)
 DIRE_ACCENT = (120, 50, 50)
@@ -44,10 +38,6 @@ DIVIDER_COLOUR = (80, 80, 90)
 HEADER_COLOUR = (180, 180, 190)
 
 CACHE_DIR = Path(__file__).parent / ".icon_cache"
-
-# ---------------------------------------------------------------------------
-# OpenDota constants cache (populated on first use)
-# ---------------------------------------------------------------------------
 
 _ability_ids: dict[str, str] = {}   # "5462" -> "nyx_assassin_impale"
 _heroes: dict[str, dict] = {}       # "5" -> {name, img, icon, ...}
@@ -79,8 +69,6 @@ async def _load_constants() -> None:
                 else:
                     logger.warning("Failed to load heroes: %d", resp.status)
 
-        # Only mark loaded if we got useful data — if the API was down,
-        # leave _constants_loaded=False so the next request retries.
         if _ability_ids and _heroes:
             _constants_loaded = True
         else:
@@ -91,7 +79,6 @@ async def _load_constants() -> None:
 
 
 def _ability_icon_url(ability_id: int) -> str | None:
-    """Return CDN URL for an ability icon, or None if unknown."""
     name = _ability_ids.get(str(ability_id))
     if not name:
         return None
@@ -99,11 +86,9 @@ def _ability_icon_url(ability_id: int) -> str | None:
 
 
 def _hero_icon_url(hero_id: int) -> str | None:
-    """Return CDN URL for a hero portrait icon, or None if unknown."""
     hero = _heroes.get(str(hero_id))
     if not hero:
         return None
-    # Use the icon field (small portrait), fallback to img
     icon_path = hero.get("icon") or hero.get("img")
     if not icon_path:
         return None
@@ -113,7 +98,6 @@ def _hero_icon_url(hero_id: int) -> str | None:
 def _icon_url_for_pick(ability_id: int) -> tuple[str | None, bool]:
     """
     Return (icon_url, is_hero) for a draft pick.
-
     Negative ability IDs represent hero model picks.
     """
     if ability_id < 0:
@@ -121,47 +105,10 @@ def _icon_url_for_pick(ability_id: int) -> tuple[str | None, bool]:
     return _ability_icon_url(ability_id), False
 
 
-def _ability_icon_url_by_name(ability_name: str) -> str | None:
-    """
-    Return CDN URL for an ability icon given its name string.
-
-    Works directly with replay-parsed ability names (e.g. "morphling_waveform")
-    without needing the OpenDota ability_ids constant lookup.
-    """
-    if not ability_name:
-        return None
-    return f"{CDN_BASE}/apps/dota2/images/dota_react/abilities/{ability_name}.png"
-
-
-def _hero_icon_url_by_name(hero_name: str) -> str | None:
-    """
-    Return CDN URL for a hero portrait given its snake_case name string
-    (e.g. "death_prophet", "faceless_void").
-    """
-    if not hero_name:
-        return None
-    # Standard Dota 2 CDN path for hero portraits
-    return f"{CDN_BASE}/apps/dota2/images/dota_react/heroes/{hero_name}.png"
-
-
-def _icon_url_for_pick_by_name(ability_name: str, pick_type: str) -> str | None:
-    """
-    Return the right CDN URL based on pick_type.
-    """
-    if pick_type == "model":
-        return _hero_icon_url_by_name(ability_name)
-    return _ability_icon_url_by_name(ability_name)
-
-
-# ---------------------------------------------------------------------------
-# Icon downloading with disk cache
-# ---------------------------------------------------------------------------
-
 async def _download_icon(session: aiohttp.ClientSession, url: str) -> Image.Image | None:
     """Download an icon, caching to disk. Returns a PIL Image or None."""
     CACHE_DIR.mkdir(exist_ok=True)
 
-    # Use URL hash as cache filename
     url_hash = hashlib.md5(url.encode()).hexdigest()
     cache_path = CACHE_DIR / f"{url_hash}.png"
 
@@ -200,22 +147,18 @@ def _make_placeholder(size: int = ICON_SIZE) -> Image.Image:
     return img
 
 
-# ---------------------------------------------------------------------------
-# Draft order parsing
-# ---------------------------------------------------------------------------
-
 def _parse_draft_order(match_data: dict) -> list[dict]:
     """
     Parse windrun match data into per-seat draft sequences.
 
-    Returns a list of 10 dicts sorted by seat number:
-        {seat, player_name, team, picks: [{ability_id, is_hero, pick_order}]}
+    Returns a list of 10 dicts (in draft-order seat sequence):
+        {seat, player_name, team, kills, deaths, assists,
+         picks: [{ability_id, is_hero, pick_order}]}
     """
     picks = match_data.get("picks", [])
     radiant = match_data.get("radiant", [])
     dire = match_data.get("dire", [])
 
-    # Build lookups: ability_id -> (player_name, team), player_name -> stats
     ability_owner: dict[int, tuple[str, str]] = {}
     player_stats: dict[str, dict] = {}
     for player in radiant:
@@ -235,8 +178,7 @@ def _parse_draft_order(match_data: dict) -> list[dict]:
             "assists": player.get("assists", 0),
         }
 
-    # Assign picks to players in draft order
-    player_picks: dict[str, list[dict]] = {}  # player_name -> list of picks
+    player_picks: dict[str, list[dict]] = {}
     player_team: dict[str, str] = {}
 
     for pick in sorted(picks, key=lambda p: p["pickOrder"]):
@@ -254,8 +196,7 @@ def _parse_draft_order(match_data: dict) -> list[dict]:
             "pick_order": pick["pickOrder"],
         })
 
-    # Determine seat order: seat 1 = whoever picked first, etc.
-    # The first 10 picks (round 1) determine seat order
+    # Seat order = order in which players made their first pick.
     seat_order: list[str] = []
     seen = set()
     for pick in sorted(picks, key=lambda p: p["pickOrder"]):
@@ -283,12 +224,7 @@ def _parse_draft_order(match_data: dict) -> list[dict]:
     return result
 
 
-# ---------------------------------------------------------------------------
-# Image generation
-# ---------------------------------------------------------------------------
-
 def _try_load_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
-    """Try to load a nice font, falling back to default."""
     font_paths = [
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
         "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
@@ -309,29 +245,19 @@ async def _render_draft_image(
     radiant_win: bool,
 ) -> BytesIO:
     """
-    Core rendering logic \u2014 shared by both windrun and DB code paths.
-
     seats: list of 10 dicts, each with keys:
         seat, player_name, team, kills, deaths, assists,
         picks: [{ability_id, is_hero, pick_order}]
     Returns a BytesIO containing a PNG image.
     """
-    # Collect all icon URLs we need to download.
-    # Picks may carry a pre-resolved "icon_url" (DB path) or rely on ability_id (windrun path).
-    all_picks_with_urls: list[tuple[int, str | None, bool]] = []
+    unique_urls: set[str] = set()
     for seat in seats:
         for pick in seat["picks"]:
-            if "icon_url" in pick:
-                url = pick["icon_url"]
-                is_hero = pick.get("is_hero", False)
-            else:
-                url, is_hero = _icon_url_for_pick(pick.get("ability_id", 0))
-            all_picks_with_urls.append((pick.get("ability_id", 0), url, is_hero))
+            url, _ = _icon_url_for_pick(pick.get("ability_id", 0))
+            if url:
+                unique_urls.add(url)
 
-    # Download all icons concurrently
-    unique_urls = {url for _, url, _ in all_picks_with_urls if url}
     icons: dict[str, Image.Image] = {}
-
     timeout = aiohttp.ClientTimeout(total=30)
     async with aiohttp.ClientSession(timeout=timeout) as session:
         tasks = {url: asyncio.create_task(_download_icon(session, url)) for url in unique_urls}
@@ -342,10 +268,9 @@ async def _render_draft_image(
 
     placeholder = _make_placeholder()
 
-    # Calculate image dimensions
     cell_width = NAME_WIDTH + (ICON_SIZE + ICON_PAD) * PICKS_PER_PLAYER + ICON_PAD
     img_width = cell_width * 2 + DIVIDER_WIDTH
-    num_rows = 5  # 10 seats in 5 paired rows
+    num_rows = 5
     title_height = 52
     img_height = title_height + num_rows * ROW_HEIGHT + ICON_PAD
 
@@ -356,12 +281,10 @@ async def _render_draft_image(
     font_small = _try_load_font(15)
     font_title = _try_load_font(28)
 
-    # Title
     winner = "Radiant" if radiant_win else "Dire"
     title = f"Match {match_id}, Winner: {winner}"
     draw.text((img_width // 2, 12), title, fill=HEADER_COLOUR, font=font_title, anchor="mt")
 
-    # Draw each row (pair of seats)
     for row_idx in range(num_rows):
         left_seat_idx = row_idx * 2
         right_seat_idx = row_idx * 2 + 1
@@ -376,27 +299,20 @@ async def _render_draft_image(
             team = seat["team"]
             accent = RADIANT_ACCENT if team == "radiant" else DIRE_ACCENT
 
-            if side == "left":
-                x_start = 0
-            else:
-                x_start = cell_width + DIVIDER_WIDTH
+            x_start = 0 if side == "left" else cell_width + DIVIDER_WIDTH
 
-            # Team accent bar
             draw.rectangle(
                 [x_start, y, x_start + 3, y + ROW_HEIGHT - 1],
                 fill=accent,
             )
 
-            # Player name
             name_x = x_start + 8
             name_y = y + (ROW_HEIGHT - 18) // 2
-            # Truncate name if too long
             display_name = seat["player_name"]
             if len(display_name) > 12:
-                display_name = display_name[:11] + "\u2026"
+                display_name = display_name[:11] + "…"
             draw.text((name_x, name_y), display_name, fill=TEXT_COLOUR, font=font)
 
-            # KDA line
             kda_str = f"{seat['kills']}/{seat['deaths']}/{seat['assists']}"
             draw.text(
                 (name_x, name_y - 17),
@@ -405,24 +321,17 @@ async def _render_draft_image(
                 font=font_small,
             )
 
-            # Draw pick icons
             icon_x = x_start + NAME_WIDTH
             icon_y = y + ICON_PAD
 
             for pick in seat["picks"]:
-                if "icon_url" in pick:
-                    url = pick["icon_url"]
-                    is_hero = pick.get("is_hero", False)
-                else:
-                    url, is_hero = _icon_url_for_pick(pick.get("ability_id", 0))
+                url, _ = _icon_url_for_pick(pick.get("ability_id", 0))
                 icon_img = icons.get(url) if url else None
                 if not icon_img:
                     icon_img = placeholder
 
-                # Resize icon
                 resized = icon_img.resize((ICON_SIZE, ICON_SIZE), Image.Resampling.LANCZOS)
 
-                # Hero model picks get a gold border
                 if pick["is_hero"]:
                     border_size = 2
                     bordered = Image.new(
@@ -431,14 +340,12 @@ async def _render_draft_image(
                         HERO_BORDER_COLOUR + (255,),
                     )
                     bordered.paste(resized, (border_size, border_size))
-                    # Paste bordered icon (slightly offset to account for border)
                     img.paste(bordered, (icon_x - border_size, icon_y - border_size), bordered)
                 else:
                     img.paste(resized, (icon_x, icon_y), resized)
 
                 icon_x += ICON_SIZE + ICON_PAD
 
-        # Divider between left and right seats
         div_x = cell_width + DIVIDER_WIDTH // 2
         draw.line(
             [(div_x, y + 4), (div_x, y + ROW_HEIGHT - 4)],
@@ -446,7 +353,6 @@ async def _render_draft_image(
             width=1,
         )
 
-    # Convert to PNG bytes
     output = BytesIO()
     final = img.convert("RGB")
     final.save(output, "PNG")
@@ -457,8 +363,6 @@ async def _render_draft_image(
 async def generate_draft_image(match_data: dict) -> BytesIO:
     """
     Generate a draft order visualization image from windrun.io match data.
-
-    Returns a BytesIO containing a PNG image.
     """
     await _load_constants()
 
@@ -469,65 +373,3 @@ async def generate_draft_image(match_data: dict) -> BytesIO:
     match_id = match_data.get("matchId", "?")
     radiant_win = bool(match_data.get("radiantWin"))
     return await _render_draft_image(seats, match_id, radiant_win)
-
-
-async def generate_draft_image_from_db(match_id: int, data: dict) -> BytesIO:
-
-    """
-    Generate a draft order visualization image from local DB data.
-
-    data is the dict returned by db.get_draft_picks_for_display():
-        {
-          'radiant_win': bool,
-          'picks': [{'pick_order', 'ability_id', 'player_id'}, ...],
-          'players_by_seat': {0..9: {'name', 'kills', 'deaths', 'assists'}}
-        }
-
-    Returns a BytesIO containing a PNG image.
-    """
-    await _load_constants()
-
-    picks = data["picks"]
-    players_by_seat = data["players_by_seat"]
-    radiant_win = data["radiant_win"]
-
-    # Build the same seats structure that _render_draft_image expects.
-    # DB picks carry ability_name (e.g. "morphling_waveform" or "death_prophet"
-    # for models) and pick_type ("ability" or "model"). We pre-resolve the CDN
-    # URL based on type so _render_draft_image doesn't need to know.
-    seats = []
-    for seat_num in range(10):
-        player = players_by_seat.get(seat_num, {})
-        seat_picks = [
-            {
-                "ability_name": p.get("ability_name", ""),
-                "icon_url": _icon_url_for_pick_by_name(
-                    p.get("ability_name", ""),
-                    p.get("pick_type", "ability"),
-                ),
-                "is_hero": p.get("pick_type") == "model",
-                "pick_order": p["pick_order"],
-            }
-            for p in picks
-            if p["player_id"] == seat_num
-        ]
-        seat_picks.sort(key=lambda p: p["pick_order"])
-
-        seats.append({
-            "seat": seat_num + 1,
-            "player_name": player.get("name", f"Seat {seat_num}"),
-            "team": "radiant" if seat_num < 5 else "dire",
-            "picks": seat_picks,
-            "kills": player.get("kills", 0),
-            "deaths": player.get("deaths", 0),
-            "assists": player.get("assists", 0),
-        })
-
-    # seats[0-4] = radiant (player_slots 0-4), seats[5-9] = dire (player_slots 128-132).
-    # Interleave so the renderer pairs each radiant seat with the matching dire seat:
-    # [r0,d0, r1,d1, r2,d2, r3,d3, r4,d4] → row N = (radiant N, dire N).
-    radiant_seats = seats[:5]
-    dire_seats = seats[5:]
-    ordered = [s for pair in zip(radiant_seats, dire_seats) for s in pair]
-
-    return await _render_draft_image(ordered, match_id, radiant_win)

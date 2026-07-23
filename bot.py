@@ -6,7 +6,7 @@ import logging
 from datetime import datetime, timezone, timedelta
 
 from config import DISCORD_TOKEN, ADMIN_USER_ID, REGION_CLUSTERS, GAME_MODE_FILTERS, LOOKUP_CHANNEL_IDS
-from fetcher import fetch_and_store_matches_for_division, fetch_and_store_drafts_for_guild
+from fetcher import fetch_and_store_matches_for_division
 from db import init_db, get_division, upsert_division, get_all_divisions, get_scold_channel
 from formatters import format_leaderboard, format_player_stats, format_team_stats
 
@@ -166,7 +166,7 @@ async def config(
     app_commands.Choice(name="Teamfight Participation", value="teamfight_participation"),
     app_commands.Choice(name="Defensive Item Uses",     value="defensive_item_uses"),
     app_commands.Choice(name="Tower Kills",             value="tower_kills"),
-    app_commands.Choice(name="Observer Kills",          value="observer_kills"),
+    app_commands.Choice(name="Observer Kills/min",      value="observer_kills_per_min"),
     app_commands.Choice(name="Roshans Killed",          value="roshans_killed"),
     app_commands.Choice(name="Camp Stacks",             value="camps_stacked"),
     app_commands.Choice(name="Rune Pickups",            value="rune_pickups"),
@@ -298,13 +298,75 @@ async def player(interaction: discord.Interaction, name: str, week: int = None, 
                 rating = adj["adjusted_rating"]
 
         if match_row is None:
-            # No matches in this guild — still surface the rating, links, and ID.
-            display = (
+            # No matches in this guild — still surface the rating, links, and
+            # ID. If we have no cached rating, fall back to a live API lookup
+            # (best-effort; nothing saved to the DB).
+            avatar_url: str | None = (cache_row or {}).get("avatar_url")
+            display_name = (
                 (cache_row or {}).get("override_nickname")
                 or (cache_row or {}).get("name")
                 or resolved_name
-                or f"Account {account_id}"
             )
+
+            if rating is None:
+                try:
+                    from windrun import fetch_player as fetch_windrun_player
+                    from opendota_lookup import (
+                        fetch_player_profile, fetch_player_game_counts,
+                        estimate_mmr_from_rank_tier,
+                    )
+                    from db import get_skill_override
+                    from formatters import _resolve_internal_rating
+                    import asyncio as _asyncio
+                    results = await _asyncio.gather(
+                        fetch_windrun_player(account_id),
+                        fetch_player_profile(account_id),
+                        fetch_player_game_counts(account_id),
+                        return_exceptions=True,
+                    )
+                    wr, od, od_counts = (
+                        None if isinstance(r, Exception) else r for r in results
+                    )
+                    from formatters import windrun_rating_for_formula, sanitize_od_counts
+                    od_counts = sanitize_od_counts(od, od_counts)
+                    override = get_skill_override(account_id)
+                    raw_wr = (wr or {}).get("rating")
+                    formula_wr = windrun_rating_for_formula(wr)
+                    rank_tier = (od or {}).get("rank_tier")
+                    lb_rank   = (od or {}).get("leaderboard_rank")
+                    mmr_est = estimate_mmr_from_rank_tier(rank_tier, lb_rank)
+                    eff_wr  = (override["windrun_rating"]
+                               if override and override.get("windrun_rating") is not None
+                               else formula_wr)
+                    eff_mmr = (override["ranked_mmr"]
+                               if override and override.get("ranked_mmr") is not None
+                               else mmr_est)
+                    ad_last = (od_counts or {}).get("last_year_ad")
+                    ad_all  = (od_counts or {}).get("all_time_ad")
+                    ranked_last = (od_counts or {}).get("last_year_ranked")
+                    ranked_all  = (od_counts or {}).get("all_time_ranked")
+                    info = _resolve_internal_rating(
+                        override=override,
+                        ad_last=ad_last, ad_all=ad_all,
+                        ranked_last=ranked_last, ranked_all=ranked_all,
+                        wr_rating=eff_wr, ranked_mmr=eff_mmr,
+                    )
+                    if info:
+                        rating = info[0]
+                    if not display_name:
+                        display_name = (
+                            (wr or {}).get("nickname")
+                            or ((od or {}).get("profile") or {}).get("personaname")
+                        )
+                    if not avatar_url:
+                        avatar_url = (
+                            ((od or {}).get("profile") or {}).get("avatarfull")
+                            or (wr or {}).get("avatar")
+                        )
+                except Exception:
+                    logger.exception("Live lookup failed in /player for %d", account_id)
+
+            display = display_name or f"Account {account_id}"
             from formatters import EMBED_COLOUR_BLUE
             title = f"🎮 {display}"
             if rating is not None:
@@ -317,11 +379,19 @@ async def player(interaction: discord.Interaction, name: str, week: int = None, 
                 description=f"No matches in this server for {week_label.lower()}.",
                 colour=EMBED_COLOUR_BLUE,
             )
+            if avatar_url:
+                embed.set_thumbnail(url=avatar_url)
             embed.add_field(
                 name="🔗 Profiles",
                 value=f"[Dotabuff]({dotabuff_url}) · [Windrun]({windrun_url})",
                 inline=False,
             )
+            if (cache_row or {}).get("fh_unavailable"):
+                embed.add_field(
+                    name="⚠️ Match history hidden",
+                    value="Steam match history is private, so game counts are unavailable.",
+                    inline=False,
+                )
             embed.set_footer(text=f"Account ID: {account_id}")
             await interaction.followup.send(embed=embed)
             return
@@ -332,6 +402,12 @@ async def player(interaction: discord.Interaction, name: str, week: int = None, 
             match_row, week_label=week_label, debug=debug, rating=rating,
             qualified_pool=qualified_pool,
         )
+        if (cache_row or {}).get("fh_unavailable"):
+            embed.add_field(
+                name="⚠️ Match history hidden",
+                value="Steam match history is private, so OpenDota game counts are unavailable.",
+                inline=False,
+            )
         await interaction.followup.send(embed=embed)
     except Exception as e:
         logger.exception(f"Error in player command for week {week}")
@@ -384,12 +460,471 @@ async def team_stats(interaction: discord.Interaction, name: str):
         )
         return
 
+    from team_metadata import get_team_info
+    team_label = get_team_info(captain).get("team_name") or captain
     embed = format_team_stats(
-        team_label=captain,  # captain name used as team label until proper team names are wired in
+        team_label=team_label,
         target_agg=target_agg,
         all_team_aggs=list(team_aggs.values()),
     )
     await interaction.followup.send(embed=embed)
+
+
+# Shortened stat labels for stream-card display only. Falls back to the
+# long label when no shortening is defined.
+_CARD_SHORT_LABELS: dict[str, str] = {
+    "Fantasy Points":            "Fantasy Pts",
+    "Fantasy Diff vs Teammates": "FP Diff",
+    "GPM":                       "GPM",
+    "XPM":                       "XPM",
+    "KDA":                       "KDA",
+    "Last Hits/game":            "Avg Last Hits",
+    "Denies/game":               "Avg Denies",
+    "Hero Damage/game":          "Avg Hero Dmg",
+    "Damage Share %":            "Dmg Share %",
+    "Hero Healing/game":         "Avg Hero Heal",
+    "Teamfight %":               "TF Part %",
+    "Stuns/Min":                 "Stuns/Min",
+    "Tower Kills/game":          "Avg Towers",
+    "Obs Kills/Min":             "Obs Kills/Min",
+    "Roshans Killed/game":       "Avg Roshes",
+    "Camp Stacks/game":          "Avg Stacks",
+    "Rune Pickups/game":         "Avg Runes",
+    "Defensive Item Uses/game":  "Avg Def Items",
+    "Tormentor Kills/game":      "Avg Tormentors",
+    "Watcher Captures/game":     "Avg Watchers",
+    "Building Damage/game":      "Avg Bld Dmg",
+    "First Blood Rate":          "First Blood %",
+    "Avg Game Length":           "Avg Game Len",
+    "First Tormentor Time":      "1st Torm Time",
+}
+
+
+def _clean_card_line(line: str) -> str:
+    """Strip markdown, drop the word 'rank', and shorten the stat label
+    for the streamcard display."""
+    s = line.replace("**", "").replace("(rank ", "(")
+    if ":" in s:
+        label, rest = s.split(":", 1)
+        short = _CARD_SHORT_LABELS.get(label.strip(), label.strip())
+        s = f"{short}:{rest}"
+    return s
+
+
+@tree.command(name="player_card", description="Render a stream-friendly PNG card for a player")
+@app_commands.describe(name="Player name (partial), override nickname, or numeric account ID")
+async def player_card(interaction: discord.Interaction, name: str):
+    await interaction.response.defer()
+    division = _require_division(interaction)
+    if not division:
+        await interaction.followup.send("⚠️ No division configured.", ephemeral=True)
+        return
+
+    account_id, resolved_name, err = await _resolve_player_query(interaction, name)
+    if err:
+        await interaction.followup.send(err, ephemeral=True)
+        return
+
+    from db import (
+        get_all_time_stats, get_rating_cache_row, compute_fantasy_adjusted_ratings,
+    )
+    from formatters import _compute_strengths_weaknesses
+    from streamcards import render_player_card, fetch_avatar
+
+    stats = get_all_time_stats(interaction.guild_id, division["season_start"])
+    target = next((s for s in stats if s.get("account_id") == account_id), None)
+    if target is None:
+        await interaction.followup.send(
+            f"⚠️ `{resolved_name or account_id}` has no league matches here yet.",
+            ephemeral=True,
+        )
+        return
+
+    # Rating (fantasy-adjusted, matches /player + /lookup)
+    rating: int | None = None
+    cache_row = get_rating_cache_row(account_id)
+    if cache_row and cache_row.get("internal_rating") is not None:
+        rating = cache_row["internal_rating"]
+        adjustments = compute_fantasy_adjusted_ratings(
+            interaction.guild_id, division["season_start"],
+        )
+        adj = adjustments.get(account_id)
+        if adj:
+            rating = adj["adjusted_rating"]
+
+    # Strengths/weaknesses (max 3 each)
+    pool = [s for s in stats if (s.get("games_played") or 0) >= 5]
+    strengths, weaknesses = _compute_strengths_weaknesses(target, pool)
+    strengths = [_clean_card_line(s) for s in strengths[:3]]
+    weaknesses = [_clean_card_line(s) for s in weaknesses[:3]]
+
+    cr = cache_row or {}
+    avatar_url = None if cr.get("hide_avatar") else cr.get("avatar_url")
+    avatar = await fetch_avatar(avatar_url)
+
+    games = target.get("games_played", 0) or 0
+    wins  = target.get("wins", 0) or 0
+    losses = games - wins
+    from config import ROLE_LABELS as _ROLE
+    full_role = _ROLE.get(target.get("role_position"), "—")
+    # Strip the "(Pos N)" suffix for a cleaner card label.
+    role = full_role.split(" (")[0]
+    display_name = (
+        ((cache_row or {}).get("override_nickname"))
+        or target.get("name") or resolved_name or f"Player_{account_id}"
+    )
+
+    buf = render_player_card(
+        name=display_name,
+        rating=rating,
+        role=role,
+        wins=wins, losses=losses, games=games,
+        strengths=strengths, weaknesses=weaknesses,
+        avatar=avatar, account_id=account_id,
+    )
+    await interaction.followup.send(
+        file=discord.File(buf, filename=f"player_{account_id}.png"),
+    )
+
+
+@tree.command(name="team_card", description="Render a stream-friendly PNG card for a player's team")
+@app_commands.describe(name="Any player on the team — partial name, override nickname, or numeric account ID")
+async def team_card(interaction: discord.Interaction, name: str):
+    await interaction.response.defer()
+    division = _require_division(interaction)
+    if not division:
+        await interaction.followup.send("⚠️ No division configured.", ephemeral=True)
+        return
+
+    account_id, resolved_name, err = await _resolve_player_query(interaction, name)
+    if err:
+        await interaction.followup.send(err, ephemeral=True)
+        return
+
+    from db import (
+        get_player_costs, get_team_match_aggregates, get_captain_account_ids,
+        get_rating_cache_row, get_all_time_stats,
+    )
+    from formatters import _compute_strengths_weaknesses, _TEAM_NOTABLE_STATS
+    from streamcards import render_team_card, fetch_avatar
+    import asyncio
+
+    costs = get_player_costs(interaction.guild_id, division["season_start"])
+    target_cost = costs.get(account_id)
+    captain: str | None = None
+    if target_cost and target_cost.get("captain"):
+        captain = target_cost["captain"]
+    else:
+        cap_aids = get_captain_account_ids(interaction.guild_id, division["season_start"])
+        for cap_name, cap_aid in cap_aids.items():
+            if cap_aid == account_id:
+                captain = cap_name
+                break
+    if not captain:
+        await interaction.followup.send(
+            f"⚠️ `{resolved_name or account_id}` isn't on a team this season.",
+            ephemeral=True,
+        )
+        return
+
+    team_aggs = get_team_match_aggregates(interaction.guild_id, division["season_start"])
+    target_agg = team_aggs.get(captain)
+    if not target_agg:
+        await interaction.followup.send(f"⚠️ Team `{captain}` has no game data yet.", ephemeral=True)
+        return
+
+    # Build member list (in roster order: drafted players then captain).
+    cap_aids = get_captain_account_ids(interaction.guild_id, division["season_start"])
+    captain_aid = cap_aids.get(captain)
+    drafted_aids = [aid for aid, c in costs.items() if c.get("captain") == captain]
+    roster_aids = drafted_aids + ([captain_aid] if captain_aid else [])
+
+    # Per-player role_position comes from the stats query.
+    stats_by_aid = {
+        s["account_id"]: s
+        for s in get_all_time_stats(interaction.guild_id, division["season_start"])
+    }
+
+    # Pull cache rows for names + avatars in one go.
+    members: list[dict] = []
+    avatar_tasks = []
+    for aid in roster_aids:
+        cr = get_rating_cache_row(aid) or {}
+        s = stats_by_aid.get(aid) or {}
+        av_url = None if cr.get("hide_avatar") else cr.get("avatar_url")
+        members.append({
+            "account_id": aid,
+            "name": cr.get("override_nickname") or cr.get("name") or f"Player_{aid}",
+            "is_captain": aid == captain_aid,
+            "role_position": s.get("role_position"),
+            "avatar_url": av_url,
+            "avatar": None,
+        })
+        avatar_tasks.append(fetch_avatar(av_url))
+    avatars = await asyncio.gather(*avatar_tasks)
+    for m, av in zip(members, avatars):
+        m["avatar"] = av
+
+    # Strengths/weaknesses, same data path as /team_stats.
+    strengths, weaknesses = _compute_strengths_weaknesses(
+        target_agg, list(team_aggs.values()), stat_list=_TEAM_NOTABLE_STATS,
+    )
+    strengths = [_clean_card_line(s) for s in strengths[:3]]
+    weaknesses = [_clean_card_line(s) for s in weaknesses[:3]]
+
+    games = target_agg.get("games_played", 0) or 0
+    wins  = target_agg.get("wins", 0) or 0
+    losses = games - wins
+
+    from team_metadata import get_team_info
+    info = get_team_info(captain)
+    team_label = info.get("team_name") or captain
+    # Logo URL: RD2L first, captain avatar as fallback.
+    logo_url = info.get("logo_url")
+    if not logo_url:
+        for m in members:
+            if m.get("is_captain") and m.get("avatar_url"):
+                logo_url = m["avatar_url"]
+                break
+    team_logo = await fetch_avatar(logo_url, size=160)
+
+    buf = render_team_card(
+        team_label=team_label,
+        members=members,
+        wins=wins, losses=losses, games=games,
+        strengths=strengths, weaknesses=weaknesses,
+        avg_duration=target_agg.get("avg_duration"),
+        team_logo=team_logo,
+    )
+    await interaction.followup.send(
+        file=discord.File(buf, filename=f"team_{captain}.png"),
+    )
+
+
+@tree.command(name="h2h_card", description="Render a head-to-head PNG card for two teams")
+@app_commands.describe(
+    team1="Any player on team 1 (or the captain's name)",
+    team2="Any player on team 2 (or the captain's name)",
+)
+async def h2h_card(interaction: discord.Interaction, team1: str, team2: str):
+    await interaction.response.defer()
+
+    division = _require_division(interaction)
+    if not division:
+        await interaction.followup.send("⚠️ No division configured.", ephemeral=True)
+        return
+
+    from db import (
+        get_player_costs, get_captain_account_ids, get_team_match_aggregates,
+        get_rating_cache_row, get_all_time_stats, get_head_to_head_matches,
+    )
+    from streamcards import render_h2h_card, fetch_avatar
+    import asyncio
+
+    guild_id = interaction.guild_id
+    season_start = division["season_start"]
+
+    async def _resolve_to_captain(player_input: str) -> tuple[str | None, str]:
+        """Return (captain_name, error_msg). Captain string sentinel."""
+        aid, resolved_name, err = await _resolve_player_query(interaction, player_input)
+        if err:
+            return None, err
+        costs = get_player_costs(guild_id, season_start)
+        if costs.get(aid) and costs[aid].get("captain"):
+            return costs[aid]["captain"], ""
+        cap_aids = get_captain_account_ids(guild_id, season_start)
+        for cap_name, cap_aid in cap_aids.items():
+            if cap_aid == aid:
+                return cap_name, ""
+        return None, f"⚠️ `{resolved_name or aid}` isn't on a team this season."
+
+    cap_a, err_a = await _resolve_to_captain(team1)
+    if err_a:
+        await interaction.followup.send(err_a, ephemeral=True); return
+    cap_b, err_b = await _resolve_to_captain(team2)
+    if err_b:
+        await interaction.followup.send(err_b, ephemeral=True); return
+    if cap_a == cap_b:
+        await interaction.followup.send("⚠️ Same team on both sides.", ephemeral=True); return
+
+    team_aggs = get_team_match_aggregates(guild_id, season_start)
+    agg_a = team_aggs.get(cap_a)
+    agg_b = team_aggs.get(cap_b)
+    if not agg_a or not agg_b:
+        await interaction.followup.send("⚠️ One of the teams has no match data yet.", ephemeral=True)
+        return
+
+    costs = get_player_costs(guild_id, season_start)
+    cap_aids = get_captain_account_ids(guild_id, season_start)
+    stats_by_aid = {s["account_id"]: s for s in get_all_time_stats(guild_id, season_start)}
+
+    async def _build_members(captain: str) -> list[dict]:
+        cap_aid = cap_aids.get(captain)
+        drafted_aids = [aid for aid, c in costs.items() if c.get("captain") == captain]
+        roster_aids = drafted_aids + ([cap_aid] if cap_aid else [])
+        members: list[dict] = []
+        tasks = []
+        for aid in roster_aids:
+            cr = get_rating_cache_row(aid) or {}
+            s = stats_by_aid.get(aid) or {}
+            av_url = None if cr.get("hide_avatar") else cr.get("avatar_url")
+            members.append({
+                "account_id": aid,
+                "name": cr.get("override_nickname") or cr.get("name") or f"Player_{aid}",
+                "is_captain": aid == cap_aid,
+                "role_position": s.get("role_position"),
+                "avatar_url": av_url,
+                "avatar": None,
+            })
+            tasks.append(fetch_avatar(av_url))
+        avatars = await asyncio.gather(*tasks)
+        for m, av in zip(members, avatars):
+            m["avatar"] = av
+        return members
+
+    members_a, members_b = await asyncio.gather(_build_members(cap_a), _build_members(cap_b))
+
+    record_a = (int(agg_a.get("wins", 0) or 0), int((agg_a.get("games_played", 0) or 0) - (agg_a.get("wins", 0) or 0)))
+    record_b = (int(agg_b.get("wins", 0) or 0), int((agg_b.get("games_played", 0) or 0) - (agg_b.get("wins", 0) or 0)))
+
+    history = get_head_to_head_matches(guild_id, season_start, cap_a, cap_b)
+
+    # Map captain → real team name + logo URL (from RD2L). When a team has no
+    # registered logo, fall back to the captain's Steam avatar.
+    from team_metadata import get_team_info
+    info_a = get_team_info(cap_a)
+    info_b = get_team_info(cap_b)
+
+    def _logo_url_for(info: dict, members: list[dict]) -> str | None:
+        if info.get("logo_url"):
+            return info["logo_url"]
+        for m in members:
+            if m.get("is_captain") and m.get("avatar_url"):
+                return m["avatar_url"]
+        return None
+
+    logo_a, logo_b = await asyncio.gather(
+        fetch_avatar(_logo_url_for(info_a, members_a), size=160),
+        fetch_avatar(_logo_url_for(info_b, members_b), size=160),
+    )
+
+    buf = render_h2h_card(
+        team_a_label=info_a["team_name"], team_a_record=record_a,
+        team_a_members=members_a, team_a_agg=agg_a,
+        team_b_label=info_b["team_name"], team_b_record=record_b,
+        team_b_members=members_b, team_b_agg=agg_b,
+        history=history,
+        team_a_logo=logo_a, team_b_logo=logo_b,
+    )
+    await interaction.followup.send(
+        file=discord.File(buf, filename=f"h2h_{cap_a}_vs_{cap_b}.png"),
+    )
+
+
+@tree.command(name="h2h_player", description="Render a head-to-head PNG card comparing two players")
+@app_commands.describe(
+    player1="First player (partial name, override nickname, or numeric account ID)",
+    player2="Second player (partial name, override nickname, or numeric account ID)",
+)
+async def h2h_player(interaction: discord.Interaction, player1: str, player2: str):
+    await interaction.response.defer()
+    division = _require_division(interaction)
+    if not division:
+        await interaction.followup.send("⚠️ No division configured.", ephemeral=True)
+        return
+
+    from db import (
+        get_all_time_stats, get_rating_cache_row, compute_fantasy_adjusted_ratings,
+    )
+    from streamcards import (
+        render_h2h_player_card, fetch_avatar, compute_h2h_stat_rows,
+    )
+    import asyncio
+
+    aid_a, resolved_a, err_a = await _resolve_player_query(interaction, player1)
+    if err_a:
+        await interaction.followup.send(err_a, ephemeral=True); return
+    aid_b, resolved_b, err_b = await _resolve_player_query(interaction, player2)
+    if err_b:
+        await interaction.followup.send(err_b, ephemeral=True); return
+    if aid_a == aid_b:
+        await interaction.followup.send("⚠️ Same player on both sides.", ephemeral=True); return
+
+    stats = get_all_time_stats(interaction.guild_id, division["season_start"])
+    row_a = next((s for s in stats if s.get("account_id") == aid_a), None)
+    row_b = next((s for s in stats if s.get("account_id") == aid_b), None)
+    if row_a is None or row_b is None:
+        missing = resolved_a if row_a is None else resolved_b
+        await interaction.followup.send(
+            f"⚠️ `{missing}` has no league matches here yet.", ephemeral=True,
+        )
+        return
+
+    # Rank stats by |z-diff| across a 5-game-minimum pool. Both target players
+    # are included in the pool regardless of games played so we never miss
+    # a stat because they're new.
+    pool = [s for s in stats if (s.get("games_played") or 0) >= 5]
+    pool_ids = {s["account_id"] for s in pool}
+    for r in (row_a, row_b):
+        if r["account_id"] not in pool_ids:
+            pool.append(r)
+    stat_rows = compute_h2h_stat_rows(row_a, row_b, pool, top_n=8)
+
+    # Ratings: prefer fantasy-adjusted, fall back to raw internal_rating.
+    adjustments = compute_fantasy_adjusted_ratings(
+        interaction.guild_id, division["season_start"],
+    )
+
+    def _rating_for(aid: int) -> int | None:
+        cr = get_rating_cache_row(aid) or {}
+        raw = cr.get("internal_rating")
+        if raw is None:
+            return None
+        adj = adjustments.get(aid)
+        return adj["adjusted_rating"] if adj else raw
+
+    rating_a = _rating_for(aid_a)
+    rating_b = _rating_for(aid_b)
+
+    from config import ROLE_LABELS as _ROLE
+
+    def _display(row: dict, aid: int, fallback_name: str) -> tuple[str, str, int, int]:
+        cr = get_rating_cache_row(aid) or {}
+        games = row.get("games_played", 0) or 0
+        wins = row.get("wins", 0) or 0
+        losses = games - wins
+        full_role = _ROLE.get(row.get("role_position"), "—")
+        role = full_role.split(" (")[0]
+        name = (
+            cr.get("override_nickname")
+            or row.get("name")
+            or fallback_name
+            or f"Player_{aid}"
+        )
+        return name, role, wins, losses
+
+    name_a, role_a, wins_a, losses_a = _display(row_a, aid_a, resolved_a)
+    name_b, role_b, wins_b, losses_b = _display(row_b, aid_b, resolved_b)
+
+    cr_a = get_rating_cache_row(aid_a) or {}
+    cr_b = get_rating_cache_row(aid_b) or {}
+    av_a_url = None if cr_a.get("hide_avatar") else cr_a.get("avatar_url")
+    av_b_url = None if cr_b.get("hide_avatar") else cr_b.get("avatar_url")
+    avatar_a, avatar_b = await asyncio.gather(
+        fetch_avatar(av_a_url), fetch_avatar(av_b_url),
+    )
+
+    buf = render_h2h_player_card(
+        name_a=name_a, rating_a=rating_a, role_a=role_a,
+        wins_a=wins_a, losses_a=losses_a, avatar_a=avatar_a,
+        name_b=name_b, rating_b=rating_b, role_b=role_b,
+        wins_b=wins_b, losses_b=losses_b, avatar_b=avatar_b,
+        stat_rows=stat_rows,
+    )
+    await interaction.followup.send(
+        file=discord.File(buf, filename=f"h2h_{aid_a}_vs_{aid_b}.png"),
+    )
+
 
 
 @tree.command(name="lookup", description="[Owner] Diagnostic lookup — full methodology breakdown for a player")
@@ -458,7 +993,7 @@ async def lookup(interaction: discord.Interaction, query: str, force_refresh: bo
             fallback_name=name,
             override=override,
             cached_rating=cache_row.get("internal_rating"),
-            cached_avatar=cache_row.get("avatar_url"),
+            cached_avatar=None if (cache_row.get("hide_avatar") or (override and override.get("hide_avatar"))) else cache_row.get("avatar_url"),
             updated_at=cache_row.get("updated_at"),
             adjustment_pct=adjustment_pct,
         )
@@ -485,6 +1020,11 @@ async def lookup(interaction: discord.Interaction, query: str, force_refresh: bo
         wr_task, wr_matches_task, od_task, od_counts_task, return_exceptions=True,
     )
     wr, wr_matches, od, od_counts = (None if isinstance(r, Exception) else r for r in results)
+    # If Steam match history is hidden, OpenDota's /wl counts are all 0/0 —
+    # convert those bogus 0s to None so display shows "hidden" and the rating
+    # formula doesn't apply an inexperience penalty for unverifiable history.
+    from formatters import sanitize_od_counts as _sanitize_od_counts
+    od_counts = _sanitize_od_counts(od, od_counts)
     for label, r in zip(("windrun", "windrun-matches", "opendota", "opendota-counts"), results):
         if isinstance(r, Exception):
             logger.exception("%s fetch failed for %d", label, account_id, exc_info=r)
@@ -538,7 +1078,8 @@ async def lookup(interaction: discord.Interaction, query: str, force_refresh: bo
     is_stale_render = False
     if not have_any_signal and cache_row:
         fallback_cached_rating = cache_row.get("internal_rating")
-        fallback_cached_avatar = cache_row.get("avatar_url")
+        if not (cache_row.get("hide_avatar") or (override and override.get("hide_avatar"))):
+            fallback_cached_avatar = cache_row.get("avatar_url")
         fallback_updated_at = cache_row.get("updated_at")
         is_stale_render = True
 
@@ -586,12 +1127,13 @@ async def lookup(interaction: discord.Interaction, query: str, force_refresh: bo
         try:
             from opendota_lookup import estimate_mmr_from_rank_tier
             from db import upsert_rating_cache_row
-            from formatters import _resolve_internal_rating
+            from formatters import _resolve_internal_rating, windrun_rating_for_formula
             raw_wr = (wr or {}).get("rating")
+            formula_wr = windrun_rating_for_formula(wr)
             rank_tier = (od or {}).get("rank_tier")
             lb_rank = (od or {}).get("leaderboard_rank")
             mmr_est = estimate_mmr_from_rank_tier(rank_tier, lb_rank)
-            eff_wr  = override["windrun_rating"] if override and override.get("windrun_rating") is not None else raw_wr
+            eff_wr  = override["windrun_rating"] if override and override.get("windrun_rating") is not None else formula_wr
             eff_mmr = override["ranked_mmr"]     if override and override.get("ranked_mmr") is not None     else mmr_est
             ranked_last_year = (od_counts or {}).get("last_year_ranked")
             ranked_all_time  = (od_counts or {}).get("all_time_ranked")
@@ -615,7 +1157,11 @@ async def lookup(interaction: discord.Interaction, query: str, force_refresh: bo
                 "ad_all_time":      ad_all_time,
                 "ranked_last_year": ranked_last_year,
                 "explanation":      info[1] if info else None,
-                "avatar_url":       (wr or {}).get("avatar"),
+                "avatar_url":       (
+                    ((od or {}).get("profile") or {}).get("avatarfull")
+                    or (wr or {}).get("avatar")
+                ),
+                "fh_unavailable":   bool((od or {}).get("profile", {}).get("fh_unavailable")) if od else None,
             })
         except Exception:
             logger.exception("cache write failed for %d after /lookup", account_id)
@@ -631,7 +1177,14 @@ async def _resolve_player_query(interaction: discord.Interaction, q: str) -> tup
     if not q:
         return None, None, "⚠️ Empty query."
     if q.isdigit():
-        return int(q), None, None
+        n = int(q)
+        # Steam64 IDs (17 digits, > offset) — convert to steam32/account_id
+        # by subtracting the steam base. Users often paste these from a
+        # Steam profile URL instead of the friend-ID from Dotabuff.
+        STEAM64_OFFSET = 76561197960265728
+        if n > STEAM64_OFFSET:
+            n -= STEAM64_OFFSET
+        return n, None, None
 
     from db import _conn
     guild_id = interaction.guild_id
@@ -700,6 +1253,7 @@ async def _resolve_player_query(interaction: discord.Interaction, q: str) -> tup
     ranked_mmr="Manual ranked MMR (omit to keep existing)",
     rating="Manual internal rating — overrides EVERYTHING; windrun/ranked_mmr/trust-weights are ignored",
     note="Optional note (e.g. 'smurf — real rank is 10k')",
+    hide_avatar="True to hide their Steam avatar everywhere (inappropriate profile pic). False to unhide.",
     clear="Set True to remove any existing override for this player",
     delete="Set True to remove the player entirely AND permanently exclude them from /players",
     restore="Set True to undo a prior delete (removes this guild's exclusion entry for them)",
@@ -712,6 +1266,7 @@ async def set_player(
     ranked_mmr: int = None,
     rating: int = None,
     note: str = None,
+    hide_avatar: bool = None,
     clear: bool = False,
     delete: bool = False,
     restore: bool = False,
@@ -783,7 +1338,7 @@ async def set_player(
         await interaction.followup.send(msg, ephemeral=True)
         return
 
-    if windrun is None and ranked_mmr is None and rating is None and note is None and nickname is None:
+    if windrun is None and ranked_mmr is None and rating is None and note is None and nickname is None and hide_avatar is None:
         # Show current state
         existing = get_skill_override(account_id)
         if existing:
@@ -812,6 +1367,7 @@ async def set_player(
         note=note,
         nickname=nickname,
         internal_rating_override=rating,
+        hide_avatar=hide_avatar,
         set_by_user_id=interaction.user.id,
         set_by_name=interaction.user.display_name,
     )
@@ -848,17 +1404,19 @@ async def set_player(
         "raw_windrun":      eff_wr,
         "mmr_estimate":     eff_mmr,
         "ad_last_year":     existing.get("ad_last_year"),
+        "ad_all_time":      existing.get("ad_all_time"),
         "ranked_last_year": existing.get("ranked_last_year"),
         "explanation":      info[1] if info else existing.get("explanation"),
         "avatar_url":       existing.get("avatar_url"),
     })
 
     parts = []
-    if nickname is not None:   parts.append(f"nickname=`{nickname}`")
-    if windrun is not None:    parts.append(f"windrun=`{windrun}`")
-    if ranked_mmr is not None: parts.append(f"ranked_mmr=`{ranked_mmr}`")
-    if rating is not None:     parts.append(f"rating=`{rating}`")
-    if note is not None:       parts.append(f"note=`{note}`")
+    if nickname is not None:    parts.append(f"nickname=`{nickname}`")
+    if windrun is not None:     parts.append(f"windrun=`{windrun}`")
+    if ranked_mmr is not None:  parts.append(f"ranked_mmr=`{ranked_mmr}`")
+    if rating is not None:      parts.append(f"rating=`{rating}`")
+    if note is not None:        parts.append(f"note=`{note}`")
+    if hide_avatar is not None: parts.append(f"hide_avatar=`{hide_avatar}`")
     rating_note = f" · cached rating: **{info[0]}**" if info else ""
     await interaction.followup.send(
         f"✅ Updated override for {label}: {', '.join(parts)}{rating_note}",
@@ -889,14 +1447,18 @@ async def _refresh_ratings_task(aids: list[int], interaction: discord.Interactio
             wr_data, od, od_counts = (None if isinstance(r, Exception) else r for r in results)
 
             raw_wr   = (wr_data or {}).get("rating")
+            from formatters import windrun_rating_for_formula
+            formula_wr = windrun_rating_for_formula(wr_data)
             rank_tier = (od or {}).get("rank_tier")
             lb_rank   = (od or {}).get("leaderboard_rank")
             mmr_est   = estimate_mmr_from_rank_tier(rank_tier, lb_rank)
 
             override = get_skill_override(aid)
-            eff_wr  = override["windrun_rating"] if override and override.get("windrun_rating") is not None else raw_wr
+            eff_wr  = override["windrun_rating"] if override and override.get("windrun_rating") is not None else formula_wr
             eff_mmr = override["ranked_mmr"]     if override and override.get("ranked_mmr") is not None     else mmr_est
 
+            from formatters import sanitize_od_counts
+            od_counts = sanitize_od_counts(od, od_counts)
             ad_last     = (od_counts or {}).get("last_year_ad")
             ad_all      = (od_counts or {}).get("all_time_ad")
             ranked_last = (od_counts or {}).get("last_year_ranked")
@@ -921,9 +1483,14 @@ async def _refresh_ratings_task(aids: list[int], interaction: discord.Interactio
                 "raw_windrun":      raw_wr,
                 "mmr_estimate":     mmr_est,
                 "ad_last_year":     ad_last,
+                "ad_all_time":      ad_all,
                 "ranked_last_year": ranked_last,
                 "explanation":      info[1] if info else None,
-                "avatar_url":       (wr_data or {}).get("avatar"),
+                "avatar_url":       (
+                    ((od or {}).get("profile") or {}).get("avatarfull")
+                    or (wr_data or {}).get("avatar")
+                ),
+                "fh_unavailable":   bool((od or {}).get("profile", {}).get("fh_unavailable")) if od else None,
             })
             if info:
                 success += 1
@@ -1155,159 +1722,29 @@ async def quote(interaction: discord.Interaction):
 async def draftorder(interaction: discord.Interaction, match_id: str):
     await interaction.response.defer()
 
-    # Validate match ID
     try:
         mid = int(match_id.strip())
     except ValueError:
         await interaction.followup.send("⚠️ Invalid match ID. Please provide a numeric match ID.", ephemeral=True)
         return
 
-    from db import get_draft_picks_for_display, get_match_replay_info, upsert_draft_picks
-    from draftorder import generate_draft_image_from_db
+    from windrun import fetch_match
+    from draftorder import generate_draft_image
 
     try:
-        # 1) Try our local DB first — same-day data from replay parsing.
-        draft_data = get_draft_picks_for_display(mid)
-        if draft_data:
-            # If any cached picks are still "unknown" (OpenDota was still
-            # parsing at the time of first /draftorder), retry resolution.
-            if any(p.get("ability_name") in ("", "unknown") for p in draft_data["picks"]):
-                try:
-                    from opendota_lookup import resolve_picks_with_opendota
-                    from db import _conn
-                    with _conn() as conn:
-                        db_picks = conn.execute("""
-                            SELECT pick_order, player_id, pick_type, ability_name, m_n_ability_id
-                            FROM draft_picks WHERE match_id = ?
-                            ORDER BY pick_order
-                        """, (mid,)).fetchall()
-                    # Reconstruct parser-shaped pick dicts. We don't have
-                    # hero_id stored on draft_picks rows; OpenDota provides
-                    # it directly via player_slot, so we leave it 0 here.
-                    pseudo = [
-                        {
-                            "order":          r["pick_order"],
-                            "player_id":      r["player_id"],
-                            "type":           r["pick_type"],
-                            "ability_name":   r["ability_name"],
-                            "m_n_ability_id": r["m_n_ability_id"],
-                            "hero_id":        0,
-                        }
-                        for r in db_picks
-                    ]
-                    resolved = await resolve_picks_with_opendota(mid, pseudo)
-                    updates = []
-                    for r, new in zip(db_picks, resolved):
-                        if (new["ability_name"] not in ("", "unknown")
-                                and r["ability_name"] != new["ability_name"]):
-                            updates.append({
-                                "pick_order":     new["order"],
-                                "player_id":      new["player_id"],
-                                "ability_name":   new["ability_name"],
-                                "pick_type":      new["type"],
-                                "m_n_ability_id": new["m_n_ability_id"],
-                                "ability_id":     0,
-                            })
-                    if updates:
-                        upsert_draft_picks(mid, updates)
-                        logger.info("Match %d: backfilled %d picks via OpenDota", mid, len(updates))
-                        draft_data = get_draft_picks_for_display(mid)
-                except Exception:
-                    logger.exception("OpenDota re-resolve failed for %d", mid)
-            logger.info("Serving draftorder for match %d from DB (%d picks)", mid, len(draft_data["picks"]))
-            image_bytes = await generate_draft_image_from_db(mid, draft_data)
-            file = discord.File(image_bytes, filename=f"draft_{mid}.png")
-            await interaction.followup.send(file=file)
-            return
-
-        # 2) On-demand parse for ANY match. We import the match metadata
-        # first (so /draftorder rendering has player names + KDA), then
-        # parse the replay. fetch_draft_picks falls back to Steam Web API
-        # for replay_salt + cluster if we don't have them stored. Discord
-        # allows up to 15 min after defer(); typical parse is 30-90s.
-        try:
-            await interaction.edit_original_response(
-                content="⏳ Parsing replay (this can take 1-2 minutes for a fresh match)…"
-            )
-        except Exception:
-            pass  # progress message is nice-to-have, don't fail on it
-
-        # Use guild_id=0 ("external one-off") so non-league matches that
-        # users look up via /draftorder don't pollute /matches for the guild.
-        # If this match later gets pulled in by the weekly league refresh,
-        # it'll be inserted again under the real guild_id (PK is composite).
-        from fetcher import import_match
-        ok = await import_match(mid, guild_id=0)
-        if not ok:
-            logger.warning("import_match(%d) failed; replay parse may also fail", mid)
-        cluster, replay_salt = get_match_replay_info(mid)
-        logger.info(
-            "On-demand parse for %d (cluster=%d, salt=%d)", mid, cluster, replay_salt,
-        )
-        from replay import fetch_draft_picks
-        from opendota_lookup import resolve_picks_with_opendota
-        picks = await fetch_draft_picks(mid, cluster, replay_salt)
-
-        # If the parse failed because the replay isn't downloadable yet
-        # (replay_salt not in OpenDota AND Steam API also unavailable),
-        # give a useful "try again later" message.
-        if not picks and not replay_salt:
-            try:
-                await interaction.edit_original_response(content="")
-            except Exception:
-                pass
+        data = await fetch_match(mid)
+        if not data or not data.get("picks") or not data.get("radiant") or not data.get("dire"):
             await interaction.followup.send(
-                f"⏳ Match `{mid}` is too new — Valve hasn't released the replay yet.\n"
-                "Replay data typically becomes available within 12-24 hours after a match ends. Try again later.",
+                f"⏳ Match `{mid}` hasn't been parsed by [windrun.io](https://windrun.io) yet. "
+                "Check back in a few minutes — league games are parsed with priority, but there's "
+                "still some lag on fresh matches.",
                 ephemeral=True,
             )
             return
 
-        if picks:
-            try:
-                resolved = await resolve_picks_with_opendota(mid, picks)
-            except Exception:
-                logger.exception("OpenDota resolve failed for match %d (continuing)", mid)
-                resolved = picks
-            normalized = [
-                {
-                    "pick_order":     p["order"],
-                    "player_id":      p["player_id"],
-                    "ability_name":   p["ability_name"],
-                    "pick_type":      p.get("type", "ability"),
-                    "m_n_ability_id": p.get("m_n_ability_id", 0),
-                    "ability_id":     0,
-                }
-                for p in resolved
-            ]
-            upsert_draft_picks(mid, normalized)
-            draft_data = get_draft_picks_for_display(mid)
-            if draft_data:
-                image_bytes = await generate_draft_image_from_db(mid, draft_data)
-                file = discord.File(image_bytes, filename=f"draft_{mid}.png")
-                try:
-                    await interaction.edit_original_response(content="")
-                except Exception:
-                    pass
-                await interaction.followup.send(file=file)
-                return
-        logger.warning(
-            "On-demand parse for %d yielded no picks; falling back to windrun", mid,
-        )
-
-        # 3) Replay unavailable AND we couldn't parse — give a clear error.
-        # We deliberately do NOT fall back to windrun.io: their data has
-        # multi-day lag and ours is now self-sufficient via OpenDota.
-        try:
-            await interaction.edit_original_response(content="")
-        except Exception:
-            pass
-        await interaction.followup.send(
-            f"⚠️ Could not parse a draft for match `{mid}`. "
-            "The replay may be unavailable from Valve, or this isn't an Ability Draft game.",
-            ephemeral=True,
-        )
-
+        image_bytes = await generate_draft_image(data)
+        file = discord.File(image_bytes, filename=f"draft_{mid}.png")
+        await interaction.followup.send(file=file)
     except Exception as e:
         logger.exception("Error in draftorder command for match %s", match_id)
         await interaction.followup.send(f"❌ Error generating draft order: {e}", ephemeral=True)
@@ -1369,12 +1806,23 @@ async def refresh_leaderboard(interaction: discord.Interaction):
     await interaction.response.send_message("⏳ Fetching match data...", ephemeral=True)
     try:
         count = await fetch_and_store_matches_for_division(interaction.guild_id)
-        draft_count = await fetch_and_store_drafts_for_guild(interaction.guild_id)
-        msg = f"✅ Done! Fetched {count} new match(es)"
-        if draft_count:
-            msg += f", parsed {draft_count} draft(s)"
-        msg += "."
-        await interaction.followup.send(msg, ephemeral=True)
+        # Kick off the same windrun + OpenDota rating refresh /refresh_ratings does,
+        # in the background so this command returns fast. User gets a second ping
+        # when the rating refresh completes (~5s/player due to windrun rate limit).
+        from db import get_guild_player_account_ids
+        aids = get_guild_player_account_ids(interaction.guild_id)
+        eta_note = ""
+        if aids:
+            eta_min = max(1, round(len(aids) * 5 / 60))
+            asyncio.create_task(_refresh_ratings_task(aids, interaction))
+            eta_note = (
+                f" Refreshing internal ratings for {len(aids)} players "
+                f"in the background (~{eta_min} min); I'll ping you here when done."
+            )
+        await interaction.followup.send(
+            f"✅ Fetched {count} new match(es).{eta_note}",
+            ephemeral=True,
+        )
     except Exception as e:
         logger.exception("Refresh failed")
         await interaction.followup.send(f"❌ Error during fetch: {e}", ephemeral=True)
@@ -1466,9 +1914,6 @@ async def weekly_fetch():
             count = await fetch_and_store_matches_for_division(div["guild_id"])
             total_count += count
             logger.info(f"Weekly fetch for guild {div['guild_id']}: {count} match(es)")
-            draft_count = await fetch_and_store_drafts_for_guild(div["guild_id"])
-            if draft_count:
-                logger.info(f"Weekly draft fetch for guild {div['guild_id']}: {draft_count} draft(s)")
         except Exception:
             logger.exception(f"Weekly fetch failed for guild {div['guild_id']}")
 

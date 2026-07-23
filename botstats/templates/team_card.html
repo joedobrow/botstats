@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Team Card</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
+
+    :root {
+      --bg: #10121c;
+      --panel: #181c2a;
+      --line: #262a3a;
+      --accent: #ffc33c;
+      --win: #60c878;
+      --loss: #dc5a5a;
+      --text: #ebebf0;
+      --text-2: #a0a5b4;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      height: 100%;
+      background: transparent;
+      font-family: 'Inter', system-ui, sans-serif;
+      color: var(--text);
+    }
+    .card {
+      width: 1000px;
+      min-height: 620px;
+      background: linear-gradient(135deg, #131624 0%, #1a1e30 100%);
+      border-radius: 18px;
+      padding: 32px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+      position: relative;
+      overflow: hidden;
+    }
+    .title {
+      font-size: 46px;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      text-align: center;
+    }
+    .record {
+      color: var(--accent);
+      font-size: 28px;
+      font-weight: 800;
+      text-align: center;
+      margin-top: 8px;
+    }
+    .roster {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 16px;
+      margin: 36px 0 24px;
+    }
+    .slot {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+    }
+    .avatar-wrap { position: relative; }
+    .avatar {
+      width: 130px;
+      height: 130px;
+      border-radius: 50%;
+      background: var(--panel);
+      border: 3px solid var(--line);
+      background-size: cover;
+      background-position: center;
+    }
+    .slot.captain .avatar { border-color: var(--accent); }
+    .slot.captain .cap-label {
+      position: absolute;
+      top: -22px;
+      left: 50%;
+      transform: translateX(-50%);
+      color: var(--accent);
+      font-size: 13px;
+      font-weight: 800;
+      letter-spacing: 0.1em;
+    }
+    .slot-name {
+      font-size: 18px;
+      font-weight: 700;
+      max-width: 140px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      text-align: center;
+    }
+    .slot-role {
+      font-size: 15px;
+      color: var(--text-2);
+    }
+    .divider {
+      border: none;
+      border-top: 2px solid var(--line);
+      margin: 8px 0 24px;
+    }
+    .columns {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 32px;
+    }
+    .col-title {
+      font-size: 26px;
+      font-weight: 800;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      margin-bottom: 14px;
+    }
+    .col-title.win  { color: var(--win); }
+    .col-title.loss { color: var(--loss); }
+    .stat-line {
+      font-size: 22px;
+      line-height: 1.5;
+    }
+    .stat-line .label { font-weight: 600; }
+    .stat-line .rank  { color: var(--text-2); font-weight: 400; }
+    .logo {
+      position: absolute;
+      bottom: 24px;
+      right: 24px;
+      width: 120px;
+      height: auto;
+      opacity: 0.95;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="title">Team <<TEAM_LABEL>></div>
+    <div class="record"><<RECORD>></div>
+    <div class="roster">
+      <<ROSTER_HTML>>
+    </div>
+    <hr class="divider" />
+    <div class="columns">
+      <div>
+        <div class="col-title win">▲ Strengths</div>
+        <<STRENGTHS_HTML>>
+      </div>
+      <div>
+        <div class="col-title loss">▼ Weaknesses</div>
+        <<WEAKNESSES_HTML>>
+      </div>
+    </div>
+    <img class="logo" src="/assets/rd2l_logo.png" alt="" />
+  </div>
+</body>
+</html>

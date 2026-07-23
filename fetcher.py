@@ -16,7 +16,6 @@ from datetime import datetime, timezone
 from config import OPENDOTA_API_KEY, REGION_CLUSTERS, GAME_MODE_FILTERS
 from db import (
     upsert_match, upsert_players, upsert_chat_messages, match_exists, get_division,
-    get_matches_without_drafts, get_match_replay_info, draft_exists, upsert_draft_picks,
 )
 
 logger = logging.getLogger(__name__)
@@ -432,69 +431,3 @@ async def import_match(match_id: int, guild_id: int = 0) -> bool:
     return True
 
 
-async def fetch_and_store_drafts_for_guild(guild_id: int) -> int:
-    """
-    For every AD match in this guild that has no draft data yet, download the
-    replay from Valve, parse it with the Go binary, and store the picks.
-
-    Returns the number of matches for which draft picks were successfully stored.
-    Replays are downloaded one at a time to avoid hammering Valve's CDN.
-    """
-    from replay import fetch_draft_picks
-
-    match_ids = get_matches_without_drafts(guild_id)
-    if not match_ids:
-        logger.info("No matches missing draft data for guild %d", guild_id)
-        return 0
-
-    logger.info(
-        "Fetching draft picks for %d match(es) in guild %d",
-        len(match_ids), guild_id,
-    )
-
-    stored = 0
-    for match_id in match_ids:
-        cluster, replay_salt = get_match_replay_info(match_id)
-        logger.info("Processing replay for match %d (cluster=%d salt=%d)", match_id, cluster, replay_salt)
-
-        picks = await fetch_draft_picks(match_id, cluster, replay_salt)
-
-        if picks is None:
-            logger.warning("Could not get draft picks for match %d — will retry next refresh", match_id)
-            continue
-
-        if len(picks) == 0:
-            logger.warning("Match %d returned 0 picks — may not be AD or replay is unavailable", match_id)
-            # Don't store anything; we'll retry next time in case of a transient issue
-            continue
-
-        # Resolve every pick (abilities + models) via OpenDota's per-match
-        # data. We do this on EVERY match since m_n_ability_id is per-match,
-        # not stable globally. Cheap (one HTTP call) and consistent.
-        from opendota_lookup import resolve_picks_with_opendota
-        try:
-            picks = await resolve_picks_with_opendota(match_id, picks)
-        except Exception:
-            logger.exception("OpenDota resolve failed for match %d (continuing)", match_id)
-
-        # The parser emits order/player_id/type/ability_name/m_n_ability_id.
-        normalized = [
-            {
-                "pick_order":     p["order"],
-                "player_id":      p["player_id"],
-                "ability_name":   p["ability_name"],
-                "pick_type":      p.get("type", "ability"),
-                "m_n_ability_id": p.get("m_n_ability_id", 0),
-                "ability_id":     0,
-            }
-            for p in picks
-        ]
-        upsert_draft_picks(match_id, normalized)
-        stored += 1
-        logger.info("Stored %d draft picks for match %d", len(normalized), match_id)
-
-        # Small pause between replays — be polite to Valve's CDN
-        import asyncio
-        await asyncio.sleep(2)
-
-    return stored

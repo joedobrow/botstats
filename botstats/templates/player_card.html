@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Player Card</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
+
+    :root {
+      --bg: #10121c;
+      --panel: #181c2a;
+      --line: #262a3a;
+      --accent: #ffc33c;
+      --win: #60c878;
+      --loss: #dc5a5a;
+      --text: #ebebf0;
+      --text-2: #a0a5b4;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      height: 100%;
+      background: transparent;
+      font-family: 'Inter', system-ui, sans-serif;
+      color: var(--text);
+    }
+    .card {
+      width: 900px;
+      min-height: 520px;
+      background: linear-gradient(135deg, #131624 0%, #1a1e30 100%);
+      border-radius: 18px;
+      padding: 32px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+      position: relative;
+      overflow: hidden;
+    }
+    .header {
+      display: flex;
+      gap: 28px;
+      align-items: center;
+    }
+    .avatar {
+      width: 180px;
+      height: 180px;
+      border-radius: 50%;
+      background: var(--panel);
+      flex-shrink: 0;
+      border: 3px solid var(--line);
+      background-size: cover;
+      background-position: center;
+    }
+    .head-text { flex: 1; min-width: 0; }
+    .name {
+      font-size: 48px;
+      font-weight: 800;
+      line-height: 1.1;
+      letter-spacing: -0.02em;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .rating {
+      color: var(--accent);
+      font-size: 26px;
+      font-weight: 800;
+      margin-top: 12px;
+    }
+    .meta {
+      color: var(--text-2);
+      font-size: 24px;
+      margin-top: 8px;
+    }
+    .divider {
+      border: none;
+      border-top: 2px solid var(--line);
+      margin: 28px 0 24px;
+    }
+    .columns {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 32px;
+    }
+    .col-title {
+      font-size: 26px;
+      font-weight: 800;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      margin-bottom: 14px;
+    }
+    .col-title.win  { color: var(--win); }
+    .col-title.loss { color: var(--loss); }
+    .stat-line {
+      font-size: 22px;
+      line-height: 1.5;
+      color: var(--text);
+    }
+    .stat-line .label { font-weight: 600; }
+    .stat-line .rank { color: var(--text-2); font-weight: 400; }
+    .logo {
+      position: absolute;
+      bottom: 24px;
+      right: 24px;
+      width: 108px;
+      height: auto;
+      opacity: 0.95;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="header">
+      <div class="avatar" style="background-image: url('<<AVATAR_URL>>')"></div>
+      <div class="head-text">
+        <div class="name"><<NAME>></div>
+        <div class="rating">Adjusted Windrun <<RATING>></div>
+        <div class="meta"><<RECORD>> · <<ROLE>></div>
+      </div>
+    </div>
+    <hr class="divider" />
+    <div class="columns">
+      <div>
+        <div class="col-title win">▲ Strengths</div>
+        <<STRENGTHS_HTML>>
+      </div>
+      <div>
+        <div class="col-title loss">▼ Weaknesses</div>
+        <<WEAKNESSES_HTML>>
+      </div>
+    </div>
+    <img class="logo" src="/assets/rd2l_logo.png" alt="" />
+  </div>
+</body>
+</html>

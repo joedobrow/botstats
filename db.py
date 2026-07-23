@@ -104,6 +104,9 @@ def init_db():
         if skill_cols and "internal_rating_override" not in skill_cols:
             logger.info("Migrating: adding internal_rating_override column to skill_overrides")
             conn.execute("ALTER TABLE skill_overrides ADD COLUMN internal_rating_override INTEGER")
+        if skill_cols and "hide_avatar" not in skill_cols:
+            logger.info("Migrating: adding hide_avatar column to skill_overrides")
+            conn.execute("ALTER TABLE skill_overrides ADD COLUMN hide_avatar INTEGER DEFAULT 0")
 
         # --- Migration: add avatar_url + ad_all_time to player_ratings_cache ---
         cursor = conn.execute("PRAGMA table_info(player_ratings_cache)")
@@ -114,6 +117,9 @@ def init_db():
         if prc_cols and "ad_all_time" not in prc_cols:
             logger.info("Migrating: adding ad_all_time column to player_ratings_cache")
             conn.execute("ALTER TABLE player_ratings_cache ADD COLUMN ad_all_time INTEGER")
+        if prc_cols and "fh_unavailable" not in prc_cols:
+            logger.info("Migrating: adding fh_unavailable column to player_ratings_cache")
+            conn.execute("ALTER TABLE player_ratings_cache ADD COLUMN fh_unavailable INTEGER DEFAULT 0")
 
         # --- Migration: add scold_channel_id column to divisions if missing ---
         cursor = conn.execute("PRAGMA table_info(divisions)")
@@ -224,6 +230,7 @@ def init_db():
                 ranked_last_year  INTEGER,
                 explanation       TEXT,
                 avatar_url        TEXT,
+                fh_unavailable    INTEGER DEFAULT 0,
                 updated_at        TEXT NOT NULL
             );
 
@@ -237,6 +244,7 @@ def init_db():
                 nickname                TEXT,
                 note                    TEXT,
                 internal_rating_override INTEGER,
+                hide_avatar             INTEGER DEFAULT 0,
                 set_by_user_id          INTEGER,
                 set_by_name             TEXT,
                 set_at                  TEXT NOT NULL
@@ -524,6 +532,8 @@ def get_latest_week_stats(guild_id: int, week_offset: int = 0) -> list[dict]:
                 AVG(p.obs_placed)               AS obs_placed,
                 AVG(p.sen_placed)               AS sen_placed,
                 AVG(p.observer_kills)           AS observer_kills,
+                AVG(p.observer_kills * 60.0 / NULLIF(p.duration, 0))
+                                                AS observer_kills_per_min,
                 AVG(p.sentry_kills)             AS sentry_kills,
                 AVG(p.tower_kills)              AS tower_kills,
                 AVG(p.roshans_killed)           AS roshans_killed,
@@ -597,6 +607,8 @@ def get_stats_for_season_week(guild_id: int, week_number: int, season_start_date
                 AVG(p.obs_placed)               AS obs_placed,
                 AVG(p.sen_placed)               AS sen_placed,
                 AVG(p.observer_kills)           AS observer_kills,
+                AVG(p.observer_kills * 60.0 / NULLIF(p.duration, 0))
+                                                AS observer_kills_per_min,
                 AVG(p.sentry_kills)             AS sentry_kills,
                 AVG(p.tower_kills)              AS tower_kills,
                 AVG(p.roshans_killed)           AS roshans_killed,
@@ -689,6 +701,8 @@ def get_all_time_stats(guild_id: int, season_start_date: str = None) -> list[dic
                 AVG(p.obs_placed)               AS obs_placed,
                 AVG(p.sen_placed)               AS sen_placed,
                 AVG(p.observer_kills)           AS observer_kills,
+                AVG(p.observer_kills * 60.0 / NULLIF(p.duration, 0))
+                                                AS observer_kills_per_min,
                 AVG(p.sentry_kills)             AS sentry_kills,
                 AVG(p.tower_kills)              AS tower_kills,
                 AVG(p.roshans_killed)           AS roshans_killed,
@@ -859,41 +873,55 @@ def upsert_rating_cache_row(row: dict) -> None:
         "ranked_last_year": row.get("ranked_last_year"),
         "explanation":      row.get("explanation"),
         "avatar_url":       row.get("avatar_url"),
+        "fh_unavailable":   1 if row.get("fh_unavailable") else 0 if "fh_unavailable" in row else None,
         "updated_at":       datetime.now(timezone.utc).isoformat(),
     }
     with _conn() as conn:
         conn.execute("""
             INSERT INTO player_ratings_cache
                 (account_id, name, internal_rating, raw_windrun, mmr_estimate,
-                 ad_last_year, ad_all_time, ranked_last_year, explanation, avatar_url, updated_at)
+                 ad_last_year, ad_all_time, ranked_last_year, explanation, avatar_url,
+                 fh_unavailable, updated_at)
             VALUES (:account_id, :name, :internal_rating, :raw_windrun,
                     :mmr_estimate, :ad_last_year, :ad_all_time, :ranked_last_year,
-                    :explanation, :avatar_url, :updated_at)
+                    :explanation, :avatar_url, :fh_unavailable, :updated_at)
             ON CONFLICT(account_id) DO UPDATE SET
-                name             = excluded.name,
-                internal_rating  = excluded.internal_rating,
-                raw_windrun      = excluded.raw_windrun,
-                mmr_estimate     = excluded.mmr_estimate,
-                ad_last_year     = excluded.ad_last_year,
-                ad_all_time      = excluded.ad_all_time,
-                ranked_last_year = excluded.ranked_last_year,
-                explanation      = excluded.explanation,
+                name             = COALESCE(excluded.name, player_ratings_cache.name),
+                internal_rating  = COALESCE(excluded.internal_rating, player_ratings_cache.internal_rating),
+                raw_windrun      = COALESCE(excluded.raw_windrun, player_ratings_cache.raw_windrun),
+                mmr_estimate     = COALESCE(excluded.mmr_estimate, player_ratings_cache.mmr_estimate),
+                ad_last_year     = COALESCE(excluded.ad_last_year, player_ratings_cache.ad_last_year),
+                ad_all_time      = COALESCE(excluded.ad_all_time, player_ratings_cache.ad_all_time),
+                ranked_last_year = COALESCE(excluded.ranked_last_year, player_ratings_cache.ranked_last_year),
+                explanation      = COALESCE(excluded.explanation, player_ratings_cache.explanation),
                 avatar_url       = COALESCE(excluded.avatar_url, player_ratings_cache.avatar_url),
+                fh_unavailable   = COALESCE(excluded.fh_unavailable, player_ratings_cache.fh_unavailable),
                 updated_at       = excluded.updated_at
         """, payload)
 
 
 def get_rating_cache_row(account_id: int) -> dict | None:
-    """Return a single cached rating row (with override nickname joined in),
-    or None if not present."""
+    """Return a single cached rating row (with override nickname + hide_avatar
+    joined in), or None if not present."""
     with _conn() as conn:
         row = conn.execute("""
-            SELECT prc.*, so.nickname AS override_nickname
+            SELECT prc.*, so.nickname AS override_nickname,
+                   so.hide_avatar AS hide_avatar
             FROM player_ratings_cache prc
             LEFT JOIN skill_overrides so ON so.account_id = prc.account_id
             WHERE prc.account_id = ?
         """, (account_id,)).fetchone()
     return dict(row) if row else None
+
+
+def is_avatar_hidden(account_id: int) -> bool:
+    """True when the account has hide_avatar set in skill_overrides."""
+    with _conn() as conn:
+        row = conn.execute(
+            "SELECT hide_avatar FROM skill_overrides WHERE account_id = ?",
+            (account_id,),
+        ).fetchone()
+    return bool(row and row["hide_avatar"])
 
 
 def compute_fantasy_adjusted_ratings(guild_id: int, season_start: str) -> dict[int, dict]:
@@ -1103,6 +1131,7 @@ def upsert_skill_override(
     set_by_name: str | None,
     nickname: str | None = None,
     internal_rating_override: int | None = None,
+    hide_avatar: bool | None = None,
 ) -> None:
     """Insert or update an override. Pass None for any field to KEEP the
     existing value (partial updates). To clear an override entirely, use
@@ -1114,26 +1143,30 @@ def upsert_skill_override(
         nt   = note           if note           is not None else existing.get("note")
         nk   = nickname       if nickname       is not None else existing.get("nickname")
         ir   = internal_rating_override if internal_rating_override is not None else existing.get("internal_rating_override")
+        ha   = (1 if hide_avatar else 0) if hide_avatar is not None else existing.get("hide_avatar") or 0
     else:
         wr, rm, nt, nk, ir = windrun_rating, ranked_mmr, note, nickname, internal_rating_override
+        ha = 1 if hide_avatar else 0
     from datetime import datetime, timezone
     now = datetime.now(timezone.utc).isoformat()
     with _conn() as conn:
         conn.execute("""
             INSERT INTO skill_overrides
                 (account_id, windrun_rating, ranked_mmr, nickname, note,
-                 internal_rating_override, set_by_user_id, set_by_name, set_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 internal_rating_override, hide_avatar,
+                 set_by_user_id, set_by_name, set_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(account_id) DO UPDATE SET
                 windrun_rating          = excluded.windrun_rating,
                 ranked_mmr              = excluded.ranked_mmr,
                 nickname                = excluded.nickname,
                 note                    = excluded.note,
                 internal_rating_override = excluded.internal_rating_override,
+                hide_avatar             = excluded.hide_avatar,
                 set_by_user_id          = excluded.set_by_user_id,
                 set_by_name             = excluded.set_by_name,
                 set_at                  = excluded.set_at
-        """, (account_id, wr, rm, nk, nt, ir, set_by_user_id, set_by_name, now))
+        """, (account_id, wr, rm, nk, nt, ir, ha, set_by_user_id, set_by_name, now))
 
 
 def delete_skill_override(account_id: int) -> bool:
@@ -1195,6 +1228,88 @@ def get_captain_account_ids(guild_id: int, season_start: str) -> dict[str, int |
             if row:
                 result[cap] = row["account_id"]
     return result
+
+
+def get_head_to_head_matches(
+    guild_id: int, season_start: str, captain_a: str, captain_b: str,
+) -> list[dict]:
+    """Find matches where both teams had ≥3 of their roster on opposite sides.
+
+    Each returned dict has:
+        match_id, start_time, duration, a_won (bool)
+    Sorted by start_time ascending.
+    """
+    from datetime import datetime, timezone, timedelta
+
+    if season_start:
+        season_dt = datetime.fromisoformat(season_start).replace(tzinfo=timezone.utc)
+        season_monday = season_dt - timedelta(days=season_dt.weekday())
+        week_zero_start = season_monday - timedelta(weeks=1)
+        start_ts = int(week_zero_start.timestamp())
+    else:
+        start_ts = 0
+
+    costs = get_player_costs(guild_id, season_start)
+    cap_aids = get_captain_account_ids(guild_id, season_start)
+
+    def _roster(cap_name: str) -> set[int]:
+        s = {aid for aid, c in costs.items() if c.get("captain") == cap_name}
+        if cap_aids.get(cap_name):
+            s.add(cap_aids[cap_name])
+        return s
+
+    roster_a = _roster(captain_a)
+    roster_b = _roster(captain_b)
+    if not roster_a or not roster_b:
+        return []
+
+    with _conn() as conn:
+        rows = conn.execute("""
+            SELECT p.match_id, p.account_id, p.player_slot,
+                   m.radiant_win, m.duration, m.start_time
+            FROM players p JOIN matches m ON p.match_id = m.match_id
+            WHERE m.guild_id = ? AND m.start_time >= ?
+        """, (guild_id, start_ts)).fetchall()
+
+    by_match: dict[int, dict] = {}
+    for r in rows:
+        d = dict(r)
+        m = by_match.setdefault(d["match_id"], {
+            "radiant": set(), "dire": set(),
+            "radiant_win": d["radiant_win"],
+            "duration":    d["duration"],
+            "start_time":  d["start_time"],
+        })
+        slot = d.get("player_slot")
+        if slot is None:
+            continue
+        if 0 <= slot < 128:
+            m["radiant"].add(d["account_id"])
+        elif slot >= 128:
+            m["dire"].add(d["account_id"])
+
+    results: list[dict] = []
+    for match_id, m in by_match.items():
+        r_a = len(roster_a & m["radiant"])
+        d_a = len(roster_a & m["dire"])
+        r_b = len(roster_b & m["radiant"])
+        d_b = len(roster_b & m["dire"])
+        a_radiant = r_a >= 3 and d_b >= 3
+        a_dire    = d_a >= 3 and r_b >= 3
+        if not (a_radiant or a_dire):
+            continue
+        if a_radiant:
+            a_won = bool(m["radiant_win"])
+        else:
+            a_won = not bool(m["radiant_win"])
+        results.append({
+            "match_id":   match_id,
+            "start_time": m["start_time"],
+            "duration":   m["duration"],
+            "a_won":      a_won,
+        })
+    results.sort(key=lambda x: x["start_time"])
+    return results
 
 
 def get_team_match_aggregates(guild_id: int, season_start: str) -> dict[str, dict]:
@@ -1290,13 +1405,14 @@ def get_team_match_aggregates(guild_id: int, season_start: str) -> dict[str, dic
 
     # Stats that sum across the 5 players (team totals per match).
     PER_PLAYER_SUM_KEYS = (
-        "gpm", "last_hits", "denies", "hero_damage", "hero_healing",
+        "gpm", "xpm",
+        "last_hits", "denies", "hero_damage", "hero_healing",
         "tower_kills", "observer_kills", "roshans_killed", "camps_stacked",
         "rune_pickups", "defensive_item_uses", "tormentor_kills",
         "watcher_captures", "building_damage",
     )
-    # Stats kept as the 5-player average (percentages, rates, etc.).
-    PER_PLAYER_AVG_KEYS = ("teamfight_participation", "xpm")
+    # Stats kept as the 5-player average (percentages, etc.).
+    PER_PLAYER_AVG_KEYS = ("teamfight_participation",)
 
     def _per_match_team_stats(side: list[dict], duration: int) -> dict:
         n = len(side)
@@ -1740,34 +1856,35 @@ def fit_cost_mmr_diff(stats: list[dict]) -> tuple[float, float, float] | None:
 
 def _compute_value(stats: list[dict]) -> list[dict]:
     """Fit cost-vs-diff (univariate) and set s['predicted_diff'] and s['value']
-    (= residual) for each drafted player. Untouched for players without a cost.
+    for each drafted player. Untouched for players without a cost.
 
-    /suggested_cost separately uses the multivariate cost+mmr fit; we keep value
-    on the cost-only model so /leaderboard Value answers a simpler question:
-    "given this player's draft cost alone, did they over- or under-perform?"
+    predicted_diff: FP-diff predicted from cost alone (a + b·cost).
+    value: cost-space delta = (actual_diff - predicted_diff) / b, i.e. how
+      many draft-dollars over (positive) or under (negative) the player's
+      cost the linear model says they were worth. Requires a positive slope
+      (higher cost → higher diff); if the slope is non-positive or the fit
+      fails, value is left as None.
     """
     fit = fit_cost_diff(stats)
     if fit is None:
-        # Not enough data — fall back to per-player residual = diff - mean(diff)
-        drafted = [
-            s for s in stats
-            if s.get("cost") is not None and s.get("diff") is not None
-        ]
-        if not drafted:
-            return stats
-        mean_y = sum(s["diff"] for s in drafted) / len(drafted)
-        for s in drafted:
-            s["predicted_diff"] = round(mean_y, 2)
-            s["value"] = round(s["diff"] - mean_y, 2)
+        for s in stats:
+            if s.get("cost") is not None and s.get("diff") is not None:
+                s.setdefault("predicted_diff", None)
+                s["value"] = None
         return stats
 
     a, b = fit
+    VALUE_CAP = 70.0  # cost-space delta clipped to ±70 to avoid noisy blow-ups
     for s in stats:
         if s.get("cost") is None or s.get("diff") is None:
             continue
         predicted = a + b * s["cost"]
         s["predicted_diff"] = round(predicted, 2)
-        s["value"] = round(s["diff"] - predicted, 2)
+        if b > 0:
+            raw = (s["diff"] - predicted) / b
+            s["value"] = round(max(-VALUE_CAP, min(VALUE_CAP, raw)), 2)
+        else:
+            s["value"] = None
     return stats
 
 
@@ -2017,214 +2134,6 @@ def get_match_ids_for_player(guild_id: int, player_name: str) -> set[int]:
               AND LOWER(p.name) LIKE LOWER(?)
         """, (guild_id, f"%{player_name}%")).fetchall()
     return {r["match_id"] for r in rows}
-
-
-# ---------------------------------------------------------------------------
-# Draft picks
-# ---------------------------------------------------------------------------
-
-def draft_exists(match_id: int) -> bool:
-    """Return True if we already have draft pick data for this match."""
-    with _conn() as conn:
-        row = conn.execute(
-            "SELECT 1 FROM draft_picks WHERE match_id = ? LIMIT 1", (match_id,)
-        ).fetchone()
-    return row is not None
-
-
-def upsert_draft_picks(match_id: int, picks: list[dict]):
-    """
-    Persist draft picks for a match.
-
-    Each pick dict must have: pick_order, player_id, and either ability_name
-    (preferred, e.g. "morphling_waveform") or ability_id (legacy integer).
-    Uses INSERT OR IGNORE so re-running is safe.
-    """
-    with _conn() as conn:
-        conn.executemany("""
-            INSERT OR REPLACE INTO draft_picks
-                (match_id, pick_order, ability_id, ability_name, pick_type, m_n_ability_id, player_id)
-            VALUES (:match_id, :pick_order, :ability_id, :ability_name, :pick_type, :m_n_ability_id, :player_id)
-        """, [{
-            "match_id": match_id,
-            "ability_id": 0,
-            "ability_name": "",
-            "pick_type": "ability",
-            "m_n_ability_id": 0,
-            **p,
-        } for p in picks])
-
-
-def get_ability_id_mapping(m_n_ids: list[int]) -> dict[int, dict]:
-    """
-    Look up multiple m_n_ability_id values in the static mapping table.
-
-    Returns:
-        {m_n_ability_id: {'pick_type': str, 'ability_name': str, 'hero_id': int}}
-        for IDs that exist in the table. Missing IDs are absent from the dict.
-    """
-    if not m_n_ids:
-        return {}
-    placeholders = ",".join("?" * len(m_n_ids))
-    with _conn() as conn:
-        rows = conn.execute(f"""
-            SELECT m_n_ability_id, pick_type, ability_name, hero_id
-            FROM ability_id_mapping
-            WHERE m_n_ability_id IN ({placeholders})
-        """, m_n_ids).fetchall()
-    return {
-        r["m_n_ability_id"]: {
-            "pick_type": r["pick_type"],
-            "ability_name": r["ability_name"],
-            "hero_id": r["hero_id"],
-        }
-        for r in rows
-    }
-
-
-def upsert_ability_id_mappings(mappings: list[dict]):
-    """
-    Upsert ability_id_mapping rows. Each dict needs:
-        m_n_ability_id, pick_type, ability_name, hero_id
-    Uses INSERT OR REPLACE so collected ground truth always wins.
-    """
-    if not mappings:
-        return
-    with _conn() as conn:
-        conn.executemany("""
-            INSERT OR REPLACE INTO ability_id_mapping
-                (m_n_ability_id, pick_type, ability_name, hero_id)
-            VALUES (:m_n_ability_id, :pick_type, :ability_name, :hero_id)
-        """, mappings)
-
-
-def get_draft_picks(match_id: int) -> list[dict]:
-    """Return all draft picks for a match, sorted by pick order."""
-    with _conn() as conn:
-        rows = conn.execute("""
-            SELECT pick_order, ability_id, ability_name, pick_type, player_id
-            FROM draft_picks
-            WHERE match_id = ?
-            ORDER BY pick_order
-        """, (match_id,)).fetchall()
-    return [dict(r) for r in rows]
-
-
-def get_draft_picks_for_display(match_id: int) -> dict | None:
-    """
-    Return draft picks + player info needed to render a draft image.
-
-    Draft seat mapping uses player_slot (stored since the player_slot migration):
-      - player_slot 0-4   → draft seat 0-4   (radiant)
-      - player_slot 128-132 → draft seat 5-9  (dire; seat = slot - 123)
-
-    For older rows where player_slot was not yet stored (value -1), we fall back
-    to insertion order within each team as a best-effort approximation.
-
-    Returns:
-        {
-          'radiant_win': bool,
-          'picks': [{'pick_order', 'ability_id', 'player_id'}, ...],
-          'players_by_seat': {
-              0: {'name': str, 'kills': int, 'deaths': int, 'assists': int},
-              ...  (keys 0-9)
-          }
-        }
-        or None if no draft picks exist for this match.
-    """
-    with _conn() as conn:
-        match_row = conn.execute(
-            "SELECT radiant_win FROM matches WHERE match_id = ?", (match_id,)
-        ).fetchone()
-        if not match_row:
-            return None
-
-        pick_rows = conn.execute("""
-            SELECT pick_order, ability_id, ability_name, pick_type, player_id
-            FROM draft_picks
-            WHERE match_id = ?
-            ORDER BY pick_order
-        """, (match_id,)).fetchall()
-        if not pick_rows:
-            return None
-
-        player_rows = conn.execute("""
-            SELECT name, kills, deaths, assists, player_slot, team_side
-            FROM players
-            WHERE match_id = ?
-        """, (match_id,)).fetchall()
-
-    players_by_seat: dict[int, dict] = {}
-    have_slots = any(r["player_slot"] >= 0 for r in player_rows)
-
-    if have_slots:
-        # Reliable path: use stored player_slot to derive draft seat
-        for row in player_rows:
-            slot = row["player_slot"]
-            if 0 <= slot <= 4:
-                seat = slot
-            elif 128 <= slot <= 132:
-                seat = slot - 123       # 128→5, 129→6, 130→7, 131→8, 132→9
-            else:
-                continue               # unknown slot, skip
-            players_by_seat[seat] = {
-                "name": row["name"],
-                "kills": row["kills"],
-                "deaths": row["deaths"],
-                "assists": row["assists"],
-            }
-    else:
-        # Legacy fallback: insertion order within each team (approximate)
-        radiant = sorted(
-            [r for r in player_rows if r["team_side"] == "radiant"],
-            key=lambda r: r["name"],   # stable but arbitrary order
-        )
-        dire = sorted(
-            [r for r in player_rows if r["team_side"] == "dire"],
-            key=lambda r: r["name"],
-        )
-        for seat, row in enumerate(radiant):
-            players_by_seat[seat] = dict(row)
-        for i, row in enumerate(dire):
-            players_by_seat[5 + i] = dict(row)
-
-    return {
-        "radiant_win": bool(match_row["radiant_win"]),
-        "picks": [dict(r) for r in pick_rows],
-        "players_by_seat": players_by_seat,
-    }
-
-
-def get_match_replay_info(match_id: int) -> tuple[int, int]:
-    """Return (cluster, replay_salt) for a match. Both are 0 if not found."""
-    with _conn() as conn:
-        row = conn.execute(
-            "SELECT cluster, replay_salt FROM matches WHERE match_id = ?", (match_id,)
-        ).fetchone()
-    if row:
-        return row["cluster"], row["replay_salt"]
-    return 0, 0
-
-
-def get_matches_without_drafts(guild_id: int) -> list[int]:
-    """
-    Return match IDs for this guild that have no draft_picks rows yet.
-
-    Only returns AD matches (game_mode = 18).
-    Ordered oldest-first so we backfill in chronological order.
-    """
-    with _conn() as conn:
-        rows = conn.execute("""
-            SELECT m.match_id
-            FROM matches m
-            WHERE m.guild_id = ?
-              AND m.game_mode = 18
-              AND NOT EXISTS (
-                  SELECT 1 FROM draft_picks dp WHERE dp.match_id = m.match_id
-              )
-            ORDER BY m.start_time ASC
-        """, (guild_id,)).fetchall()
-    return [r["match_id"] for r in rows]
 
 
 def nuke_data(guild_id: int):

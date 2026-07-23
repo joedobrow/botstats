@@ -15,7 +15,7 @@ EMBED_COLOUR_RED    = discord.Colour(0xE74C3C)
 # Human-readable labels for stat keys
 STAT_LABELS: dict[str, str] = {
     "fantasy_points":          "⭐ Fantasy Pts",
-    "value":                   "💎 Value (Diff vs Cost-Predicted)",
+    "value":                   "💎 Value ($ over/under cost)",
     "attendance":              "📅 Attendance",
     "diff":                    "📈 Fantasy Diff vs. Teammates",
     "gpm":                     "💰 GPM",
@@ -27,10 +27,11 @@ STAT_LABELS: dict[str, str] = {
     "hero_healing":            "💚 Hero Healing",
     "xpm":                     "📈 XPM",
     "stuns":                   "😴 Stuns (sec)",
-    "stuns_per_min":           "😴 Stuns/min",
+    "stuns_per_min":           "😴 Stuns/Min",
     "teamfight_participation":  "⚡ Teamfight Part.",
     "tower_kills":             "🏰 Tower Kills",
     "observer_kills":          "👁️  Observer Kills",
+    "observer_kills_per_min":  "👁️  Obs Kills/Min",
     "roshans_killed":          "🐉 Roshans Killed",
     "camps_stacked":           "📦 Camp Stacks",
     "rune_pickups":            "💎 Rune Pickups",
@@ -128,7 +129,8 @@ def format_leaderboard(
         elif sort_by == "value":
             sign = "+" if val >= 0 else ""
             cost = p.get("cost") or 0
-            val_str = f"{sign}{val:.2f} (cost {cost})"
+            implied = cost + val
+            val_str = f"{sign}{val:.1f} (cost {cost} → worth {implied:.1f})"
             if debug:
                 diff = p.get("diff") or 0
                 diff_sign = "+" if diff >= 0 else ""
@@ -148,6 +150,8 @@ def format_leaderboard(
         elif sort_by in ("gpm", "xpm", "kda", "stuns"):
             val_str = f"{val:.1f}"
         elif sort_by == "stuns_per_min":
+            val_str = f"{val:.2f}/min"
+        elif sort_by == "observer_kills_per_min":
             val_str = f"{val:.2f}/min"
         elif sort_by == "avg_first_tormentor_time":
             val_str = _format_seconds(val)
@@ -288,7 +292,8 @@ def format_player_stats(
             predicted = p.get("predicted_diff")
             if value is not None:
                 sign = "+" if value >= 0 else ""
-                value_str = f"{sign}{value:.2f} vs expected"
+                implied = cost + value
+                value_str = f"{sign}{value:.1f}$ (worth ~{implied:.1f})"
             else:
                 value_str = "N/A"
             if predicted is not None:
@@ -334,9 +339,9 @@ _NOTABLE_STATS: list[tuple[str, str, bool, callable]] = [
     ("Damage Share %",          "avg_pct_damage",          True,  lambda v: f"{v*100:.1f}%"),
     ("Hero Healing/game",       "hero_healing",            True,  lambda v: f"{v:,.0f}"),
     ("Teamfight %",             "teamfight_participation", True,  lambda v: f"{v*100:.0f}%"),
-    ("Stuns/min",               "stuns_per_min",           True,  lambda v: f"{v:.2f}"),
+    ("Stuns/Min",               "stuns_per_min",           True,  lambda v: f"{v:.2f}"),
     ("Tower Kills/game",        "tower_kills",             True,  lambda v: f"{v:.2f}"),
-    ("Observer Kills/game",     "observer_kills",          True,  lambda v: f"{v:.2f}"),
+    ("Obs Kills/Min",           "observer_kills_per_min",  True,  lambda v: f"{v:.2f}"),
     ("Roshans Killed/game",     "roshans_killed",          True,  lambda v: f"{v:.2f}"),
     ("Camp Stacks/game",        "camps_stacked",           True,  lambda v: f"{v:.2f}"),
     ("Rune Pickups/game",       "rune_pickups",            True,  lambda v: f"{v:.2f}"),
@@ -345,7 +350,6 @@ _NOTABLE_STATS: list[tuple[str, str, bool, callable]] = [
     ("Watcher Captures/game",   "watcher_captures",        True,  lambda v: f"{v:.2f}"),
     ("Building Damage/game",    "building_damage",         True,  lambda v: f"{v:,.0f}"),
     ("First Blood Rate",        "firstblood_claimed",      True,  lambda v: f"{v*100:.0f}%"),
-    ("Avg Game Length",         "avg_duration",            False, lambda v: _format_seconds(v)),
     ("First Tormentor Time",    "avg_first_tormentor_time",False, lambda v: _format_seconds(v)),
 ]
 
@@ -356,7 +360,7 @@ _NOTABLE_STATS: list[tuple[str, str, bool, callable]] = [
 _TEAM_NOTABLE_STATS = [
     (label, key, hib, fmt)
     for (label, key, hib, fmt) in _NOTABLE_STATS
-    if key not in {"diff", "avg_pct_damage", "firstblood_claimed"}
+    if key not in {"diff", "avg_pct_damage", "firstblood_claimed", "avg_duration"}
 ]
 
 
@@ -377,7 +381,9 @@ def format_team_stats(
     desc_parts = []
     if roster_line:
         desc_parts.append(roster_line)
-    desc_parts.append(f"{wins}W-{losses}L ({win_pct:.0f}% winrate)")
+    avg_dur = target_agg.get("avg_duration")
+    avg_dur_str = f" · {_format_seconds(avg_dur)} avg game length" if avg_dur else ""
+    desc_parts.append(f"{wins}W-{losses}L ({win_pct:.0f}% winrate){avg_dur_str}")
     embed = discord.Embed(
         title=f"🛡️ Team {team_label}",
         description="\n".join(desc_parts),
@@ -588,11 +594,46 @@ def _resolve_internal_rating(
     return _internal_rating(ad_last, ad_all, ranked_last, wr_rating, ranked_mmr, ranked_all)
 
 
+def opendota_counts_are_visible(opendota: dict | None) -> bool:
+    """False when the player has private Steam match history — in which case
+    OpenDota's /wl endpoints all return 0 (meaning "unknown", not "zero").
+    Callers should treat every count as None when this returns False."""
+    return not bool((opendota or {}).get("profile", {}).get("fh_unavailable"))
+
+
+def sanitize_od_counts(opendota: dict | None, od_counts: dict | None) -> dict | None:
+    """When Steam match history is hidden, OpenDota's counts are all bogus 0s.
+    Return a copy with every value None so downstream .get() calls yield None
+    (interpreted as 'unknown' by the display + formula) instead of a false 0."""
+    if od_counts is None:
+        return None
+    if opendota_counts_are_visible(opendota):
+        return od_counts
+    return {k: None for k in od_counts}
+
+
+def windrun_rating_for_formula(wr_data: dict | None) -> float | None:
+    """Return the windrun rating only when it's a meaningful signal.
+
+    Windrun assigns every account a numeric rating even after a single game,
+    which for near-zero-game accounts drifts to placeholder values like -183
+    that carry no skill signal. We defer to windrun's own decision: when the
+    player has no `overallRank` (i.e. windrun labels them Unranked), the
+    rating is discarded so the internal-rating formula falls back to ranked
+    MMR instead.
+    """
+    if not wr_data:
+        return None
+    if wr_data.get("overallRank") is None:
+        return None
+    return wr_data.get("rating")
+
+
 def _ad_inexperience_factor(ad_last_year: int | None) -> float:
     """Discount applied to ranked-eqv to reflect AD inexperience.
 
     A pure ranked player's MMR doesn't fully translate to AD skill until
-    they have meaningful AD experience. Scale from 0.90 (10% penalty) at
+    they have meaningful AD experience. Scale from 0.95 (5% penalty) at
     0 AD games last year up to 1.00 (no penalty) at 200+.
     Unknown ad_last_year → no penalty (no data to judge).
     """
@@ -601,8 +642,8 @@ def _ad_inexperience_factor(ad_last_year: int | None) -> float:
     if ad_last_year >= 200:
         return 1.0
     if ad_last_year <= 0:
-        return 0.90
-    return 0.90 + (ad_last_year / 200.0) * 0.10
+        return 0.95
+    return 0.95 + (ad_last_year / 200.0) * 0.05
 
 
 def _lifetime_ad_bonus(ad_all_time: int | None) -> float:
@@ -763,20 +804,43 @@ def format_lookup(
         title += " (debug)"
     embed = discord.Embed(title=title, url=dotabuff_url, colour=EMBED_COLOUR_BLUE)
 
-    # Avatar (when available) shown in both modes — visual identity only.
-    # Prefer fresh windrun avatar; fall back to cached avatar if needed.
-    avatar_to_use = (windrun or {}).get("avatar") or cached_avatar
-    if avatar_to_use:
+    # Avatar (when available) — prefer the freshly-fetched OpenDota Steam
+    # avatar (avatarfull), fall back to windrun, then to whatever was cached.
+    # Suppress entirely when the player's override flags hide_avatar.
+    hidden = bool(override and override.get("hide_avatar"))
+    avatar_to_use = (
+        ((opendota or {}).get("profile") or {}).get("avatarfull")
+        or (windrun or {}).get("avatar")
+        or cached_avatar
+    )
+    if avatar_to_use and not hidden:
         embed.set_thumbnail(url=avatar_to_use)
 
     # Prominent fetch-failure warning (used by /lookup force_refresh).
     if fetch_error:
         embed.add_field(name="⚠️ Refresh failed", value=fetch_error, inline=False)
 
+    # Prominent hidden-match-history warning — OpenDota can't count games
+    # when Steam match history is private, so our rating leans on rank tier
+    # alone. The player can un-hide it in Steam → Privacy Settings → Game
+    # Details → "My profile" AND uncheck "Always keep my total playtime private".
+    if not opendota_counts_are_visible(opendota):
+        embed.add_field(
+            name="⚠️ Match history hidden",
+            value=(
+                "This player's Steam match history is private, so OpenDota "
+                "can't see their game counts. Rating is estimated from rank "
+                "tier alone."
+            ),
+            inline=False,
+        )
+
     # Resolve overrides up front so display + internal-rating both see them.
     override_wr  = (override or {}).get("windrun_rating")
     override_mmr = (override or {}).get("ranked_mmr")
-    effective_wr_rating = override_wr if override_wr is not None else (windrun or {}).get("rating")
+    # Formula uses the "meaningful" rating (None when windrun labels the
+    # account Unranked); the debug display still shows the raw number.
+    effective_wr_rating = override_wr if override_wr is not None else windrun_rating_for_formula(windrun)
 
     # Compute MMR estimate regardless of mode — internal rating needs it.
     from opendota_lookup import decode_rank_tier, estimate_mmr_from_rank_tier
@@ -834,16 +898,22 @@ def format_lookup(
             mmr_value = "Unknown"
         embed.add_field(name="🏆 Ranked MMR", value=mmr_value, inline=True)
 
+        # OpenDota can only see games when the player has public Steam match
+        # history; otherwise every /wl endpoint returns 0. Show "hidden" for
+        # those so the display isn't misleading.
+        fh_hidden = bool((opendota or {}).get("profile", {}).get("fh_unavailable"))
         def _fmt_count(last_yr, all_time):
-            ly = "?" if last_yr is None else str(last_yr)
-            at = "?" if all_time is None else str(all_time)
+            ly = ("hidden" if fh_hidden else "?") if last_yr is None else str(last_yr)
+            at = ("hidden" if fh_hidden else "?") if all_time is None else str(all_time)
             return f"**{ly}** last year · **{at}** all-time"
         ranked_total = (od_counts or {}).get("all_time_ranked")
+        suffix = "  _(match history private on Steam)_" if fh_hidden else ""
         embed.add_field(
             name="📊 Games Played",
             value=(
                 f"🎯 **AD:** {_fmt_count(ad_last_year, ad_all_time)}\n"
                 f"⚔️ **Ranked:** {_fmt_count(ranked_last, ranked_total)}"
+                f"{suffix}"
             ),
             inline=False,
         )
@@ -967,11 +1037,11 @@ def format_matches_list(matches: list[dict], week_label: str = "Latest Week") ->
         score = f"{m['radiant_score']}-{m['dire_score']}"
 
         dotabuff_link = f"https://www.dotabuff.com/matches/{match_id}"
-        opendota_link = f"https://www.opendota.com/matches/{match_id}"
+        windrun_link  = f"https://windrun.io/matches/{match_id}"
 
         lines.append(
             f"**{match_time}** ({duration_min}m) — {winner} won {score}\n"
-            f"[Dotabuff]({dotabuff_link}) · [OpenDota]({opendota_link})"
+            f"[Dotabuff]({dotabuff_link}) · [Windrun]({windrun_link}) · id: `{match_id}`"
         )
 
     # Split into multiple fields if content is too long (Discord limit: 1024 chars per field)
