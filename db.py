@@ -1899,6 +1899,56 @@ def get_head_to_head_matches(
     return results
 
 
+def get_match_team_captains(
+    guild_id: int, season_start: str, match_ids: list[int],
+) -> dict[int, dict[str, str | None]]:
+    """Attribute each side of each match to a team, keyed by captain.
+
+    Same rule as get_head_to_head_matches / get_team_match_aggregates: a side
+    belongs to a team when ≥3 of that team's roster (4 drafted + captain when
+    resolvable) played on it. Sides no team qualifies for (stand-in-heavy
+    lineups, matches from another season) map to None.
+
+    Returns {match_id: {"radiant": captain_or_None, "dire": captain_or_None}}.
+    """
+    if not match_ids or not season_start:
+        return {}
+
+    costs = get_player_costs(guild_id, season_start)
+    cap_aids = get_captain_account_ids(guild_id, season_start)
+    rosters: dict[str, set[int]] = {}
+    for aid, c in costs.items():
+        if c.get("captain"):
+            rosters.setdefault(c["captain"], set()).add(aid)
+    for cap, cap_aid in cap_aids.items():
+        if cap_aid and cap in rosters:
+            rosters[cap].add(cap_aid)
+
+    sides = {mid: {"radiant": set(), "dire": set()} for mid in match_ids}
+    if rosters:
+        ids = list(sides)
+        with _conn() as conn:
+            for i in range(0, len(ids), 500):  # stay under SQLite's bound-parameter limit
+                chunk = ids[i:i + 500]
+                rows = conn.execute(
+                    f"SELECT match_id, account_id, team_side FROM players "
+                    f"WHERE match_id IN ({','.join('?' * len(chunk))})",
+                    chunk,
+                ).fetchall()
+                for r in rows:
+                    side = sides[r["match_id"]].get(r["team_side"])
+                    if side is not None:
+                        side.add(r["account_id"])
+
+    result: dict[int, dict[str, str | None]] = {}
+    for mid, by_side in sides.items():
+        result[mid] = {}
+        for side, aids in by_side.items():
+            cap = max(rosters, key=lambda c: len(rosters[c] & aids), default=None)
+            result[mid][side] = cap if cap and len(rosters[cap] & aids) >= 3 else None
+    return result
+
+
 def get_team_match_aggregates(guild_id: int, season_start: str) -> dict[str, dict]:
     """Per-team stats computed match-by-match instead of per-player-row.
 

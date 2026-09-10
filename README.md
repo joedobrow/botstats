@@ -108,13 +108,15 @@ The bot ships with a `Dockerfile` and `fly.toml` configured for fly.io.
 | `/player <name> [week]` | Full stat breakdown for one player. Partial name matching. |
 | `/playerdiff <name> [week]` | Compare a player's fantasy points to the average of their same-side teammates. |
 | `/roles [week]` | Best fantasy-points player at each position (1–5). |
-| `/matches [week] [player]` | Match list with Dotabuff/OpenDota links; optional player filter. |
+| `/matches [week] [player]` | Match list with team names and Dotabuff/Windrun links; optional player filter. |
 | `/summary` | Compact fantasy-pts leaderboard per position for latest week + all-time. |
 | `/quote` | Random in-game chat message from a parsed match. |
 | `/draftorder <match_id>` | Render the AD pick order as an image. Triggers an on-demand replay parse if needed. |
 | `/tipjar` | Venmo link for the bot creator. |
 | `/refresh` | *(Admin)* Manually trigger a data fetch right now. |
 | `/nuke` | *(Admin)* Wipe all data for this server and re-fetch from scratch. |
+
+`/leaderboard`, `/player`, `/players`, `/matches`, `/summary`, `/team_stats`, and `/hi_vs_low` reply only to you by default; pass `public:True` to post the result in the channel instead. `/quote` posts in the channel by default (`public:False` keeps it to yourself). Image cards (`/player_card`, `/team_card`, `/h2h_card`, `/h2h_player`) and `/draftorder` always post in the channel.
 
 ---
 
