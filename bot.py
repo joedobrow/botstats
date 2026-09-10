@@ -30,8 +30,10 @@ def _require_division(interaction: discord.Interaction):
     return get_division(interaction.guild_id)
 
 
-# Commands reply privately (ephemeral) by default; public=True posts to the channel instead
+# Stat commands reply privately (ephemeral) by default; public=True posts to the channel instead.
+# Commands meant for sharing (e.g. /quote) default the other way.
 PUBLIC_PARAM_DESCRIPTION = "Post the result in the channel instead of only showing it to you (default: False)"
+PUBLIC_BY_DEFAULT_PARAM_DESCRIPTION = "Post the result in the channel; set False to only show it to you (default: True)"
 
 
 # ---------------------------------------------------------------------------
@@ -718,9 +720,9 @@ def _clean_card_line(line: str) -> str:
 
 
 @tree.command(name="player_card", description="Render a stream-friendly PNG card for a player")
-@app_commands.describe(name="Player name (partial), override nickname, or numeric account ID", public=PUBLIC_PARAM_DESCRIPTION)
-async def player_card(interaction: discord.Interaction, name: str, public: bool = False):
-    await interaction.response.defer(ephemeral=not public)
+@app_commands.describe(name="Player name (partial), override nickname, or numeric account ID")
+async def player_card(interaction: discord.Interaction, name: str):
+    await interaction.response.defer()
     division = _require_division(interaction)
     if not division:
         await interaction.followup.send("⚠️ No division configured.", ephemeral=True)
@@ -792,14 +794,13 @@ async def player_card(interaction: discord.Interaction, name: str, public: bool 
     )
     await interaction.followup.send(
         file=discord.File(buf, filename=f"player_{account_id}.png"),
-        ephemeral=not public,
     )
 
 
 @tree.command(name="team_card", description="Render a stream-friendly PNG card for a player's team")
-@app_commands.describe(name="Any player on the team — partial name, override nickname, or numeric account ID", public=PUBLIC_PARAM_DESCRIPTION)
-async def team_card(interaction: discord.Interaction, name: str, public: bool = False):
-    await interaction.response.defer(ephemeral=not public)
+@app_commands.describe(name="Any player on the team — partial name, override nickname, or numeric account ID")
+async def team_card(interaction: discord.Interaction, name: str):
+    await interaction.response.defer()
     division = _require_division(interaction)
     if not division:
         await interaction.followup.send("⚠️ No division configured.", ephemeral=True)
@@ -907,7 +908,6 @@ async def team_card(interaction: discord.Interaction, name: str, public: bool = 
     )
     await interaction.followup.send(
         file=discord.File(buf, filename=f"team_{captain}.png"),
-        ephemeral=not public,
     )
 
 
@@ -916,11 +916,10 @@ async def team_card(interaction: discord.Interaction, name: str, public: bool = 
     season="Which season to look at (defaults to the current one)",
     team1="Any player on team 1 (or the captain's name)",
     team2="Any player on team 2 (or the captain's name)",
-    public=PUBLIC_PARAM_DESCRIPTION,
 )
 @app_commands.autocomplete(season=_season_autocomplete)
-async def h2h_card(interaction: discord.Interaction, team1: str, team2: str, season: str = None, public: bool = False):
-    await interaction.response.defer(ephemeral=not public)
+async def h2h_card(interaction: discord.Interaction, team1: str, team2: str, season: str = None):
+    await interaction.response.defer()
 
     division = _require_division(interaction)
     if not division:
@@ -1034,7 +1033,6 @@ async def h2h_card(interaction: discord.Interaction, team1: str, team2: str, sea
     )
     await interaction.followup.send(
         file=discord.File(buf, filename=f"h2h_{cap_a}_vs_{cap_b}.png"),
-        ephemeral=not public,
     )
 
 
@@ -1042,10 +1040,9 @@ async def h2h_card(interaction: discord.Interaction, team1: str, team2: str, sea
 @app_commands.describe(
     player1="First player (partial name, override nickname, or numeric account ID)",
     player2="Second player (partial name, override nickname, or numeric account ID)",
-    public=PUBLIC_PARAM_DESCRIPTION,
 )
-async def h2h_player(interaction: discord.Interaction, player1: str, player2: str, public: bool = False):
-    await interaction.response.defer(ephemeral=not public)
+async def h2h_player(interaction: discord.Interaction, player1: str, player2: str):
+    await interaction.response.defer()
     division = _require_division(interaction)
     if not division:
         await interaction.followup.send("⚠️ No division configured.", ephemeral=True)
@@ -1142,7 +1139,6 @@ async def h2h_player(interaction: discord.Interaction, player1: str, player2: st
     )
     await interaction.followup.send(
         file=discord.File(buf, filename=f"h2h_{aid_a}_vs_{aid_b}.png"),
-        ephemeral=not public,
     )
 
 
@@ -1151,9 +1147,9 @@ async def h2h_player(interaction: discord.Interaction, player1: str, player2: st
 @app_commands.describe(
     query="Player name (partial match) or numeric account ID",
     force_refresh="Skip the cache and re-fetch from windrun/OpenDota",
-    public=PUBLIC_PARAM_DESCRIPTION,
+    public=PUBLIC_BY_DEFAULT_PARAM_DESCRIPTION,
 )
-async def lookup(interaction: discord.Interaction, query: str, force_refresh: bool = False, public: bool = False):
+async def lookup(interaction: discord.Interaction, query: str, force_refresh: bool = False, public: bool = True):
     is_owner = ADMIN_USER_ID and interaction.user.id == ADMIN_USER_ID
     in_admin_channel = interaction.channel_id in LOOKUP_CHANNEL_IDS
     if not (is_owner or in_admin_channel):
@@ -1997,8 +1993,8 @@ async def summary(interaction: discord.Interaction, season: str = None, public: 
 
 
 @tree.command(name="quote", description="Display a random chat message from league matches")
-@app_commands.describe(public=PUBLIC_PARAM_DESCRIPTION)
-async def quote(interaction: discord.Interaction, public: bool = False):
+@app_commands.describe(public=PUBLIC_BY_DEFAULT_PARAM_DESCRIPTION)
+async def quote(interaction: discord.Interaction, public: bool = True):
     division = _require_division(interaction)
     if not division:
         await interaction.response.send_message("⚠️ No division configured. Ask an admin to run `/config` first.", ephemeral=True)
@@ -2031,9 +2027,9 @@ async def quote(interaction: discord.Interaction, public: bool = False):
 
 
 @tree.command(name="draftorder", description="Show the Ability Draft pick order for a match")
-@app_commands.describe(match_id="The Dota 2 match ID (from Windrun or Dotabuff)", public=PUBLIC_PARAM_DESCRIPTION)
-async def draftorder(interaction: discord.Interaction, match_id: str, public: bool = False):
-    await interaction.response.defer(ephemeral=not public)
+@app_commands.describe(match_id="The Dota 2 match ID (from Windrun or Dotabuff)")
+async def draftorder(interaction: discord.Interaction, match_id: str):
+    await interaction.response.defer()
 
     try:
         mid = int(match_id.strip())
@@ -2057,7 +2053,7 @@ async def draftorder(interaction: discord.Interaction, match_id: str, public: bo
 
         image_bytes = await generate_draft_image(data)
         file = discord.File(image_bytes, filename=f"draft_{mid}.png")
-        await interaction.followup.send(file=file, ephemeral=not public)
+        await interaction.followup.send(file=file)
     except Exception as e:
         logger.exception("Error in draftorder command for match %s", match_id)
         await interaction.followup.send(f"❌ Error generating draft order: {e}", ephemeral=True)

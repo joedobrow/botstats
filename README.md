@@ -116,7 +116,7 @@ The bot ships with a `Dockerfile` and `fly.toml` configured for fly.io.
 | `/refresh` | *(Admin)* Manually trigger a data fetch right now. |
 | `/nuke` | *(Admin)* Wipe all data for this server and re-fetch from scratch. |
 
-Replies are only visible to you by default. Commands that show stats, matches, quotes, or image cards accept an optional `public:True` to post the result in the channel instead. Admin and owner commands always reply privately.
+`/leaderboard`, `/player`, `/players`, `/matches`, `/summary`, `/team_stats`, and `/hi_vs_low` reply only to you by default; pass `public:True` to post the result in the channel instead. `/quote` posts in the channel by default (`public:False` keeps it to yourself). Image cards (`/player_card`, `/team_card`, `/h2h_card`, `/h2h_player`) and `/draftorder` always post in the channel.
 
 ---
 
