@@ -985,7 +985,10 @@ def format_compact_leaderboard(stats: list[dict], pos: int, sort_by: str = "fant
 # ---------------------------------------------------------------------------
 
 def format_matches_list(matches: list[dict], week_label: str = "Latest Week") -> discord.Embed:
-    """Format a list of matches with Dotabuff links."""
+    """Format a list of matches with team names and Dotabuff links.
+
+    Rows may carry radiant_team / dire_team (league team names); sides without
+    one are shown as Radiant / Dire."""
     from datetime import datetime
 
     embed = discord.Embed(
@@ -1003,15 +1006,17 @@ def format_matches_list(matches: list[dict], week_label: str = "Latest Week") ->
         match_time = datetime.fromtimestamp(m["start_time"], tz=LEAGUE_TZ).strftime("%b %d, %I:%M %p")
         duration_min = m["duration"] // 60
 
-        winner = "Radiant" if m["radiant_win"] else "Dire"
+        radiant = discord.utils.escape_markdown(m.get("radiant_team") or "Radiant")
+        dire = discord.utils.escape_markdown(m.get("dire_team") or "Dire")
+        winner = radiant if m["radiant_win"] else dire
         score = f"{m['radiant_score']}-{m['dire_score']}"
 
         dotabuff_link = f"https://www.dotabuff.com/matches/{match_id}"
         windrun_link  = f"https://windrun.io/matches/{match_id}"
 
         lines.append(
-            f"**{match_time}** ({duration_min}m) — {winner} won {score}\n"
-            f"[Dotabuff]({dotabuff_link}) · [Windrun]({windrun_link}) · id: `{match_id}`"
+            f"**{match_time}** ({duration_min}m) — **{radiant}** vs **{dire}**\n"
+            f"{winner} won {score} · [Dotabuff]({dotabuff_link}) · [Windrun]({windrun_link}) · id: `{match_id}`"
         )
 
     # Split into multiple fields if content is too long (Discord limit: 1024 chars per field)
