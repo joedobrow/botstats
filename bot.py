@@ -1913,6 +1913,20 @@ async def matches(interaction: discord.Interaction, week: int = None, player: st
         await interaction.followup.send(msg, ephemeral=True)
         return
 
+    # Label each side with its league team; sides we can't attribute to a
+    # team fall back to Radiant/Dire in the formatter.
+    from db import get_match_team_captains
+    from team_metadata import get_team_info
+    side_captains = get_match_team_captains(guild_id, season_start, [m["match_id"] for m in match_list])
+    team_names: dict[str, str] = {}
+    for m in match_list:
+        sides = side_captains.get(m["match_id"], {})
+        for side in ("radiant", "dire"):
+            cap = sides.get(side)
+            if cap and cap not in team_names:
+                team_names[cap] = get_team_info(cap, guild_id, season_start).get("team_name") or cap
+            m[f"{side}_team"] = team_names.get(cap)
+
     from formatters import format_matches_list
     embed = format_matches_list(match_list, week_label=week_label)
     await interaction.followup.send(embed=embed, ephemeral=not public)

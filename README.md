@@ -108,7 +108,7 @@ The bot ships with a `Dockerfile` and `fly.toml` configured for fly.io.
 | `/player <name> [week]` | Full stat breakdown for one player. Partial name matching. |
 | `/playerdiff <name> [week]` | Compare a player's fantasy points to the average of their same-side teammates. |
 | `/roles [week]` | Best fantasy-points player at each position (1–5). |
-| `/matches [week] [player]` | Match list with Dotabuff/OpenDota links; optional player filter. |
+| `/matches [week] [player]` | Match list with team names and Dotabuff/Windrun links; optional player filter. |
 | `/summary` | Compact fantasy-pts leaderboard per position for latest week + all-time. |
 | `/quote` | Random in-game chat message from a parsed match. |
 | `/draftorder <match_id>` | Render the AD pick order as an image. Triggers an on-demand replay parse if needed. |
