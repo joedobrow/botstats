@@ -294,6 +294,174 @@ async def team_card_handler(request: web.Request) -> web.Response:
 
 
 # ---------------------------------------------------------------------------
+# Ratings API (for the Google Sheets scout-sheet sync)
+# ---------------------------------------------------------------------------
+
+# Cap how many never-before-seen players get computed per request, so one
+# hourly sync call can't run long enough to hit a client-side timeout.
+# Windrun's ~5s per-account rate limit dominates: 8 accounts ~= 40s worst
+# case. Any stragglers beyond the cap just get picked up on the next sync.
+RATINGS_BACKFILL_LIMIT = 8
+
+
+async def _account_ids_from_draft_sheet(draft_sheet_url: str) -> list[int]:
+    """Fetch the public rd2l.gg draft-sheet CSV and pull out every player's
+    Steam account_id from their dotabuff/opendota profile link."""
+    import csv
+    import io
+    import re
+    import aiohttp
+
+    timeout = aiohttp.ClientTimeout(total=15)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with session.get(draft_sheet_url) as resp:
+            resp.raise_for_status()
+            text = await resp.text()
+
+    reader = csv.DictReader(io.StringIO(text))
+    ids = []
+    for row in reader:
+        m = re.search(r"/players/(\d+)", row.get("dotabuff") or row.get("opendota") or "")
+        if m:
+            ids.append(int(m.group(1)))
+    return ids
+
+
+async def ratings_api_handler(request: web.Request) -> web.Response:
+    """GET /api/ratings[?draft_sheet_url=...][&guild_id=...&season_start=...] ->
+        {"account_id": {"internal_rating": int, "name": str}}
+
+    Requires the X-Api-Key header to match RATINGS_API_KEY. Returns every
+    cached player_ratings_cache row, keyed by account_id as a string (JSON
+    object keys must be strings).
+
+    When draft_sheet_url is given, first computes + caches ratings (up to
+    RATINGS_BACKFILL_LIMIT per call) for any account in that CSV that isn't
+    cached yet, so newly-signed-up players get a rating without anyone
+    needing to run /player or /refresh_ratings by hand.
+
+    When guild_id + season_start are given, internal_rating is the same
+    fantasy-adjusted number /player displays (base rating nudged up to
+    ±6% by how much someone over/underperformed expectations that season),
+    not the raw player_ratings_cache value — matching /player exactly for
+    anyone with match history that season. Falls back to the raw rating for
+    anyone without an adjustment entry (no match history / manually rated),
+    same as /player does. Omit these params to get the raw rating, as before.
+    """
+    from config import RATINGS_API_KEY
+
+    if not RATINGS_API_KEY:
+        return web.Response(text="Ratings API not configured", status=503)
+    if request.headers.get("X-Api-Key") != RATINGS_API_KEY:
+        return web.Response(text="Unauthorized", status=401)
+
+    from db import get_all_rating_cache_rows, get_rating_cache_row
+
+    draft_sheet_url = request.query.get("draft_sheet_url")
+    if draft_sheet_url:
+        from rating_compute import compute_and_cache_rating
+        try:
+            account_ids = await _account_ids_from_draft_sheet(draft_sheet_url)
+        except Exception:
+            logger.exception("Failed to fetch draft sheet for ratings backfill")
+            account_ids = []
+
+        missing = [aid for aid in account_ids if get_rating_cache_row(aid) is None]
+        for aid in missing[:RATINGS_BACKFILL_LIMIT]:
+            await compute_and_cache_rating(aid)
+
+    rows = get_all_rating_cache_rows()
+
+    adjustments = {}
+    guild_id = request.query.get("guild_id")
+    season_start = request.query.get("season_start")
+    if guild_id and season_start:
+        from db import compute_fantasy_adjusted_ratings
+        adjustments = compute_fantasy_adjusted_ratings(int(guild_id), season_start)
+
+    data = {}
+    for r in rows:
+        aid = r["account_id"]
+        rating = r["internal_rating"]
+        adj = adjustments.get(aid)
+        if adj:
+            rating = adj["adjusted_rating"]
+        data[str(aid)] = {"internal_rating": rating, "name": r["name"]}
+    return web.json_response(data)
+
+
+async def costs_api_handler(request: web.Request) -> web.Response:
+    """GET /api/costs?guild_id=...&season_start=YYYY-MM-DD ->
+        {"account_id": {"cost": int, "captain": str|None}}
+
+    Requires the same X-Api-Key as /api/ratings. Read-only wrapper around
+    db.get_player_costs, for Google Sheets analytics that want a past
+    season's draft costs (e.g. "what did this player go for last season").
+    """
+    from config import RATINGS_API_KEY
+
+    if not RATINGS_API_KEY:
+        return web.Response(text="Ratings API not configured", status=503)
+    if request.headers.get("X-Api-Key") != RATINGS_API_KEY:
+        return web.Response(text="Unauthorized", status=401)
+
+    guild_id = request.query.get("guild_id")
+    season_start = request.query.get("season_start")
+    if not guild_id or not season_start:
+        return web.Response(text="Missing guild_id or season_start query param", status=400)
+
+    from db import get_player_costs
+
+    costs = get_player_costs(int(guild_id), season_start)
+    data = {
+        str(aid): {"cost": c["cost"], "captain": c["captain"]}
+        for aid, c in costs.items()
+    }
+    return web.json_response(data)
+
+
+async def season_stats_api_handler(request: web.Request) -> web.Response:
+    """GET /api/season_stats?guild_id=...&season_start=YYYY-MM-DD ->
+        {"account_id": {games_played, wins, attendance, fantasy_points,
+                         cost, deserved_cost, value}}
+
+    Requires the same X-Api-Key as /api/ratings. Thin wrapper around
+    db.get_all_time_stats for a given season — the exact same numbers
+    /leaderboard's "Value ($ deserved − $ paid)" is built from, exposed for
+    Google Sheets draft-prep analytics (e.g. computing a suggested bid from
+    a past season's performance-vs-cost outcome).
+    """
+    from config import RATINGS_API_KEY
+
+    if not RATINGS_API_KEY:
+        return web.Response(text="Ratings API not configured", status=503)
+    if request.headers.get("X-Api-Key") != RATINGS_API_KEY:
+        return web.Response(text="Unauthorized", status=401)
+
+    guild_id = request.query.get("guild_id")
+    season_start = request.query.get("season_start")
+    if not guild_id or not season_start:
+        return web.Response(text="Missing guild_id or season_start query param", status=400)
+
+    from db import get_all_time_stats
+
+    rows = get_all_time_stats(int(guild_id), season_start)
+    data = {
+        str(r["account_id"]): {
+            "games_played":   r.get("games_played"),
+            "wins":           r.get("wins"),
+            "attendance":     r.get("attendance"),
+            "fantasy_points": r.get("fantasy_points"),
+            "cost":           r.get("cost"),
+            "deserved_cost":  r.get("deserved_cost"),
+            "value":          r.get("value"),
+        }
+        for r in rows
+    }
+    return web.json_response(data)
+
+
+# ---------------------------------------------------------------------------
 # AD helper (existing)
 # ---------------------------------------------------------------------------
 
@@ -314,11 +482,27 @@ async def ad_helper_handler(request: web.Request) -> web.Response:
     return web.Response(text=html, content_type="text/html")
 
 
+async def vibecheck_handler(request: web.Request) -> web.Response:
+    """Static content piece: the S39 Discord-vibes scouting report.
+
+    Served from here rather than as a Claude artifact so the link is public —
+    anyone in the Discord can open it without an account.
+    """
+    path = TEMPLATE_DIR / "vibecheck_s39.html"
+    if not path.exists():
+        return web.Response(text="Not found.", status=404)
+    return web.Response(text=path.read_text(encoding="utf-8"), content_type="text/html")
+
+
 def create_app() -> web.Application:
     app = web.Application()
+    app.router.add_get("/vibecheck", vibecheck_handler)
     app.router.add_get("/ad-helper", ad_helper_handler)
     app.router.add_get("/card/player/{account_id}", player_card_handler)
     app.router.add_get("/card/team/{captain}",       team_card_handler)
+    app.router.add_get("/api/ratings",                ratings_api_handler)
+    app.router.add_get("/api/costs",                  costs_api_handler)
+    app.router.add_get("/api/season_stats",            season_stats_api_handler)
     # Serve the rd2l logo + any other static assets from the assets/ dir.
     if ASSETS_DIR.exists():
         app.router.add_static("/assets/", path=str(ASSETS_DIR), show_index=False)

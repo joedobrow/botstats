@@ -120,6 +120,27 @@ def init_db():
         if prc_cols and "fh_unavailable" not in prc_cols:
             logger.info("Migrating: adding fh_unavailable column to player_ratings_cache")
             conn.execute("ALTER TABLE player_ratings_cache ADD COLUMN fh_unavailable INTEGER DEFAULT 0")
+        if prc_cols and "rank_tier" not in prc_cols:
+            logger.info("Migrating: adding rank_tier + leaderboard_rank to player_ratings_cache")
+            conn.execute("ALTER TABLE player_ratings_cache ADD COLUMN rank_tier INTEGER")
+            conn.execute("ALTER TABLE player_ratings_cache ADD COLUMN leaderboard_rank INTEGER")
+
+        # --- Migration: add rank_tier + leaderboard_rank to skill_overrides ---
+        # These replace ranked_mmr as the ranked-side override lever. ranked_mmr
+        # is kept for now so existing rows still round-trip; the runtime migration
+        # further down converts them into (rank_tier, leaderboard_rank) once.
+        cursor = conn.execute("PRAGMA table_info(skill_overrides)")
+        so_cols = [row[1] for row in cursor.fetchall()]
+        if so_cols and "rank_tier" not in so_cols:
+            logger.info("Migrating: adding rank_tier + leaderboard_rank to skill_overrides")
+            conn.execute("ALTER TABLE skill_overrides ADD COLUMN rank_tier INTEGER")
+            conn.execute("ALTER TABLE skill_overrides ADD COLUMN leaderboard_rank INTEGER")
+        if so_cols and "alt_account_for" not in so_cols:
+            logger.info("Migrating: adding alt_account_for column to skill_overrides")
+            conn.execute("ALTER TABLE skill_overrides ADD COLUMN alt_account_for INTEGER")
+        if so_cols and "discord_override" not in so_cols:
+            logger.info("Migrating: adding discord_override column to skill_overrides")
+            conn.execute("ALTER TABLE skill_overrides ADD COLUMN discord_override TEXT")
 
         # --- Migration: add scold_channel_id column to divisions if missing ---
         cursor = conn.execute("PRAGMA table_info(divisions)")
@@ -225,6 +246,8 @@ def init_db():
                 internal_rating   INTEGER,
                 raw_windrun       REAL,
                 mmr_estimate      INTEGER,
+                rank_tier         INTEGER,
+                leaderboard_rank  INTEGER,
                 ad_last_year      INTEGER,
                 ad_all_time       INTEGER,
                 ranked_last_year  INTEGER,
@@ -240,11 +263,15 @@ def init_db():
             CREATE TABLE IF NOT EXISTS skill_overrides (
                 account_id              INTEGER PRIMARY KEY,
                 windrun_rating          REAL,
-                ranked_mmr              INTEGER,
+                ranked_mmr              INTEGER,       -- deprecated; migrated to rank_tier
+                rank_tier               INTEGER,
+                leaderboard_rank        INTEGER,
                 nickname                TEXT,
                 note                    TEXT,
                 internal_rating_override INTEGER,
                 hide_avatar             INTEGER DEFAULT 0,
+                alt_account_for         INTEGER,        -- main account_id to defer rating to
+                discord_override        TEXT,           -- overrides scraped rd2l handle for /sync_roles_channels
                 set_by_user_id          INTEGER,
                 set_by_name             TEXT,
                 set_at                  TEXT NOT NULL
@@ -264,6 +291,52 @@ def init_db():
 
             CREATE INDEX IF NOT EXISTS idx_player_costs_lookup
                 ON player_costs(guild_id, season_start);
+
+            -- Explicit week boundaries per season, replacing pure calendar
+            -- math so bye weeks / reschedules can be handled directly
+            -- (skip a week, or widen an adjacent one) instead of only ever
+            -- being able to shift the whole season via season_start.
+            -- week_number 0 is the pre-season/calibration window. A guild's
+            -- season only uses this table once rows exist for it — see
+            -- get_season_week_range/get_current_season_week, which fall
+            -- back to the legacy calendar formula when none are defined.
+            CREATE TABLE IF NOT EXISTS season_weeks (
+                guild_id      INTEGER NOT NULL,
+                season_start  TEXT NOT NULL,
+                week_number   INTEGER NOT NULL,
+                start_ts      INTEGER NOT NULL,
+                end_ts        INTEGER NOT NULL,
+                PRIMARY KEY (guild_id, season_start, week_number)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_season_weeks_lookup
+                ON season_weeks(guild_id, season_start);
+
+            -- Per-season team identity (real team name + logo), keyed by the
+            -- captain string that appears in player_costs. Replaces the old
+            -- hardcoded team_metadata.py dict so a new season is a data change,
+            -- not a code change.
+            -- One row per season this guild has run. Lets commands offer a
+            -- season: filter and give it a human label; divisions only ever
+            -- holds the *current* season, so without this the history is
+            -- reachable but unnameable.
+            CREATE TABLE IF NOT EXISTS seasons (
+                guild_id      INTEGER NOT NULL,
+                season_start  TEXT NOT NULL,
+                league_id     INTEGER,
+                label         TEXT,
+                created_at    TEXT NOT NULL,
+                PRIMARY KEY (guild_id, season_start)
+            );
+
+            CREATE TABLE IF NOT EXISTS season_teams (
+                guild_id      INTEGER NOT NULL,
+                season_start  TEXT NOT NULL,
+                captain       TEXT NOT NULL,      -- lowercased captain key
+                team_name     TEXT NOT NULL,
+                logo_url      TEXT,
+                PRIMARY KEY (guild_id, season_start, captain)
+            );
 
             -- Per-guild roster of "tracked" players. Lets /set_player add a
             -- player to a guild even if they haven't appeared in a match yet,
@@ -310,7 +383,119 @@ def init_db():
 
             CREATE INDEX IF NOT EXISTS idx_chat_match ON chat_messages(match_id);
         """)
+    _migrate_ranked_mmr_overrides_to_rank()
+    _seed_s38_season_teams()
+    _backfill_season_registry()
     logger.info("Database initialised at %s", DB_PATH)
+
+
+def _backfill_season_registry():
+    """Register any season that already has data but predates the seasons table:
+    each division's current season, plus every season_start seen in player_costs.
+    League id comes from the division row where it lines up. Labels stay NULL —
+    they render as the start date until /start_new_season sets a real one."""
+    with _conn() as conn:
+        divs = conn.execute(
+            "SELECT guild_id, league_id, season_start FROM divisions").fetchall()
+        for d in divs:
+            conn.execute("""
+                INSERT INTO seasons (guild_id, season_start, league_id, label, created_at)
+                VALUES (?, ?, ?, NULL, datetime('now'))
+                ON CONFLICT(guild_id, season_start) DO UPDATE SET
+                    league_id = COALESCE(seasons.league_id, excluded.league_id)
+            """, (d["guild_id"], d["season_start"], d["league_id"]))
+        conn.execute("""
+            INSERT INTO seasons (guild_id, season_start, league_id, label, created_at)
+            SELECT DISTINCT pc.guild_id, pc.season_start, NULL, NULL, datetime('now')
+            FROM player_costs pc
+            WHERE NOT EXISTS (
+                SELECT 1 FROM seasons s
+                WHERE s.guild_id = pc.guild_id AND s.season_start = pc.season_start
+            )
+        """)
+
+
+def _seed_s38_season_teams():
+    """One-shot: move the old hardcoded team_metadata.py dict into season_teams
+    so the S38 cards/H2H keep their real names + logos after the table exists.
+    No-op once the rows are present (or if that season isn't configured here)."""
+    S38_GUILD, S38_SEASON = 1481800158826991718, "2026-04-28"
+    with _conn() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM season_teams WHERE guild_id = ? AND season_start = ? LIMIT 1",
+            (S38_GUILD, S38_SEASON),
+        ).fetchone()
+        if row:
+            return
+    try:
+        from team_metadata import _LEGACY_S38_TEAMS
+    except Exception:
+        return
+    teams = [
+        {"captain": cap, "team_name": info["team_name"], "logo_url": info.get("logo_url")}
+        for cap, info in _LEGACY_S38_TEAMS.items()
+    ]
+    if teams:
+        upsert_season_teams(S38_GUILD, S38_SEASON, teams)
+        logger.info("Seeded %d S38 team identities into season_teams", len(teams))
+
+
+def _migrate_ranked_mmr_overrides_to_rank():
+    """One-shot migration: turn existing skill_overrides.ranked_mmr into an
+    equivalent (rank_tier, leaderboard_rank) pair so the pre-squish overrides
+    keep behaving the same under the new badge-based pipeline.
+
+    Reversal recipe:
+      - MMR ≥ Immortal floor (5420): rank_tier = 80. If MMR > 6000, back-solve
+        leaderboard rank via the old log formula. If MMR ≤ 6000, generic Immortal.
+      - MMR < 5420: find the medal bracket, pick the star sub-band whose midpoint
+        is closest to the stored MMR value.
+    """
+    try:
+        from rating_model import legacy_mmr_to_leaderboard_rank
+    except ImportError:
+        # Public clone with no rating model — there are no legacy overrides to
+        # migrate in that case, so skipping is correct rather than fatal.
+        logger.info("rating_model absent; skipping legacy ranked_mmr migration")
+        return
+    _BRACKETS = [
+        (1, 0, 770), (2, 770, 1540), (3, 1540, 2310), (4, 2310, 3080),
+        (5, 3080, 3850), (6, 3850, 4620), (7, 4620, 5420),
+    ]
+    with _conn() as conn:
+        rows = conn.execute(
+            "SELECT account_id, ranked_mmr FROM skill_overrides "
+            "WHERE ranked_mmr IS NOT NULL AND rank_tier IS NULL"
+        ).fetchall()
+        for r in rows:
+            mmr = r["ranked_mmr"]
+            if mmr is None:
+                continue
+            if mmr >= 5420:
+                rt = 80
+                if mmr > 8000:
+                    # High-MMR overrides map to real leaderboard positions via
+                    # the legacy fit, which lives in the private rating model.
+                    lb = legacy_mmr_to_leaderboard_rank(mmr)
+                else:
+                    # Low-Immortal (5420-8000) doesn't cleanly correspond to a
+                    # leaderboard rank; treat as generic Immortal.
+                    lb = None
+            else:
+                # Find the closest star midpoint in the applicable bracket.
+                bracket = next((b for b in _BRACKETS if b[1] <= mmr < b[2]), _BRACKETS[0])
+                tier, lo, hi = bracket
+                width = hi - lo
+                stars = min(range(1, 6), key=lambda s: abs((lo + width * (2 * s - 1) / 10) - mmr))
+                rt = tier * 10 + stars
+                lb = None
+            conn.execute(
+                "UPDATE skill_overrides SET rank_tier = ?, leaderboard_rank = ?, ranked_mmr = NULL "
+                "WHERE account_id = ?",
+                (rt, lb, r["account_id"]),
+            )
+            logger.info("Migrated override for %d: ranked_mmr=%d → rank_tier=%d lb=%s",
+                        r["account_id"], mmr, rt, lb)
 
 
 # ---------------------------------------------------------------------------
@@ -507,6 +692,237 @@ def _season_week_start(week_number: int, season_start_date: str) -> tuple[int, i
     return int(target_monday.timestamp()), int(target_sunday.timestamp())
 
 
+def _season_weeks_defined(guild_id: int, season_start_date: str) -> bool:
+    """True once any explicit season_weeks rows exist for this guild/season."""
+    with _conn() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM season_weeks WHERE guild_id = ? AND season_start = ? LIMIT 1",
+            (guild_id, season_start_date),
+        ).fetchone()
+    return row is not None
+
+
+def get_season_week_range(guild_id: int, season_start_date: str, week_number: int) -> tuple[int, int]:
+    """Canonical (start_unix, end_unix) for a season week. Prefers an
+    explicit season_weeks row (so byes/reschedules can override a single
+    week); falls back to the calendar formula when the guild/season has no
+    explicit weeks defined yet (e.g. any season before this feature existed)."""
+    with _conn() as conn:
+        row = conn.execute(
+            "SELECT start_ts, end_ts FROM season_weeks "
+            "WHERE guild_id = ? AND season_start = ? AND week_number = ?",
+            (guild_id, season_start_date, week_number),
+        ).fetchone()
+    if row:
+        return row["start_ts"], row["end_ts"]
+    return _season_week_start(week_number, season_start_date)
+
+
+def get_current_season_week(guild_id: int, season_start_date: str) -> int:
+    """Canonical 'current week' resolver, used wherever week=None needs to
+    mean something concrete (leaderboard/player/matches default, /summary).
+
+    With explicit weeks defined: the week whose range contains right now, or
+    the closest one (last if we're past every defined week, first if we're
+    before all of them). Falls back to the legacy get_latest_season_week
+    calendar logic when no explicit weeks exist for this guild/season."""
+    if not _season_weeks_defined(guild_id, season_start_date):
+        return get_latest_season_week(guild_id, season_start_date) or 1
+
+    now_ts = int(datetime.now(timezone.utc).timestamp())
+    with _conn() as conn:
+        rows = conn.execute(
+            "SELECT week_number, start_ts, end_ts FROM season_weeks "
+            "WHERE guild_id = ? AND season_start = ? ORDER BY start_ts",
+            (guild_id, season_start_date),
+        ).fetchall()
+
+    current = rows[0]["week_number"]
+    for r in rows:
+        if r["start_ts"] <= now_ts:
+            current = r["week_number"]
+        else:
+            break
+    return current
+
+
+# ---------------------------------------------------------------------------
+# Season teams (team identity: real name + logo, per season)
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Season registry (which seasons this guild has run)
+# ---------------------------------------------------------------------------
+
+def get_seasons(guild_id: int) -> list[dict]:
+    """Every season this guild has run, newest first.
+
+    Unions the registry with any season_start that actually has costs or
+    weeks on file, so seasons predating the registry still show up.
+    """
+    with _conn() as conn:
+        rows = conn.execute("""
+            SELECT s.season_start,
+                   s.league_id,
+                   s.label
+            FROM seasons s WHERE s.guild_id = :g
+            UNION
+            SELECT DISTINCT pc.season_start, NULL, NULL
+            FROM player_costs pc WHERE pc.guild_id = :g
+              AND pc.season_start NOT IN (SELECT season_start FROM seasons WHERE guild_id = :g)
+            UNION
+            SELECT DISTINCT sw.season_start, NULL, NULL
+            FROM season_weeks sw WHERE sw.guild_id = :g
+              AND sw.season_start NOT IN (SELECT season_start FROM seasons WHERE guild_id = :g)
+            ORDER BY season_start DESC
+        """, {"g": guild_id}).fetchall()
+    return [dict(r) for r in rows]
+
+
+def upsert_season(guild_id: int, season_start: str,
+                  league_id: int | None = None, label: str | None = None) -> None:
+    """Register a season. Passing None for league_id/label keeps any existing value."""
+    from datetime import datetime as _dt, timezone as _tz
+    with _conn() as conn:
+        conn.execute("""
+            INSERT INTO seasons (guild_id, season_start, league_id, label, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(guild_id, season_start) DO UPDATE SET
+                league_id = COALESCE(excluded.league_id, seasons.league_id),
+                label     = COALESCE(excluded.label,     seasons.label)
+        """, (guild_id, season_start, league_id, label, _dt.now(_tz.utc).isoformat()))
+
+
+def season_label(season: dict) -> str:
+    """Display name for a season row: its label if we have one, else the date."""
+    lbl = season.get("label")
+    return lbl if lbl else f"Season starting {season['season_start']}"
+
+
+def get_season_teams(guild_id: int, season_start_date: str) -> dict[str, dict]:
+    """All teams for a guild/season as {lowercased_captain: {team_name, logo_url}}."""
+    with _conn() as conn:
+        rows = conn.execute(
+            "SELECT captain, team_name, logo_url FROM season_teams "
+            "WHERE guild_id = ? AND season_start = ?",
+            (guild_id, season_start_date),
+        ).fetchall()
+    return {r["captain"]: {"team_name": r["team_name"], "logo_url": r["logo_url"]} for r in rows}
+
+
+def upsert_season_teams(guild_id: int, season_start_date: str, teams: list[dict]) -> int:
+    """Insert/update team identities. Each dict needs captain + team_name;
+    logo_url optional. Captain is stored lowercased so lookups are
+    case-insensitive against whatever player_costs holds."""
+    if not teams:
+        return 0
+    with _conn() as conn:
+        conn.executemany("""
+            INSERT INTO season_teams (guild_id, season_start, captain, team_name, logo_url)
+            VALUES (:guild_id, :season_start, :captain, :team_name, :logo_url)
+            ON CONFLICT(guild_id, season_start, captain) DO UPDATE SET
+                team_name = excluded.team_name,
+                logo_url  = COALESCE(excluded.logo_url, season_teams.logo_url)
+        """, [
+            {
+                "guild_id": guild_id,
+                "season_start": season_start_date,
+                "captain": (t["captain"] or "").strip().lower(),
+                "team_name": t["team_name"],
+                "logo_url": t.get("logo_url"),
+            }
+            for t in teams if t.get("captain") and t.get("team_name")
+        ])
+    return len(teams)
+
+
+def get_season_weeks(guild_id: int, season_start_date: str) -> list[dict]:
+    """All explicitly-defined weeks for this guild/season, ordered by week_number."""
+    with _conn() as conn:
+        rows = conn.execute(
+            "SELECT week_number, start_ts, end_ts FROM season_weeks "
+            "WHERE guild_id = ? AND season_start = ? ORDER BY week_number",
+            (guild_id, season_start_date),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def upsert_season_week(guild_id: int, season_start_date: str, week_number: int, start_ts: int, end_ts: int) -> None:
+    """Insert/update one explicit week boundary."""
+    with _conn() as conn:
+        conn.execute("""
+            INSERT INTO season_weeks (guild_id, season_start, week_number, start_ts, end_ts)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(guild_id, season_start, week_number) DO UPDATE SET
+                start_ts = excluded.start_ts,
+                end_ts   = excluded.end_ts
+        """, (guild_id, season_start_date, week_number, start_ts, end_ts))
+
+
+def delete_season_week(guild_id: int, season_start_date: str, week_number: int) -> bool:
+    """Remove one week's explicit definition. Returns True if a row was removed."""
+    with _conn() as conn:
+        cur = conn.execute(
+            "DELETE FROM season_weeks WHERE guild_id = ? AND season_start = ? AND week_number = ?",
+            (guild_id, season_start_date, week_number),
+        )
+    return cur.rowcount > 0
+
+
+def generate_season_weeks(guild_id: int, season_start_date: str, num_weeks: int,
+                          first_week: int = 1) -> None:
+    """Bulk-create consecutive 7-day week blocks starting at `first_week`.
+
+    first_week=1 (default) numbers them 1..num_weeks, with week 1 being the
+    calendar week containing season_start. first_week=0 numbers them
+    0..num_weeks-1 for seasons that open with a scrim/"week 0" that doesn't
+    count toward seeding — week 0 is then the week containing season_start
+    and week 1 is the week after.
+
+    Individual weeks can be adjusted afterward via upsert_season_week /
+    delete_season_week (e.g. a bye) without affecting any other week."""
+    with _conn() as conn:
+        conn.executemany("""
+            INSERT INTO season_weeks (guild_id, season_start, week_number, start_ts, end_ts)
+            VALUES (:guild_id, :season_start, :week_number, :start_ts, :end_ts)
+            ON CONFLICT(guild_id, season_start, week_number) DO UPDATE SET
+                start_ts = excluded.start_ts,
+                end_ts   = excluded.end_ts
+        """, [
+            {
+                "guild_id": guild_id,
+                "season_start": season_start_date,
+                "week_number": n,
+                "start_ts": _season_week_start(n - first_week + 1, season_start_date)[0],
+                "end_ts": _season_week_start(n - first_week + 1, season_start_date)[1],
+            }
+            # Offset so `first_week` maps onto the calendar week containing
+            # season_start, whatever we've chosen to number that week.
+            for n in range(first_week, first_week + num_weeks)
+        ])
+
+
+def _all_time_start_ts(guild_id: int, season_start_date: str | None) -> int:
+    """Lower bound for 'all-time' queries: the earliest explicitly-defined
+    week's start (if any weeks are defined for this guild/season), else the
+    legacy week-zero calendar calculation, else 0 (no season_start at all)."""
+    if not season_start_date:
+        return 0
+    if _season_weeks_defined(guild_id, season_start_date):
+        with _conn() as conn:
+            row = conn.execute(
+                "SELECT MIN(start_ts) AS s FROM season_weeks WHERE guild_id = ? AND season_start = ?",
+                (guild_id, season_start_date),
+            ).fetchone()
+        if row and row["s"] is not None:
+            return row["s"]
+    season_start = datetime.strptime(season_start_date, "%Y-%m-%d")
+    season_start = season_start.replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=timezone.utc)
+    season_monday = season_start - timedelta(days=season_start.weekday())
+    week_zero_start = season_monday - timedelta(weeks=1)
+    return int(week_zero_start.timestamp())
+
+
 def get_latest_week_stats(guild_id: int, week_offset: int = 0) -> list[dict]:
     """Return aggregated per-player stats for the given week.
 
@@ -572,6 +988,7 @@ def get_latest_week_stats(guild_id: int, week_offset: int = 0) -> list[dict]:
         """, {"guild_id": guild_id, "start": start, "end": end}).fetchall()
 
     diffs = _compute_player_diffs(guild_id, start, end)
+    diffs_vs_lobby = _compute_player_diffs_vs_lobby(guild_id, start, end)
     results = []
     for r in rows:
         d = dict(r)
@@ -581,13 +998,20 @@ def get_latest_week_stats(guild_id: int, week_offset: int = 0) -> list[dict]:
         from fantasy import calculate_fantasy_points
         d["fantasy_points"] = calculate_fantasy_points(d)
         d["diff"] = diffs.get(d["account_id"], 0.0)
+        d["diff_vs_lobby"] = diffs_vs_lobby.get(d["account_id"], 0.0)
         results.append(d)
     return results
 
 
 def get_stats_for_season_week(guild_id: int, week_number: int, season_start_date: str) -> list[dict]:
-    """Return aggregated per-player stats for a specific season week."""
-    start, end = _season_week_start(week_number, season_start_date)
+    """Return aggregated per-player stats for a specific season week.
+
+    Resolves through get_season_week_range so an explicitly-defined week
+    (including a week 0, or a bye/reschedule override) wins over the plain
+    calendar formula — the formula assumes week 1 is the first week, so it
+    puts week 0 a week BEFORE the season and finds nothing.
+    """
+    start, end = get_season_week_range(guild_id, season_start_date, week_number)
     with _conn() as conn:
         rows = conn.execute("""
             SELECT
@@ -647,6 +1071,7 @@ def get_stats_for_season_week(guild_id: int, week_number: int, season_start_date
         """, {"guild_id": guild_id, "start": start, "end": end}).fetchall()
 
     diffs = _compute_player_diffs(guild_id, start, end)
+    diffs_vs_lobby = _compute_player_diffs_vs_lobby(guild_id, start, end)
     results = []
     for r in rows:
         d = dict(r)
@@ -654,6 +1079,7 @@ def get_stats_for_season_week(guild_id: int, week_number: int, season_start_date
         from fantasy import calculate_fantasy_points
         d["fantasy_points"] = calculate_fantasy_points(d)
         d["diff"] = diffs.get(d["account_id"], 0.0)
+        d["diff_vs_lobby"] = diffs_vs_lobby.get(d["account_id"], 0.0)
         results.append(d)
     costs = get_player_costs(guild_id, season_start_date)
     results = _attach_costs(results, costs)
@@ -664,23 +1090,21 @@ def get_stats_for_season_week(guild_id: int, week_number: int, season_start_date
     return results
 
 
-def get_all_time_stats(guild_id: int, season_start_date: str = None) -> list[dict]:
+def get_all_time_stats(guild_id: int, season_start_date: str = None,
+                       cross_season: bool = False) -> list[dict]:
     """Return aggregated per-player stats across all matches for a division.
 
-    If season_start_date is provided, only includes matches from that date onwards.
+    If season_start_date is provided, only includes matches from that date
+    onwards. With cross_season=True the match window opens up to every match
+    the guild has ever recorded (all seasons), while cost-derived fields
+    (cost/captain/value/attendance) still come from season_start_date — those
+    describe a specific draft, so they stay season-scoped by definition.
     """
     from fantasy import calculate_fantasy_points
 
-    # Calculate season start timestamp if provided
-    # Week 0 = one week before season_monday (since _season_week_start is 1-indexed)
-    if season_start_date:
-        season_start = datetime.strptime(season_start_date, "%Y-%m-%d")
-        season_start = season_start.replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=timezone.utc)
-        season_monday = season_start - timedelta(days=season_start.weekday())
-        week_zero_start = season_monday - timedelta(weeks=1)
-        start_ts = int(week_zero_start.timestamp())
-    else:
-        start_ts = 0
+    # cross_season widens the match window to the guild's entire history;
+    # cost/attendance below still key off season_start_date.
+    start_ts = 0 if cross_season else _all_time_start_ts(guild_id, season_start_date)
 
     with _conn() as conn:
         rows = conn.execute("""
@@ -741,23 +1165,46 @@ def get_all_time_stats(guild_id: int, season_start_date: str = None) -> list[dic
         """, (guild_id, start_ts)).fetchall()
 
     diffs = _compute_player_diffs(guild_id, start_ts)
+    diffs_vs_lobby = _compute_player_diffs_vs_lobby(guild_id, start_ts)
     results = []
     for r in rows:
         d = dict(r)
         d["kda"] = round((d["total_kills"] + d["total_assists"]) / max(d["total_deaths"], 1), 2)
         d["fantasy_points"] = calculate_fantasy_points(d)
         d["diff"] = diffs.get(d["account_id"], 0.0)
+        d["diff_vs_lobby"] = diffs_vs_lobby.get(d["account_id"], 0.0)
         results.append(d)
     if season_start_date:
         costs = get_player_costs(guild_id, season_start_date)
         results = _attach_costs(results, costs)
         _compute_value(results)
-        attendance_map = _compute_attendance(guild_id, start_ts, None, costs)
+        # Attendance is "what share of your team's season did you show up for",
+        # so it always uses the season window even when the stat rows above
+        # were widened to every season by cross_season.
+        season_ts = _all_time_start_ts(guild_id, season_start_date)
+        attendance_map = _compute_attendance(guild_id, season_ts, None, costs)
         for s in results:
             s["attendance"] = attendance_map.get(s["account_id"])
     else:
         for s in results:
             s["attendance"] = None
+
+    # Mirror alt accounts: an alt typically has no match rows of its own
+    # (their games were played under the main's Steam account), so add a
+    # copy of the main's full stat row under the alt's account_id too — see
+    # _mirror_alts_into for the general version of this used elsewhere.
+    by_aid = {s["account_id"]: s for s in results}
+    with _conn() as conn:
+        alt_rows = conn.execute(
+            "SELECT account_id, alt_account_for FROM skill_overrides WHERE alt_account_for IS NOT NULL"
+        ).fetchall()
+    for ar in alt_rows:
+        alt_id, main_id = ar["account_id"], ar["alt_account_for"]
+        if alt_id not in by_aid and main_id in by_aid:
+            mirrored = dict(by_aid[main_id])
+            mirrored["account_id"] = alt_id
+            results.append(mirrored)
+
     return results
 
 
@@ -845,6 +1292,57 @@ def _compute_player_diffs(guild_id: int, start: int, end: int | None = None) -> 
     return {aid: sum(ds) / len(ds) for aid, ds in diffs_by_account.items() if ds}
 
 
+def _compute_player_diffs_vs_lobby(guild_id: int, start: int, end: int | None = None) -> dict[int, float]:
+    """For every player with matches in the time range, return the average
+    per-match fantasy-points diff vs. the OTHER 9 players in the match —
+    both teammates AND opponents. Opponent-strength-aware in a way the
+    teammates-only diff isn't: a great performance against a weak enemy
+    team gets discounted; standing out against a stacked enemy gets bonus.
+
+    Used only by /leaderboard Value (via _compute_value). The teammates-only
+    diff powers the fantasy adjustment path — this doesn't replace it.
+    """
+    if end is None:
+        sql = """
+            SELECT p.*, m.duration AS match_duration
+            FROM players p
+            JOIN matches m ON p.match_id = m.match_id
+            WHERE m.guild_id = ? AND m.start_time >= ?
+        """
+        params: tuple = (guild_id, start)
+    else:
+        sql = """
+            SELECT p.*, m.duration AS match_duration
+            FROM players p
+            JOIN matches m ON p.match_id = m.match_id
+            WHERE m.guild_id = ? AND m.start_time BETWEEN ? AND ?
+        """
+        params = (guild_id, start, end)
+
+    with _conn() as conn:
+        rows = conn.execute(sql, params).fetchall()
+
+    if not rows:
+        return {}
+
+    by_match: dict[int, list[dict]] = {}
+    for r in rows:
+        by_match.setdefault(r["match_id"], []).append(dict(r))
+
+    diffs_by_account: dict[int, list[float]] = {}
+    for match_rows in by_match.values():
+        fps = {r["account_id"]: _per_match_fp(r) for r in match_rows}
+        aids = list(fps.keys())
+        if len(aids) < 2:
+            continue
+        for aid in aids:
+            others = [fps[a] for a in aids if a != aid]
+            other_avg = sum(others) / len(others)
+            diffs_by_account.setdefault(aid, []).append(fps[aid] - other_avg)
+
+    return {aid: sum(ds) / len(ds) for aid, ds in diffs_by_account.items() if ds}
+
+
 def get_guild_player_account_ids(guild_id: int) -> list[int]:
     """All distinct account_ids who've played in this guild's matches."""
     with _conn() as conn:
@@ -868,6 +1366,8 @@ def upsert_rating_cache_row(row: dict) -> None:
         "internal_rating":  row.get("internal_rating"),
         "raw_windrun":      row.get("raw_windrun"),
         "mmr_estimate":     row.get("mmr_estimate"),
+        "rank_tier":        row.get("rank_tier"),
+        "leaderboard_rank": row.get("leaderboard_rank"),
         "ad_last_year":     row.get("ad_last_year"),
         "ad_all_time":      row.get("ad_all_time"),
         "ranked_last_year": row.get("ranked_last_year"),
@@ -880,16 +1380,20 @@ def upsert_rating_cache_row(row: dict) -> None:
         conn.execute("""
             INSERT INTO player_ratings_cache
                 (account_id, name, internal_rating, raw_windrun, mmr_estimate,
+                 rank_tier, leaderboard_rank,
                  ad_last_year, ad_all_time, ranked_last_year, explanation, avatar_url,
                  fh_unavailable, updated_at)
-            VALUES (:account_id, :name, :internal_rating, :raw_windrun,
-                    :mmr_estimate, :ad_last_year, :ad_all_time, :ranked_last_year,
+            VALUES (:account_id, :name, :internal_rating, :raw_windrun, :mmr_estimate,
+                    :rank_tier, :leaderboard_rank,
+                    :ad_last_year, :ad_all_time, :ranked_last_year,
                     :explanation, :avatar_url, :fh_unavailable, :updated_at)
             ON CONFLICT(account_id) DO UPDATE SET
                 name             = COALESCE(excluded.name, player_ratings_cache.name),
                 internal_rating  = COALESCE(excluded.internal_rating, player_ratings_cache.internal_rating),
                 raw_windrun      = COALESCE(excluded.raw_windrun, player_ratings_cache.raw_windrun),
                 mmr_estimate     = COALESCE(excluded.mmr_estimate, player_ratings_cache.mmr_estimate),
+                rank_tier        = COALESCE(excluded.rank_tier, player_ratings_cache.rank_tier),
+                leaderboard_rank = COALESCE(excluded.leaderboard_rank, player_ratings_cache.leaderboard_rank),
                 ad_last_year     = COALESCE(excluded.ad_last_year, player_ratings_cache.ad_last_year),
                 ad_all_time      = COALESCE(excluded.ad_all_time, player_ratings_cache.ad_all_time),
                 ranked_last_year = COALESCE(excluded.ranked_last_year, player_ratings_cache.ranked_last_year),
@@ -902,16 +1406,60 @@ def upsert_rating_cache_row(row: dict) -> None:
 
 def get_rating_cache_row(account_id: int) -> dict | None:
     """Return a single cached rating row (with override nickname + hide_avatar
-    joined in), or None if not present."""
+    joined in), or None if not present.
+
+    If the override has alt_account_for set, the returned row substitutes the
+    main account's internal_rating (and explanation) into this row so callers
+    transparently treat the alt as having the main's skill. Alt's own name,
+    avatar, and stats are preserved.
+    """
     with _conn() as conn:
         row = conn.execute("""
             SELECT prc.*, so.nickname AS override_nickname,
-                   so.hide_avatar AS hide_avatar
+                   so.hide_avatar AS hide_avatar,
+                   so.alt_account_for AS alt_account_for
             FROM player_ratings_cache prc
             LEFT JOIN skill_overrides so ON so.account_id = prc.account_id
             WHERE prc.account_id = ?
         """, (account_id,)).fetchone()
-    return dict(row) if row else None
+        if not row:
+            return None
+        result = dict(row)
+        main_id = result.get("alt_account_for")
+        if main_id and main_id != account_id:
+            main_row = conn.execute(
+                "SELECT internal_rating, explanation, name FROM player_ratings_cache "
+                "WHERE account_id = ?",
+                (main_id,),
+            ).fetchone()
+            if main_row and main_row["internal_rating"] is not None:
+                main_name = main_row["name"] or f"#{main_id}"
+                result["internal_rating"] = main_row["internal_rating"]
+                result["explanation"] = f"linked to {main_name} ({main_row['explanation'] or 'main account'})"
+        return result
+
+
+def get_all_rating_cache_rows() -> list[dict]:
+    """Return account_id + internal_rating (+ override nickname) for every
+    cached player. Used by the /api/ratings endpoint.
+
+    Mirrors get_rating_cache_row's alt_account_for substitution: an alt's
+    internal_rating is swapped for its main account's, when the main has one.
+    """
+    with _conn() as conn:
+        rows = conn.execute("""
+            SELECT prc.account_id,
+                   COALESCE(so.nickname, prc.name) AS name,
+                   CASE
+                       WHEN so.alt_account_for IS NOT NULL AND main.internal_rating IS NOT NULL
+                       THEN main.internal_rating
+                       ELSE prc.internal_rating
+                   END AS internal_rating
+            FROM player_ratings_cache prc
+            LEFT JOIN skill_overrides so ON so.account_id = prc.account_id
+            LEFT JOIN player_ratings_cache main ON main.account_id = so.alt_account_for
+        """).fetchall()
+    return [dict(r) for r in rows]
 
 
 def is_avatar_hidden(account_id: int) -> bool:
@@ -1031,7 +1579,8 @@ def get_guild_cached_ratings(guild_id: int, include_all: bool = False) -> list[d
         if include_all:
             rows = conn.execute("""
                 SELECT prc.*, so.nickname AS override_nickname,
-                       so.internal_rating_override AS rating_override
+                       so.internal_rating_override AS rating_override,
+                       so.alt_account_for AS alt_account_for
                 FROM player_ratings_cache prc
                 LEFT JOIN skill_overrides so ON so.account_id = prc.account_id
                 WHERE prc.account_id NOT IN (
@@ -1041,7 +1590,8 @@ def get_guild_cached_ratings(guild_id: int, include_all: bool = False) -> list[d
         else:
             rows = conn.execute("""
                 SELECT prc.*, so.nickname AS override_nickname,
-                       so.internal_rating_override AS rating_override
+                       so.internal_rating_override AS rating_override,
+                       so.alt_account_for AS alt_account_for
                 FROM player_ratings_cache prc
                 LEFT JOIN skill_overrides so ON so.account_id = prc.account_id
                 WHERE prc.account_id IN (
@@ -1054,7 +1604,33 @@ def get_guild_cached_ratings(guild_id: int, include_all: bool = False) -> list[d
                     SELECT account_id FROM guild_exclusions WHERE guild_id = ?
                 )
             """, (guild_id, guild_id)).fetchall()
-    return [dict(r) for r in rows]
+
+        # Substitute the main account's internal_rating for any alt-linked row,
+        # matching get_rating_cache_row's behavior so /players shows alts at
+        # their main's skill. Main may be outside this guild's roster, so pull
+        # any missing mains explicitly.
+        needed_mains = {r["alt_account_for"] for r in rows if r["alt_account_for"]}
+        have = {r["account_id"] for r in rows}
+        missing = needed_mains - have
+        main_ratings = {r["account_id"]: r["internal_rating"] for r in rows
+                        if r["internal_rating"] is not None}
+        if missing:
+            placeholders = ",".join("?" * len(missing))
+            extra = conn.execute(
+                f"SELECT account_id, internal_rating FROM player_ratings_cache "
+                f"WHERE account_id IN ({placeholders}) AND internal_rating IS NOT NULL",
+                tuple(missing),
+            ).fetchall()
+            for e in extra:
+                main_ratings[e["account_id"]] = e["internal_rating"]
+        result = []
+        for r in rows:
+            d = dict(r)
+            main_id = d.get("alt_account_for")
+            if main_id and main_id in main_ratings:
+                d["internal_rating"] = main_ratings[main_id]
+            result.append(d)
+    return result
 
 
 def exclude_from_guild(guild_id: int, account_id: int) -> None:
@@ -1125,48 +1701,67 @@ def get_skill_override(account_id: int) -> dict | None:
 def upsert_skill_override(
     account_id: int,
     windrun_rating: float | None,
-    ranked_mmr: int | None,
+    rank_tier: int | None,
+    leaderboard_rank: int | None,
     note: str | None,
     set_by_user_id: int | None,
     set_by_name: str | None,
     nickname: str | None = None,
     internal_rating_override: int | None = None,
     hide_avatar: bool | None = None,
+    alt_account_for: int | None = None,
+    discord_override: str | None = None,
 ) -> None:
     """Insert or update an override. Pass None for any field to KEEP the
     existing value (partial updates). To clear an override entirely, use
-    delete_skill_override()."""
+    delete_skill_override().
+
+    rank_tier + leaderboard_rank replace the legacy ranked_mmr override. The
+    legacy column stays in the row schema but new writes always leave it None.
+
+    alt_account_for links this account to a main account — get_rating_cache_row
+    transparently substitutes the main's internal_rating for the alt.
+    """
     existing = get_skill_override(account_id)
     if existing:
         wr   = windrun_rating if windrun_rating is not None else existing.get("windrun_rating")
-        rm   = ranked_mmr     if ranked_mmr     is not None else existing.get("ranked_mmr")
+        rt   = rank_tier      if rank_tier      is not None else existing.get("rank_tier")
+        lb   = leaderboard_rank if leaderboard_rank is not None else existing.get("leaderboard_rank")
         nt   = note           if note           is not None else existing.get("note")
         nk   = nickname       if nickname       is not None else existing.get("nickname")
         ir   = internal_rating_override if internal_rating_override is not None else existing.get("internal_rating_override")
         ha   = (1 if hide_avatar else 0) if hide_avatar is not None else existing.get("hide_avatar") or 0
+        alt  = alt_account_for if alt_account_for is not None else existing.get("alt_account_for")
+        dov  = discord_override if discord_override is not None else existing.get("discord_override")
     else:
-        wr, rm, nt, nk, ir = windrun_rating, ranked_mmr, note, nickname, internal_rating_override
+        wr, rt, lb, nt, nk, ir = windrun_rating, rank_tier, leaderboard_rank, note, nickname, internal_rating_override
         ha = 1 if hide_avatar else 0
+        alt = alt_account_for
+        dov = discord_override
     from datetime import datetime, timezone
     now = datetime.now(timezone.utc).isoformat()
     with _conn() as conn:
         conn.execute("""
             INSERT INTO skill_overrides
-                (account_id, windrun_rating, ranked_mmr, nickname, note,
-                 internal_rating_override, hide_avatar,
-                 set_by_user_id, set_by_name, set_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (account_id, windrun_rating, ranked_mmr, rank_tier, leaderboard_rank,
+                 nickname, note, internal_rating_override, hide_avatar, alt_account_for,
+                 discord_override, set_by_user_id, set_by_name, set_at)
+            VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(account_id) DO UPDATE SET
                 windrun_rating          = excluded.windrun_rating,
-                ranked_mmr              = excluded.ranked_mmr,
+                ranked_mmr              = NULL,
+                rank_tier               = excluded.rank_tier,
+                leaderboard_rank        = excluded.leaderboard_rank,
                 nickname                = excluded.nickname,
                 note                    = excluded.note,
                 internal_rating_override = excluded.internal_rating_override,
                 hide_avatar             = excluded.hide_avatar,
+                alt_account_for         = excluded.alt_account_for,
+                discord_override        = excluded.discord_override,
                 set_by_user_id          = excluded.set_by_user_id,
                 set_by_name             = excluded.set_by_name,
                 set_at                  = excluded.set_at
-        """, (account_id, wr, rm, nk, nt, ir, ha, set_by_user_id, set_by_name, now))
+        """, (account_id, wr, rt, lb, nk, nt, ir, ha, alt, dov, set_by_user_id, set_by_name, now))
 
 
 def delete_skill_override(account_id: int) -> bool:
@@ -1239,15 +1834,7 @@ def get_head_to_head_matches(
         match_id, start_time, duration, a_won (bool)
     Sorted by start_time ascending.
     """
-    from datetime import datetime, timezone, timedelta
-
-    if season_start:
-        season_dt = datetime.fromisoformat(season_start).replace(tzinfo=timezone.utc)
-        season_monday = season_dt - timedelta(days=season_dt.weekday())
-        week_zero_start = season_monday - timedelta(weeks=1)
-        start_ts = int(week_zero_start.timestamp())
-    else:
-        start_ts = 0
+    start_ts = _all_time_start_ts(guild_id, season_start)
 
     costs = get_player_costs(guild_id, season_start)
     cap_aids = get_captain_account_ids(guild_id, season_start)
@@ -1329,15 +1916,7 @@ def get_team_match_aggregates(guild_id: int, season_start: str) -> dict[str, dic
     games_played here counts *team matches* (not player-games), and wins is
     a real team W-L.
     """
-    from datetime import datetime, timezone, timedelta
-
-    if season_start:
-        season_dt = datetime.fromisoformat(season_start).replace(tzinfo=timezone.utc)
-        season_monday = season_dt - timedelta(days=season_dt.weekday())
-        week_zero_start = season_monday - timedelta(weeks=1)
-        start_ts = int(week_zero_start.timestamp())
-    else:
-        start_ts = 0
+    start_ts = _all_time_start_ts(guild_id, season_start)
 
     # Rosters: captain → {account_ids}
     costs = get_player_costs(guild_id, season_start)
@@ -1563,18 +2142,39 @@ def get_team_aggregates(guild_id: int, season_start: str) -> dict[str, dict]:
     return teams
 
 
+def _mirror_alts_into(result: dict[int, dict]) -> None:
+    """For every skill_overrides row with alt_account_for set, if the alt's
+    account_id has no entry but its main's does, mirror the main's entry
+    under the alt's account_id too. Lets a dict keyed by account_id resolve
+    correctly regardless of which of the two accounts a caller looks up —
+    e.g. someone who signed up for a season under their alt but whose real
+    match history lives under their main."""
+    with _conn() as conn:
+        alt_rows = conn.execute(
+            "SELECT account_id, alt_account_for FROM skill_overrides WHERE alt_account_for IS NOT NULL"
+        ).fetchall()
+    for ar in alt_rows:
+        alt_id, main_id = ar["account_id"], ar["alt_account_for"]
+        if alt_id not in result and main_id in result:
+            result[alt_id] = result[main_id]
+
+
 def get_player_costs(guild_id: int, season_start: str) -> dict[int, dict]:
-    """Return {account_id: {cost, captain, mmr}} for the season."""
+    """Return {account_id: {cost, captain, mmr}} for the season. Alts with
+    no cost row of their own get their main's mirrored under their own
+    account_id too — see _mirror_alts_into."""
     with _conn() as conn:
         rows = conn.execute(
             "SELECT account_id, cost, captain, mmr FROM player_costs "
             "WHERE guild_id = ? AND season_start = ?",
             (guild_id, season_start),
         ).fetchall()
-    return {
+    result = {
         r["account_id"]: {"cost": r["cost"], "captain": r["captain"], "mmr": r["mmr"]}
         for r in rows
     }
+    _mirror_alts_into(result)
+    return result
 
 
 def upsert_player_costs(guild_id: int, season_start: str, costs: list[dict]):
@@ -1854,37 +2454,52 @@ def fit_cost_mmr_diff(stats: list[dict]) -> tuple[float, float, float] | None:
     return _solve3(M, y)
 
 
-def _compute_value(stats: list[dict]) -> list[dict]:
-    """Fit cost-vs-diff (univariate) and set s['predicted_diff'] and s['value']
-    for each drafted player. Untouched for players without a cost.
+MIN_GAMES_FOR_VALUE = 5
 
-    predicted_diff: FP-diff predicted from cost alone (a + b·cost).
-    value: cost-space delta = (actual_diff - predicted_diff) / b, i.e. how
-      many draft-dollars over (positive) or under (negative) the player's
-      cost the linear model says they were worth. Requires a positive slope
-      (higher cost → higher diff); if the slope is non-positive or the fit
-      fails, value is left as None.
+
+def _compute_value(stats: list[dict]) -> list[dict]:
+    """Assign each drafted player a "deserved cost" and a value delta.
+
+    Approach: rank drafted players by opponent-adjusted fantasy diff
+    (best-to-worst), rank their actual costs (highest-to-lowest), and match
+    them position-for-position. The best-performing player deserves the top
+    actual cost in the pool, 2nd-best deserves the 2nd-highest, etc.
+
+    value = deserved_cost − actual_cost
+      positive → underpaid (steal),  negative → overpaid.
+
+    Filters:
+      - must have a cost (drafted)
+      - must have MIN_GAMES_FOR_VALUE games this season (noise floor)
+      - must have a diff_vs_lobby populated (opponent-adjusted diff — see
+        _compute_player_diffs_vs_lobby in db.py)
+
+    Everyone else gets s['value']=None, s['deserved_cost']=None.
     """
-    fit = fit_cost_diff(stats)
-    if fit is None:
-        for s in stats:
-            if s.get("cost") is not None and s.get("diff") is not None:
-                s.setdefault("predicted_diff", None)
-                s["value"] = None
+    # Initialise all rows so callers don't KeyError.
+    for s in stats:
+        s.setdefault("value", None)
+        s.setdefault("deserved_cost", None)
+
+    eligible = [
+        s for s in stats
+        if s.get("cost") is not None
+        and s.get("diff_vs_lobby") is not None
+        and (s.get("games_played") or 0) >= MIN_GAMES_FOR_VALUE
+    ]
+    if len(eligible) < 2:
         return stats
 
-    a, b = fit
-    VALUE_CAP = 70.0  # cost-space delta clipped to ±70 to avoid noisy blow-ups
-    for s in stats:
-        if s.get("cost") is None or s.get("diff") is None:
-            continue
-        predicted = a + b * s["cost"]
-        s["predicted_diff"] = round(predicted, 2)
-        if b > 0:
-            raw = (s["diff"] - predicted) / b
-            s["value"] = round(max(-VALUE_CAP, min(VALUE_CAP, raw)), 2)
-        else:
-            s["value"] = None
+    # Rank-match: sort players by performance, sort costs, pair them up.
+    # deserved_cost floored at 0 (no-op today since RD2L actual costs are all
+    # positive, but keeps the intent explicit if we ever switch mapping methods).
+    # Value itself is un-floored: negative Value = overpay, shown as such.
+    perf_sorted = sorted(eligible, key=lambda s: -s["diff_vs_lobby"])
+    costs_sorted = sorted((s["cost"] for s in eligible), reverse=True)
+    for player, deserved in zip(perf_sorted, costs_sorted):
+        deserved = max(0, deserved)
+        player["deserved_cost"] = deserved
+        player["value"] = round(deserved - player["cost"], 2)
     return stats
 
 
@@ -1905,14 +2520,10 @@ def get_player_team_diff(
     """
     if week_number is None or week_number == -1:
         # All-time: mirror the season-start filter used by get_all_time_stats
-        season_start = datetime.strptime(season_start_date, "%Y-%m-%d")
-        season_start = season_start.replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=timezone.utc)
-        season_monday = season_start - timedelta(days=season_start.weekday())
-        week_zero_start = season_monday - timedelta(weeks=1)
-        start = int(week_zero_start.timestamp())
+        start = _all_time_start_ts(guild_id, season_start_date)
         end = 2**31 - 1
     else:
-        start, end = _season_week_start(week_number, season_start_date)
+        start, end = get_season_week_range(guild_id, season_start_date, week_number)
 
     with _conn() as conn:
         target_matches = conn.execute("""
@@ -2049,7 +2660,7 @@ def get_matches_for_week(guild_id: int, week_offset: int = 0) -> list[dict]:
 
 def get_matches_for_season_week(guild_id: int, week_number: int, season_start_date: str) -> list[dict]:
     """Return all matches for a specific season week (1-indexed)."""
-    start, end = _season_week_start(week_number, season_start_date)
+    start, end = get_season_week_range(guild_id, season_start_date, week_number)
     with _conn() as conn:
         rows = conn.execute("""
             SELECT
@@ -2067,10 +2678,26 @@ def get_matches_for_season_week(guild_id: int, week_number: int, season_start_da
     return [dict(r) for r in rows]
 
 
-def get_latest_matches(guild_id: int) -> list[dict]:
-    """Return all matches from the most recent week that has data for a division."""
+def get_latest_matches(guild_id: int, season_start_date: str | None = None) -> list[dict]:
+    """Return all matches from the current season week (via
+    get_current_season_week/get_season_week_range, so this respects explicit
+    week boundaries — including byes — instead of a raw calendar week).
+
+    Falls back to the plain "most recent calendar week with a match" when no
+    season_start_date is available at all (e.g. division not configured)."""
+    if season_start_date:
+        week_number = get_current_season_week(guild_id, season_start_date)
+        start, end = get_season_week_range(guild_id, season_start_date, week_number)
+        with _conn() as conn:
+            rows = conn.execute("""
+                SELECT match_id, start_time, duration, radiant_win, radiant_score, dire_score
+                FROM matches
+                WHERE guild_id = :guild_id AND start_time BETWEEN :start AND :end
+                ORDER BY start_time DESC
+            """, {"guild_id": guild_id, "start": start, "end": end}).fetchall()
+        return [dict(r) for r in rows]
+
     with _conn() as conn:
-        # Find the most recent match for this guild
         latest = conn.execute(
             "SELECT MAX(start_time) as max_time FROM matches WHERE guild_id = ?",
             (guild_id,)
@@ -2078,25 +2705,15 @@ def get_latest_matches(guild_id: int) -> list[dict]:
         if not latest or not latest["max_time"]:
             return []
 
-        latest_time = latest["max_time"]
-        # Find the Monday of the week containing that match
-        dt = datetime.fromtimestamp(latest_time, tz=timezone.utc)
+        dt = datetime.fromtimestamp(latest["max_time"], tz=timezone.utc)
         monday = dt - timedelta(days=dt.weekday())
         monday = monday.replace(hour=0, minute=0, second=0, microsecond=0)
         sunday = monday + timedelta(days=7) - timedelta(seconds=1)
 
-        # Get all matches in that week for this guild
         rows = conn.execute("""
-            SELECT
-                match_id,
-                start_time,
-                duration,
-                radiant_win,
-                radiant_score,
-                dire_score
+            SELECT match_id, start_time, duration, radiant_win, radiant_score, dire_score
             FROM matches
-            WHERE guild_id = :guild_id
-              AND start_time BETWEEN :start AND :end
+            WHERE guild_id = :guild_id AND start_time BETWEEN :start AND :end
             ORDER BY start_time DESC
         """, {"guild_id": guild_id, "start": int(monday.timestamp()), "end": int(sunday.timestamp())}).fetchall()
     return [dict(r) for r in rows]

@@ -17,9 +17,28 @@ ADMIN_USER_ID: int | None = int(os.environ["ADMIN_USER_ID"]) if os.environ.get("
 
 STEAM_API_KEY = os.environ.get("STEAM_API_KEY", "")
 
+# Shared secret required (as the X-Api-Key header) to call GET /api/ratings.
+# Used by the Google Apps Script that syncs the scout sheet. Generate with
+# e.g. `python -c "import secrets; print(secrets.token_urlsafe(32))"`.
+RATINGS_API_KEY: str | None = os.environ.get("RATINGS_API_KEY")
+
 # Channels where /lookup is open to anyone (typically admin-only Discord
 # channels). Owner can always use /lookup anywhere.
 LOOKUP_CHANNEL_IDS: set[int] = {1512177911711662272}
+
+# Timezone used for every user-facing date/time. Match timestamps are stored
+# as UTC unix seconds; without this they render in the host's zone, which on
+# fly.io is UTC and reads as several hours off for an EST-WED league.
+# Override with LEAGUE_TZ=America/Los_Angeles etc. if a division moves.
+LEAGUE_TZ_NAME: str = os.environ.get("LEAGUE_TZ", "America/New_York")
+
+try:
+    from zoneinfo import ZoneInfo
+    LEAGUE_TZ = ZoneInfo(LEAGUE_TZ_NAME)
+except Exception:  # pragma: no cover - bad tz name shouldn't take the bot down
+    from datetime import timezone as _tz
+    LEAGUE_TZ = _tz.utc
+
 
 # ---------------------------------------------------------------------------
 # Dota 2 constants

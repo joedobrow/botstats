@@ -1,31 +1,37 @@
 """
-One-shot importer: read a draft-sheet CSV and populate the player_costs table.
+One-shot importer: read the "Drafted Players" sheet export (CSV) and
+populate the player_costs table.
 
-CSV format expected (column header names with the trailing colon, as exported
-from the league's Google Sheet):
+CSV format expected — the exact columns the Google Sheets "Drafted Players"
+tab uses (see scripts/draft_sheet_excel_helper.gs):
 
-    Winner:, Cost:, Discord ID:, Dotabuff Link:, MMR:, Comfort (Pos 1):, ..., Player statement:
+    Account ID, Name, Winner, Cost
 
-Only the first four columns + MMR are stored:
-    captain ← "Winner:"
-    cost    ← "Cost:"
-    name    ← "Discord ID:"          (logged only; identity lives in account_id)
-    account_id ← parsed from "Dotabuff Link:"  (last numeric segment of the URL)
-    mmr     ← "MMR:"
+Only rows with both Winner and Cost filled in are drafted picks; blank rows
+(nobody picked yet, or the draft hasn't happened) are skipped, not errors.
+
+    account_id ← "Account ID" (already a plain Steam32 id, no URL to parse)
+    captain    ← "Winner"
+    cost       ← "Cost"
+    name       ← "Name" (logged only; identity lives in account_id)
 
 Usage:
-    python import_costs.py --csv draft-sheet.csv \
-        --guild-id 1481800158826991718 --season-start 2026-04-28
+    python import_costs.py --csv drafted-players.csv \
+        --guild-id 1481800158826991718 --season-start 2026-XX-XX
 
 Uses the same DB_PATH as the bot (default /data/dota_stats.db on fly, else
 dota_stats.db). Re-running with the same (guild_id, season_start) overwrites
 existing rows for that season.
+
+Note: player_costs also has an "mmr" column (a draft-time MMR snapshot used
+by a couple of regression-based stats), but the Drafted Players sheet has
+no equivalent column, so it's left unset (None) for every imported row —
+downstream code already treats it as optional and skips rows missing it.
 """
 
 import argparse
 import csv
 import logging
-import re
 import sys
 
 from pathlib import Path
@@ -35,16 +41,6 @@ from db import upsert_player_costs, init_db
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
-
-DOTABUFF_RE = re.compile(r"dotabuff\.com/players/(\d+)")
-
-
-def parse_account_id(url: str) -> int | None:
-    """Extract the trailing account_id from a Dotabuff player URL."""
-    if not url:
-        return None
-    m = DOTABUFF_RE.search(url)
-    return int(m.group(1)) if m else None
 
 
 def parse_int(s: str | None) -> int | None:
@@ -60,38 +56,37 @@ def parse_int(s: str | None) -> int | None:
 
 
 def load_rows(csv_path: str) -> list[dict]:
-    """Parse the CSV and return a list of {account_id, cost, captain, mmr, name} dicts."""
+    """Parse the CSV and return a list of {account_id, cost, captain, mmr, _name} dicts."""
     with open(csv_path, newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         rows = []
         for raw in reader:
-            url = raw.get("Dotabuff Link:") or ""
-            account_id = parse_account_id(url)
-            cost = parse_int(raw.get("Cost:"))
-            captain = (raw.get("Winner:") or "").strip() or None
-            mmr = parse_int(raw.get("MMR:"))
-            name = (raw.get("Discord ID:") or "").strip()
+            account_id = parse_int(raw.get("Account ID"))
+            cost = parse_int(raw.get("Cost"))
+            captain = (raw.get("Winner") or "").strip() or None
+            name = (raw.get("Name") or "").strip()
 
             if account_id is None:
-                logger.warning("Skipping row (no parseable account_id): %s", raw)
+                logger.warning("Skipping row (no parseable Account ID): %s", raw)
                 continue
-            if cost is None:
-                logger.warning("Skipping %s (no cost)", name or account_id)
+            if cost is None or captain is None:
+                # Not drafted (yet) — the normal state for most rows until
+                # the draft actually happens.
                 continue
 
             rows.append({
                 "account_id": account_id,
                 "cost":       cost,
                 "captain":    captain,
-                "mmr":        mmr,
-                "_name":      name,  # not stored, just for logging
+                "mmr":        None,
+                "_name":      name,
             })
         return rows
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--csv", required=True, help="Path to draft-sheet CSV")
+    ap.add_argument("--csv", required=True, help="Path to the Drafted Players sheet export (CSV)")
     ap.add_argument("--guild-id", type=int, required=True, help="Discord guild ID this season belongs to")
     ap.add_argument("--season-start", required=True, help="YYYY-MM-DD; should match divisions.season_start")
     args = ap.parse_args()
@@ -100,10 +95,10 @@ def main():
 
     rows = load_rows(args.csv)
     if not rows:
-        logger.error("No valid rows found in %s", args.csv)
+        logger.error("No drafted rows found in %s (need both Winner and Cost filled in)", args.csv)
         sys.exit(1)
 
-    logger.info("Parsed %d player rows from %s", len(rows), args.csv)
+    logger.info("Parsed %d drafted player rows from %s", len(rows), args.csv)
 
     # Strip the local-only _name field before persisting
     payload = [{k: v for k, v in r.items() if k != "_name"} for r in rows]
@@ -117,8 +112,8 @@ def main():
     # Preview a few rows
     for r in sorted(rows, key=lambda r: -(r["cost"] or 0))[:5]:
         logger.info(
-            "  top: %s (account_id=%d) — cost=%d, captain=%s, mmr=%s",
-            r["_name"], r["account_id"], r["cost"], r["captain"], r["mmr"],
+            "  top: %s (account_id=%d) — cost=%d, captain=%s",
+            r["_name"], r["account_id"], r["cost"], r["captain"],
         )
 
 

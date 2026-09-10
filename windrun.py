@@ -19,6 +19,10 @@ BASE_URL = "https://api.windrun.io/api/v2"
 RATE_LIMIT_SECONDS = 5.0
 REQUEST_TIMEOUT = 90  # API is reportedly very slow
 
+# Windrun.io whitelisted this UA — required to bypass Cloudflare's bot
+# challenge on api.windrun.io. Don't change without coordinating with Noxville.
+HEADERS = {"User-Agent": "RD2L-EST-WED-Bot (contact: jdobrow@gmail.com)"}
+
 _last_call_time = 0.0
 _rate_lock = asyncio.Lock()
 
@@ -46,7 +50,7 @@ async def fetch_player(account_id: int) -> dict | None:
 
     timeout = aiohttp.ClientTimeout(total=REQUEST_TIMEOUT)
     try:
-        async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with aiohttp.ClientSession(timeout=timeout, headers=HEADERS) as session:
             async with session.get(url) as resp:
                 if resp.status != 200:
                     logger.warning("Windrun returned %d for %s", resp.status, url)
@@ -78,7 +82,7 @@ async def fetch_player_matches(account_id: int, limit: int = 200) -> list | None
     logger.info("Fetching windrun matches for %d (limit %d)", account_id, limit)
     timeout = aiohttp.ClientTimeout(total=REQUEST_TIMEOUT)
     try:
-        async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with aiohttp.ClientSession(timeout=timeout, headers=HEADERS) as session:
             async with session.get(url) as resp:
                 if resp.status != 200:
                     logger.warning("Windrun returned %d for %s", resp.status, url)
@@ -116,7 +120,7 @@ async def fetch_match(match_id: int) -> dict | None:
 
     timeout = aiohttp.ClientTimeout(total=REQUEST_TIMEOUT)
     try:
-        async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with aiohttp.ClientSession(timeout=timeout, headers=HEADERS) as session:
             async with session.get(url) as resp:
                 if resp.status != 200:
                     logger.warning("Windrun returned %d for %s", resp.status, url)

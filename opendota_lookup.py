@@ -7,6 +7,8 @@ import asyncio
 import logging
 import math
 import os
+from collections import Counter
+
 import aiohttp
 
 logger = logging.getLogger(__name__)
@@ -139,6 +141,14 @@ async def fetch_player_game_counts(account_id: int) -> dict | None:
     Note: OpenDota's lobby_type + date filter returns 0/0 (apparent bug),
     so last_year_ranked is ratio-estimated from the other counts.
 
+    The two date=365 queries (last-year total, last-year AD) have also been
+    observed to occasionally return a valid-looking but wrong (too-low)
+    count with a normal 200 status — no error to catch, just silently bad
+    data (e.g. three unrelated long-time AD players all separately landing
+    on ad_last_year=30 despite wildly different real activity, confirmed
+    wrong by re-querying moments later). Those two are verified by
+    re-querying — see fetch_wl_verified.
+
     Returns:
         {
             'all_time_total':   int,
@@ -151,13 +161,12 @@ async def fetch_player_game_counts(account_id: int) -> dict | None:
     or None if any request fails.
     """
     base = f"{OPENDOTA_BASE}/players/{account_id}/wl"
-    urls = [
-        _with_key(f"{base}?significant=0"),                           # total all-time
-        _with_key(f"{base}?significant=0&date=365"),                  # total last-year
-        _with_key(f"{base}?lobby_type=7&significant=0"),              # ranked all-time
-        _with_key(f"{base}?game_mode=18&significant=0"),              # AD all-time
-        _with_key(f"{base}?game_mode=18&date=365&significant=0"),     # AD last-year
-    ]
+    all_time_total_url  = _with_key(f"{base}?significant=0")
+    last_year_total_url = _with_key(f"{base}?significant=0&date=365")
+    all_time_ranked_url = _with_key(f"{base}?lobby_type=7&significant=0")
+    all_time_ad_url     = _with_key(f"{base}?game_mode=18&significant=0")
+    last_year_ad_url    = _with_key(f"{base}?game_mode=18&date=365&significant=0")
+
     timeout = aiohttp.ClientTimeout(total=15)
     try:
         async with aiohttp.ClientSession(timeout=timeout) as session:
@@ -176,11 +185,42 @@ async def fetch_player_game_counts(account_id: int) -> dict | None:
                         await asyncio.sleep(0.5)
                 return None
 
-            counts = await asyncio.gather(*(fetch_wl(u) for u in urls))
+            async def fetch_wl_verified(url: str) -> int | None:
+                """Like fetch_wl, but for the date=365 queries where a 200
+                response can still be silently wrong. Re-queries up to 3
+                times; returns as soon as two readings agree. If all three
+                disagree, falls back to the largest reading (the observed
+                failure mode is under-counting, never over-counting) and
+                logs it since that case hasn't been directly confirmed safe."""
+                samples = []
+                for _ in range(3):
+                    value = await fetch_wl(url)
+                    if value is None:
+                        return None
+                    samples.append(value)
+                    if len(samples) >= 2 and samples[-1] == samples[-2]:
+                        return value
+                tally = Counter(samples)
+                most_common_value, n = tally.most_common(1)[0]
+                if n >= 2:
+                    return most_common_value
+                logger.warning(
+                    "OpenDota date-filtered wl count never agreed for account %d (%s): %s — using max",
+                    account_id, url, samples,
+                )
+                return max(samples)
+
+            all_total, last_total, all_ranked, all_ad, last_ad = await asyncio.gather(
+                fetch_wl(all_time_total_url),
+                fetch_wl_verified(last_year_total_url),
+                fetch_wl(all_time_ranked_url),
+                fetch_wl(all_time_ad_url),
+                fetch_wl_verified(last_year_ad_url),
+            )
+        counts = (all_total, last_total, all_ranked, all_ad, last_ad)
         if any(c is None for c in counts):
             logger.warning("OpenDota wl fetch failed for %d", account_id)
             return None
-        all_total, last_total, all_ranked, all_ad, last_ad = counts
         # OpenDota's lobby_type+date filter is broken (returns 0/0), so we
         # estimate last-year ranked from the *non-AD* slice:
         #   non_ad_last  = last_total - last_ad

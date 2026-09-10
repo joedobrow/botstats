@@ -15,3 +15,13 @@ __pycache__/
 # Local caches / tooling
 .icon_cache/
 .claude/
+
+# Internal rating model — intentionally not published. Lives only on this
+# machine and on fly (uploaded directly; .dockerignore does not exclude it).
+# formatters.py degrades to stubs if it's absent, so a public clone still runs.
+rating_model.py
+
+# Scratch / one-off analysis output
+*.rtf
+rating_curve_analysis.csv
+rating_curve_analysis.features.json

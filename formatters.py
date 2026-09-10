@@ -2,8 +2,10 @@
 Formatters — turn raw stat dicts into Discord Embed objects.
 """
 
+import math
+
 import discord
-from config import ROLE_LABELS
+from config import ROLE_LABELS, LEAGUE_TZ
 
 # Colour palette
 EMBED_COLOUR_GOLD   = discord.Colour(0xFFD700)
@@ -15,7 +17,7 @@ EMBED_COLOUR_RED    = discord.Colour(0xE74C3C)
 # Human-readable labels for stat keys
 STAT_LABELS: dict[str, str] = {
     "fantasy_points":          "⭐ Fantasy Pts",
-    "value":                   "💎 Value ($ over/under cost)",
+    "value":                   "💎 Value ($ deserved − $ paid)",
     "attendance":              "📅 Attendance",
     "diff":                    "📈 Fantasy Diff vs. Teammates",
     "gpm":                     "💰 GPM",
@@ -129,12 +131,12 @@ def format_leaderboard(
         elif sort_by == "value":
             sign = "+" if val >= 0 else ""
             cost = p.get("cost") or 0
-            implied = cost + val
-            val_str = f"{sign}{val:.1f} (cost {cost} → worth {implied:.1f})"
+            deserved = p.get("deserved_cost") or (cost + val)
+            val_str = f"{sign}{val:.0f} (paid {cost}, deserved {deserved:.0f})"
             if debug:
-                diff = p.get("diff") or 0
-                diff_sign = "+" if diff >= 0 else ""
-                val_str += f" · diff {diff_sign}{diff:.2f}"
+                d_all = p.get("diff_vs_lobby") or 0
+                d_all_sign = "+" if d_all >= 0 else ""
+                val_str += f" · diff_vs_lobby {d_all_sign}{d_all:.2f}"
         elif sort_by == "attendance":
             games = p.get("games_played", 0) or 0
             val_str = f"{val * 100:.0f}% ({games} games)"
@@ -240,18 +242,10 @@ def format_player_stats(
     rating: int | None = None,
     qualified_pool: list[dict] | None = None,
 ) -> discord.Embed:
-    role_str = ROLE_LABELS.get(p.get("role_position"), "Unknown Role")
-    games = p.get("games_played", 0)
-    wins  = p.get("wins", 0)
     account_id = p.get("account_id", 0)
-    attendance = p.get("attendance")
 
     # Build Dotabuff URL if we have an account ID
     dotabuff_url = f"https://www.dotabuff.com/players/{account_id}" if account_id else None
-
-    games_str = f"{games} game(s) played"
-    if attendance is not None:
-        games_str += f" ({attendance * 100:.0f}% attendance)"
 
     title = f"🎮 {_display_name(p)}"
     if rating is not None:
@@ -260,51 +254,31 @@ def format_player_stats(
     embed = discord.Embed(
         title=title,
         url=dotabuff_url,
-        description=f"{role_str} · {week_label} · {games_str} · {wins} win(s)",
         colour=EMBED_COLOUR_BLUE,
     )
-
-    # Percentile-based Strengths / Weaknesses against the qualified pool.
-    if qualified_pool:
-        strengths, weaknesses = _compute_strengths_weaknesses(p, qualified_pool)
-        if strengths:
-            embed.add_field(
-                name="🔥 Strengths",
-                value="\n".join(strengths[:3]),
-                inline=False,
-            )
-        if weaknesses:
-            embed.add_field(
-                name="📉 Weaknesses",
-                value="\n".join(weaknesses[:3]),
-                inline=False,
-            )
 
     # Draft (only if we have cost data for this player this season)
     if p.get("cost"):
         cost = p["cost"]
         captain = p.get("captain") or "Unknown"
-        mmr = p.get("mmr")
-        mmr_str = f"{mmr}" if mmr else "N/A"
         draft = f"💵 Cost:      {cost}\n"
         if debug:
             value = p.get("value")
-            predicted = p.get("predicted_diff")
-            if value is not None:
+            deserved = p.get("deserved_cost")
+            if value is not None and deserved is not None:
                 sign = "+" if value >= 0 else ""
-                implied = cost + value
-                value_str = f"{sign}{value:.1f}$ (worth ~{implied:.1f})"
+                value_str = f"{sign}{value:.0f}$ (deserved ~{deserved:.0f})"
             else:
                 value_str = "N/A"
-            if predicted is not None:
-                psign = "+" if predicted >= 0 else ""
-                predicted_str = f"{psign}{predicted:.2f}"
+            d_all = p.get("diff_vs_lobby")
+            if d_all is not None:
+                dsign = "+" if d_all >= 0 else ""
+                d_all_str = f"{dsign}{d_all:.2f}"
             else:
-                predicted_str = "N/A"
-            draft += f"🎯 Expected:  {predicted_str} diff\n"
+                d_all_str = "N/A"
+            draft += f"🎯 Diff vs All: {d_all_str}\n"
             draft += f"💎 Value:     {value_str}\n"
         draft += f"👑 Captain:   {captain}\n"
-        draft += f"📊 Adjusted Windrun Rating: {mmr_str}\n"
         embed.add_field(name="Draft", value=draft, inline=True)
 
     if account_id:
@@ -553,29 +527,122 @@ def format_players_list(cached: list[dict], fantasy_adjusted: bool = False, debu
 
 
 # ---------------------------------------------------------------------------
+# Internal rating model
+# ---------------------------------------------------------------------------
+# The actual weights/curves live in rating_model.py, which is deliberately not
+# in version control (the rest of this bot is public; the model isn't). It is
+# uploaded to fly directly — .dockerignore doesn't exclude it.
+#
+# On a public clone that file is absent. Rather than crash on import, we fall
+# back to stubs that return None: every non-rating feature keeps working and
+# ratings simply report as unavailable.
+
+try:
+    from rating_model import (           # noqa: F401  (re-exported for callers)
+        _MEDAL_TO_WINDRUN,
+        _rank_to_windrun,
+        _ranked_mmr_to_windrun,
+        _windrun_to_ranked_mmr,
+        _ad_inexperience_factor,
+        _lifetime_ad_bonus,
+        _base_ad_trust,
+        _internal_rating,
+    )
+    RATING_MODEL_AVAILABLE = True
+except ImportError:  # pragma: no cover - only hit on a clone without the model
+    import logging as _logging
+    _logging.getLogger(__name__).warning(
+        "rating_model.py not found - internal ratings disabled. "
+        "This is expected on a public clone; the bot runs without it."
+    )
+    RATING_MODEL_AVAILABLE = False
+    _MEDAL_TO_WINDRUN: dict[int, int] = {}
+
+    def _rank_to_windrun(rank_tier=None, leaderboard_rank=None):
+        return None
+
+    def _ranked_mmr_to_windrun(ranked_mmr):
+        return None
+
+    def _windrun_to_ranked_mmr(wr_rating):
+        return None
+
+    def _ad_inexperience_factor(ad_last_year):
+        return 1.0
+
+    def _lifetime_ad_bonus(ad_all_time):
+        return 0.0
+
+    def _base_ad_trust(ad_last_year):
+        return 0.0
+
+    def _internal_rating(ad_last, ad_all, ranked_last, wr_rating,
+                         ranked_in_wr_raw, ranked_all=None):
+        return None
+
+
+# ---------------------------------------------------------------------------
 # /lookup
 # ---------------------------------------------------------------------------
 
-def _ranked_mmr_to_windrun(ranked_mmr: int) -> float:
-    """Piecewise conversion calibrated against user-supplied anchors at the
-    top end (where empirical sample means under-represent skilled AD players):
-
-      MMR ≤ 8000:   wr = 1900 + 0.20·mmr
-      MMR > 8000:   wr = 3500 + 0.10·(mmr − 8000)
-
-    Anchors: 8000 → 3500, 10000 → 3700. Lower-MMR slope chosen so the formula
-    still hits empirical bucket means around MMR 3000–5000 (~2500–2900 windrun).
-    """
-    if ranked_mmr <= 8000:
-        return 1900 + 0.20 * ranked_mmr
-    return 3500 + 0.10 * (ranked_mmr - 8000)
 
 
-def _windrun_to_ranked_mmr(wr_rating: float) -> int:
-    """Inverse of _ranked_mmr_to_windrun. Boundary at wr = 3500 (mmr = 8000)."""
-    if wr_rating <= 3500:
-        return round(5 * (wr_rating - 1900))
-    return round(8000 + 10 * (wr_rating - 3500))
+# Human-readable badge names for parser (/set_player) and display.
+_TIER_NAMES: list[str] = [
+    "", "Herald", "Guardian", "Crusader", "Archon",
+    "Legend", "Ancient", "Divine", "Immortal",
+]
+
+
+def parse_badge(text: str) -> int | None:
+    """Parse a badge string like 'Divine 3' or 'immortal' into rank_tier
+    (tier*10 + stars). Immortal has no stars → 80. Returns None on parse
+    failure or invalid combinations (star count out of range, immortal with
+    stars, non-immortal without stars, etc.)."""
+    if not text:
+        return None
+    parts = text.strip().lower().split()
+    if not parts:
+        return None
+    name_map = {n.lower(): i for i, n in enumerate(_TIER_NAMES) if n}
+    tier = name_map.get(parts[0])
+    if tier is None:
+        return None
+    if tier == 8:
+        return 80 if len(parts) == 1 else None
+    if len(parts) != 2:
+        return None
+    try:
+        stars = int(parts[1])
+    except ValueError:
+        return None
+    if not 1 <= stars <= 5:
+        return None
+    return tier * 10 + stars
+
+
+def format_badge(rank_tier: int | None, leaderboard_rank: int | None = None) -> str:
+    """Reverse of parse_badge — 'Divine 3', 'Immortal', or 'Immortal #15'."""
+    if not rank_tier:
+        return "?"
+    tier = rank_tier // 10
+    stars = rank_tier % 10
+    if not 1 <= tier <= 8:
+        return "?"
+    if tier == 8:
+        return f"Immortal #{leaderboard_rank}" if leaderboard_rank else "Immortal"
+    return f"{_TIER_NAMES[tier]} {stars}" if stars else _TIER_NAMES[tier]
+
+
+
+
+# ---- Deprecated: kept for migration only -------------------------------
+# _ranked_mmr_to_windrun and _windrun_to_ranked_mmr let us convert existing
+# `ranked_mmr` overrides into the new (rank_tier, leaderboard_rank) form on
+# startup. New code should call _rank_to_windrun instead.
+
+
+
 
 
 def _resolve_internal_rating(
@@ -584,14 +651,19 @@ def _resolve_internal_rating(
     ad_all: int | None,
     ranked_last: int | None,
     wr_rating: float | None,
-    ranked_mmr: int | None,
+    ranked_in_wr_raw: float | None,
     ranked_all: int | None = None,
 ) -> tuple[int, str] | None:
     """If the override sets internal_rating_override, return that directly
-    (skipping the windrun/ranked blend). Otherwise compute as normal."""
+    (skipping the windrun/ranked blend). Otherwise compute as normal.
+
+    `ranked_in_wr_raw` is the pre-inexperience-penalty windrun-equivalent of
+    the player's ranked skill (from _rank_to_windrun), or None if we don't
+    have a rank tier for them.
+    """
     if override and override.get("internal_rating_override") is not None:
         return (int(override["internal_rating_override"]), "manual rating override")
-    return _internal_rating(ad_last, ad_all, ranked_last, wr_rating, ranked_mmr, ranked_all)
+    return _internal_rating(ad_last, ad_all, ranked_last, wr_rating, ranked_in_wr_raw, ranked_all)
 
 
 def opendota_counts_are_visible(opendota: dict | None) -> bool:
@@ -629,140 +701,12 @@ def windrun_rating_for_formula(wr_data: dict | None) -> float | None:
     return wr_data.get("rating")
 
 
-def _ad_inexperience_factor(ad_last_year: int | None) -> float:
-    """Discount applied to ranked-eqv to reflect AD inexperience.
-
-    A pure ranked player's MMR doesn't fully translate to AD skill until
-    they have meaningful AD experience. Scale from 0.95 (5% penalty) at
-    0 AD games last year up to 1.00 (no penalty) at 200+.
-    Unknown ad_last_year → no penalty (no data to judge).
-    """
-    if ad_last_year is None:
-        return 1.0
-    if ad_last_year >= 200:
-        return 1.0
-    if ad_last_year <= 0:
-        return 0.95
-    return 0.95 + (ad_last_year / 200.0) * 0.05
 
 
-def _lifetime_ad_bonus(ad_all_time: int | None) -> float:
-    """Trust bonus rewarding lifetime AD experience, added to base trust.
-
-    A player with many lifetime AD games has 'specialist credibility' that
-    complements their last-year activity. Phases in from 500 to 2000 lifetime
-    AD games, capped at +15%.
-    """
-    if ad_all_time is None or ad_all_time < 500:
-        return 0.0
-    if ad_all_time >= 2000:
-        return 0.15
-    return (ad_all_time - 500) / 1500 * 0.15
 
 
-def _base_ad_trust(ad_last_year: int | None) -> float:
-    """Map last-year AD game count → windrun-trust fraction in [0, 1].
-
-    Piecewise linear, anchored at:
-        <200 → 0%, 200 → 25%, 400 → 50%, 600 → 60%, 800 → 70%,
-        1200 → 80%, 1600 → 90%, 2000+ → 100%
-    """
-    if ad_last_year is None or ad_last_year < 200:
-        return 0.0
-    if ad_last_year >= 2000:
-        return 1.0
-    if ad_last_year >= 800:
-        # 800 → 0.70, 2000 → 1.00 (slope 0.00025 per game)
-        return 0.70 + (ad_last_year - 800) * 0.00025
-    if ad_last_year >= 400:
-        # 400 → 0.50, 800 → 0.70 (slope 0.0005 per game)
-        return 0.50 + (ad_last_year - 400) * 0.0005
-    # 200 → 0.25, 400 → 0.50 (slope 0.00125 per game)
-    return 0.25 + (ad_last_year - 200) * 0.00125
 
 
-def _internal_rating(
-    ad_last: int | None,
-    ad_all: int | None,
-    ranked_last: int | None,
-    wr_rating: float | None,
-    ranked_mmr: int | None,
-    ranked_all: int | None = None,
-) -> tuple[int, str] | None:
-    """Compute the player's internal (true-skill) rating on the windrun scale.
-
-    Conversion: piecewise linear from ranked MMR → windrun (see
-    _ranked_mmr_to_windrun).
-
-    Trust model:
-      base         = _base_ad_trust(ad_last)                    # 0% to 100%
-      lifetime_bonus = _lifetime_ad_bonus(ad_all)               # 0% to +15%
-      ad_share     = ad_last / (ad_last + ranked_last)
-      adj          = (ad_share − 0.50) × 0.4                    # ±10% near 25%/75%
-      trust        = clamp(base + lifetime_bonus + adj, 0, 1)
-
-    Output: trust·windrun + (1 − trust)·ranked_in_wr.
-
-    Returns (rating, explanation) or None if neither source is usable.
-    """
-    ranked_in_wr_raw = _ranked_mmr_to_windrun(ranked_mmr) if ranked_mmr is not None else None
-    # Discount ranked-eqv when AD experience is low — pure-ranked players
-    # don't 1:1 translate to AD until they've shown they can actually play.
-    inexperience_factor = _ad_inexperience_factor(ad_last)
-    ranked_in_wr = ranked_in_wr_raw * inexperience_factor if ranked_in_wr_raw is not None else None
-
-    if wr_rating is None and ranked_in_wr is None:
-        return None
-    if wr_rating is None:
-        return (round(ranked_in_wr), "ranked-converted (no windrun data)")
-    if ranked_in_wr is None:
-        return (round(wr_rating), "windrun (no ranked data)")
-
-    # If recent ranked activity is too low AND lifetime ranked is also low,
-    # the MMR estimate is essentially a stale snapshot — blending it in adds
-    # noise. Players with substantial lifetime ranked (500+) have a well-
-    # anchored MMR even if they've slowed down recently, so we still blend.
-    LOW_RANKED_LAST_THRESHOLD = 50
-    LOW_RANKED_ALL_THRESHOLD  = 500
-    has_significant_ranked_history = (ranked_all is not None and ranked_all >= LOW_RANKED_ALL_THRESHOLD)
-    if (ranked_last is not None
-            and ranked_last < LOW_RANKED_LAST_THRESHOLD
-            and not has_significant_ranked_history):
-        ad_str = f"{ad_last} AD/yr" if ad_last is not None else ""
-        ranked_all_str = f", {ranked_all} ranked lifetime" if ranked_all is not None else ""
-        explanation = (
-            f"100% windrun ({round(wr_rating)}) "
-            f"[ranked ignored: only {ranked_last} ranked games last year"
-            + ranked_all_str
-            + (f", {ad_str}" if ad_str else "")
-            + "]"
-        )
-        return (round(wr_rating), explanation)
-
-    base = _base_ad_trust(ad_last)
-    lifetime_bonus = _lifetime_ad_bonus(ad_all)
-    adj = 0.0
-    share_str = ""
-    if ad_last is not None and ranked_last is not None and (ad_last + ranked_last) > 0:
-        ad_share = ad_last / (ad_last + ranked_last)
-        adj = (ad_share - 0.5) * 0.4
-        share_str = f", {ad_share * 100:.0f}% AD share"
-    trust = max(0.0, min(1.0, base + lifetime_bonus + adj))
-
-    rating = trust * wr_rating + (1.0 - trust) * ranked_in_wr
-
-    ad_str = f"{ad_last} AD/yr" if ad_last is not None else "AD/yr unknown"
-    lifetime_str = f", +{lifetime_bonus * 100:.0f}% lifetime" if lifetime_bonus > 0 else ""
-    penalty_str = (
-        f", −{(1 - inexperience_factor) * 100:.0f}% AD penalty"
-        if inexperience_factor < 1.0 else ""
-    )
-    explanation = (
-        f"{trust * 100:.0f}% windrun ({round(wr_rating)}) + "
-        f"{(1 - trust) * 100:.0f}% ranked-eqv ({round(ranked_in_wr)})  "
-        f"[{ad_str}{share_str}{lifetime_str}{penalty_str}]"
-    )
-    return (round(rating), explanation)
 
 
 def format_lookup(
@@ -820,6 +764,19 @@ def format_lookup(
     if fetch_error:
         embed.add_field(name="⚠️ Refresh failed", value=fetch_error, inline=False)
 
+    # Alt-account disclosure — when the override links this account to a main,
+    # the internal rating shown here is inherited from that main.
+    alt_main_id = (override or {}).get("alt_account_for")
+    if alt_main_id:
+        embed.add_field(
+            name="🔗 Alt account",
+            value=(
+                f"Linked to main account `{alt_main_id}`. "
+                "Internal rating below is inherited from that account."
+            ),
+            inline=False,
+        )
+
     # Prominent hidden-match-history warning — OpenDota can't count games
     # when Steam match history is private, so our rating leans on rank tier
     # alone. The player can un-hide it in Steam → Privacy Settings → Game
@@ -837,17 +794,18 @@ def format_lookup(
 
     # Resolve overrides up front so display + internal-rating both see them.
     override_wr  = (override or {}).get("windrun_rating")
-    override_mmr = (override or {}).get("ranked_mmr")
+    override_rank_tier = (override or {}).get("rank_tier")
+    override_lb_rank   = (override or {}).get("leaderboard_rank")
     # Formula uses the "meaningful" rating (None when windrun labels the
     # account Unranked); the debug display still shows the raw number.
     effective_wr_rating = override_wr if override_wr is not None else windrun_rating_for_formula(windrun)
 
-    # Compute MMR estimate regardless of mode — internal rating needs it.
-    from opendota_lookup import decode_rank_tier, estimate_mmr_from_rank_tier
-    rank_tier = (opendota or {}).get("rank_tier")
-    leaderboard_rank = (opendota or {}).get("leaderboard_rank")
-    api_mmr_est = estimate_mmr_from_rank_tier(rank_tier, leaderboard_rank)
-    mmr_est = override_mmr if override_mmr is not None else api_mmr_est
+    from opendota_lookup import decode_rank_tier
+    api_rank_tier = (opendota or {}).get("rank_tier")
+    api_lb_rank   = (opendota or {}).get("leaderboard_rank")
+    eff_rank_tier = override_rank_tier if override_rank_tier is not None else api_rank_tier
+    eff_lb_rank   = override_lb_rank   if override_rank_tier is not None else api_lb_rank
+    ranked_in_wr_raw = _rank_to_windrun(eff_rank_tier, eff_lb_rank)
     ranked_last = (od_counts or {}).get("last_year_ranked")
 
     # --- Debug-only fields (everything that exposes methodology / raw inputs) ---
@@ -868,7 +826,21 @@ def format_lookup(
                 rank_bits.append(f"#{overall_rank} overall")
             rank_line = " · ".join(rank_bits) if rank_bits else "Unranked"
 
-            embed.add_field(name="🌬️ Windrun", value=f"{rating_str} — {rank_line}", inline=False)
+            # Windrun now applies a penalty for smurfs / party abusers — show
+            # the raw pre-penalty rating and the applied tags when they differ
+            # from the used rating. We continue to use the penalized rating in
+            # calculations; this is disclosure, not a formula input.
+            raw = windrun.get("rawRating")
+            pct = windrun.get("penaltyPct") or 0
+            penalty_line = ""
+            if (isinstance(raw, (int, float)) and isinstance(rating, (int, float))
+                    and abs(raw - rating) >= 0.5):
+                tags = ", ".join(windrun.get("tags") or []) or "penalized"
+                penalty_line = f"\n_raw: **{raw:.0f}** · −{pct:g}% ({tags})_"
+
+            embed.add_field(name="🌬️ Windrun",
+                            value=f"{rating_str} — {rank_line}{penalty_line}",
+                            inline=False)
         elif override_wr is not None:
             embed.add_field(
                 name="🌬️ Windrun",
@@ -882,21 +854,17 @@ def format_lookup(
                 inline=False,
             )
 
-        medal_str = decode_rank_tier(rank_tier, leaderboard_rank)
-        if override_mmr is not None:
-            base = medal_str or "Manual"
-            mmr_value = f"**{base}** (~{override_mmr} MMR) ⚠️"
-        elif medal_str and api_mmr_est is not None:
-            is_immortal = rank_tier and rank_tier // 10 == 8
-            if is_immortal and not leaderboard_rank:
-                mmr_value = f"**{medal_str}** (~{api_mmr_est}+ MMR)"
-            else:
-                mmr_value = f"**{medal_str}** (~{api_mmr_est} MMR)"
-        elif medal_str:
-            mmr_value = f"**{medal_str}**"
+        # Show the effective badge (overrides win). No more MMR estimates —
+        # we work in windrun-equivalent space now.
+        override_badge_str = format_badge(override_rank_tier, override_lb_rank) if override_rank_tier else None
+        api_medal_str = decode_rank_tier(api_rank_tier, api_lb_rank)
+        if override_badge_str:
+            rank_value = f"**{override_badge_str}** ⚠️ _override_"
+        elif api_medal_str:
+            rank_value = f"**{api_medal_str}**"
         else:
-            mmr_value = "Unknown"
-        embed.add_field(name="🏆 Ranked MMR", value=mmr_value, inline=True)
+            rank_value = "Unknown"
+        embed.add_field(name="🏆 Ranked Badge", value=rank_value, inline=True)
 
         # OpenDota can only see games when the player has public Steam match
         # history; otherwise every /wl endpoint returns 0. Show "hidden" for
@@ -934,7 +902,7 @@ def format_lookup(
             ad_all=ad_all_time,
             ranked_last=ranked_last,
             wr_rating=effective_wr_rating,
-            ranked_mmr=mmr_est,
+            ranked_in_wr_raw=ranked_in_wr_raw,
             ranked_all=ranked_all_time,
         )
         if rating_info:
@@ -1030,7 +998,9 @@ def format_matches_list(matches: list[dict], week_label: str = "Latest Week") ->
     for m in matches:
         match_id = m["match_id"]
         # Convert unix timestamp to readable date
-        match_time = datetime.fromtimestamp(m["start_time"]).strftime("%b %d, %I:%M %p")
+        # start_time is UTC unix seconds; render in the league's timezone so
+        # a Wednesday-night match doesn't show up as Thursday morning.
+        match_time = datetime.fromtimestamp(m["start_time"], tz=LEAGUE_TZ).strftime("%b %d, %I:%M %p")
         duration_min = m["duration"] // 60
 
         winner = "Radiant" if m["radiant_win"] else "Dire"

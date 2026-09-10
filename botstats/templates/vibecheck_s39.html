@@ -1,0 +1,461 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="description" content="Power rankings and a scouting report on all 14 RD2L Season 39 rosters, built from 20,396 Discord messages spanning Season 38 - because these teams have not played a game together yet.">
+<meta property="og:title" content="Season 39 Vibe Check">
+<meta property="og:description" content="14 new rosters ranked 1-14 on chemistry. 0 games together. 20,396 Discord messages from the season that came before.">
+<meta name="theme-color" content="#0E1116">
+<title>Season 39 Vibe Check</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+
+<style>
+:root{
+  --ground:#0E1116; --surface:#161B23; --surface-2:#1C222C; --line:#252D3A;
+  --ink:#E7EAF0; --ink-dim:#B6BECD; --muted:#7E899C;
+  --signal:#E9A13B;      /* voice / volume */
+  --chaos:#9B7EF0;       /* jokes, irony */
+  --heat:#D9614C;        /* tilt vocabulary */
+  --calm:#5FB89A;        /* PMA vocabulary */
+  --mono:'IBM Plex Mono',ui-monospace,Menlo,monospace;
+  --sans:'IBM Plex Sans',system-ui,-apple-system,sans-serif;
+  --disp:'Bricolage Grotesque','IBM Plex Sans',system-ui,sans-serif;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    --ground:#F1F3F7; --surface:#FFFFFF; --surface-2:#F7F8FB; --line:#DDE2EA;
+    --ink:#171C24; --ink-dim:#3D4653; --muted:#67728A;
+    --signal:#B8761A; --chaos:#6B4BC4; --heat:#B8412C; --calm:#2E7D62;
+  }
+}
+:root[data-theme="light"]{
+  --ground:#F1F3F7; --surface:#FFFFFF; --surface-2:#F7F8FB; --line:#DDE2EA;
+  --ink:#171C24; --ink-dim:#3D4653; --muted:#67728A;
+  --signal:#B8761A; --chaos:#6B4BC4; --heat:#B8412C; --calm:#2E7D62;
+}
+:root[data-theme="dark"]{
+  --ground:#0E1116; --surface:#161B23; --surface-2:#1C222C; --line:#252D3A;
+  --ink:#E7EAF0; --ink-dim:#B6BECD; --muted:#7E899C;
+  --signal:#E9A13B; --chaos:#9B7EF0; --heat:#D9614C; --calm:#5FB89A;
+}
+
+*{box-sizing:border-box}
+body{
+  background:var(--ground); color:var(--ink);
+  font-family:var(--sans); line-height:1.55;
+  margin:0; padding:0;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1080px;margin:0 auto;padding:0 24px 96px}
+
+/* ---------- masthead ---------- */
+.mast{padding:64px 0 40px;border-bottom:1px solid var(--line)}
+.kicker{
+  font-family:var(--mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;
+  color:var(--signal);margin:0 0 18px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;
+}
+.kicker::before{content:"";width:26px;height:1px;background:var(--signal);display:inline-block}
+h1{
+  font-family:var(--disp);font-weight:800;
+  font-size:clamp(40px,7.5vw,76px);line-height:.98;letter-spacing:-.025em;
+  margin:0 0 22px;text-wrap:balance;
+}
+.dek{font-size:18px;color:var(--ink-dim);max-width:62ch;margin:0 0 34px}
+.dek b{color:var(--ink);font-weight:600}
+
+.statline{display:flex;gap:0;flex-wrap:wrap;border:1px solid var(--line);border-radius:3px;overflow:hidden}
+.stat{flex:1 1 150px;padding:16px 18px;border-right:1px solid var(--line);background:var(--surface)}
+.stat:last-child{border-right:none}
+.stat .v{font-family:var(--mono);font-size:26px;font-weight:600;color:var(--signal);font-variant-numeric:tabular-nums;line-height:1.1}
+.stat .l{font-family:var(--mono);font-size:10px;letter-spacing:.13em;text-transform:uppercase;color:var(--muted);margin-top:5px}
+
+/* ---------- sections ---------- */
+section{padding-top:64px}
+.sechead{margin-bottom:8px}
+.secnum{font-family:var(--mono);font-size:11px;letter-spacing:.16em;color:var(--muted);text-transform:uppercase}
+h2{font-family:var(--disp);font-weight:700;font-size:clamp(26px,3.6vw,38px);letter-spacing:-.02em;margin:6px 0 12px;text-wrap:balance}
+.lede{color:var(--ink-dim);max-width:64ch;margin:0 0 30px}
+
+/* ---------- chemistry standings ---------- */
+.weights{display:flex;flex-wrap:wrap;gap:0;border:1px solid var(--line);border-radius:3px;
+  overflow:hidden;margin-bottom:22px}
+.wcell{flex:1 1 130px;padding:11px 14px;border-right:1px solid var(--line);background:var(--surface)}
+.wcell:last-child{border-right:none}
+.wcell .wn{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.wcell .ww{font-family:var(--mono);font-size:15px;font-weight:600;color:var(--ink);margin-top:3px}
+.wcell .wd{font-size:11.5px;color:var(--muted);margin-top:4px;line-height:1.4}
+
+.standings{display:flex;flex-direction:column;gap:1px;background:var(--line);
+  border:1px solid var(--line);border-radius:4px;overflow:hidden}
+.srow{background:var(--surface);padding:14px 18px;display:grid;
+  grid-template-columns:38px 1fr 170px 62px;gap:16px;align-items:center}
+.srow.top3{background:var(--surface-2)}
+.spos{font-family:var(--disp);font-weight:800;font-size:24px;line-height:1;
+  color:var(--muted);font-variant-numeric:tabular-nums;text-align:right}
+.srow.top3 .spos{color:var(--signal)}
+.sbody{min-width:0}
+.sname{font-family:var(--disp);font-weight:700;font-size:17px;line-height:1.2;margin-bottom:3px}
+.sverdict{font-size:12.5px;color:var(--muted);line-height:1.45}
+.sbars{display:flex;gap:3px;align-items:flex-end;height:30px}
+.sbarcol{flex:1;display:flex;flex-direction:column;justify-content:flex-end;height:100%;gap:3px}
+.sbar{width:100%;border-radius:1px;background:var(--signal);min-height:2px}
+.sbarlab{font-family:var(--mono);font-size:8px;color:var(--muted);text-align:center;letter-spacing:.04em}
+.sscore{font-family:var(--mono);font-size:19px;font-weight:600;color:var(--ink);
+  text-align:right;font-variant-numeric:tabular-nums}
+.srow.top3 .sscore{color:var(--signal)}
+@media (max-width:720px){
+  .srow{grid-template-columns:30px 1fr 58px;gap:11px}
+  .sbars{display:none}
+}
+
+/* ---------- concentration chart ---------- */
+.conc{display:flex;flex-direction:column;gap:2px}
+.crow{display:grid;grid-template-columns:150px 1fr 78px;gap:14px;align-items:center;padding:7px 0}
+.cname{font-family:var(--mono);font-size:12px;color:var(--ink-dim);text-align:right;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cbar{display:flex;height:22px;border-radius:2px;overflow:hidden;background:var(--surface-2)}
+.seg{position:relative}
+.seg:first-child{background:var(--signal)}
+.seg:nth-child(2){background:color-mix(in srgb,var(--signal) 46%,var(--surface-2))}
+.seg:nth-child(3){background:color-mix(in srgb,var(--signal) 26%,var(--surface-2))}
+.seg:nth-child(4){background:color-mix(in srgb,var(--signal) 14%,var(--surface-2))}
+.seg:nth-child(5){background:color-mix(in srgb,var(--signal) 7%,var(--surface-2))}
+.ctot{font-family:var(--mono);font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+.clegend{display:flex;gap:18px;flex-wrap:wrap;font-family:var(--mono);font-size:11px;
+  color:var(--muted);margin-top:18px;padding-top:14px;border-top:1px solid var(--line)}
+.clegend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:-1px}
+
+/* ---------- team dossiers ---------- */
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:4px;padding:20px;
+  display:flex;flex-direction:column;gap:14px}
+.chead{display:flex;justify-content:space-between;align-items:baseline;gap:10px}
+.tname{font-family:var(--disp);font-weight:700;font-size:21px;letter-spacing:-.01em;line-height:1.15}
+.rank{font-family:var(--mono);font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
+.arch{font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--ground);background:var(--signal);padding:3px 8px;border-radius:2px;align-self:flex-start}
+.blurb{font-size:13.5px;color:var(--ink-dim);margin:0;line-height:1.5}
+
+.roster{display:flex;flex-direction:column;gap:5px}
+.rrow{display:grid;grid-template-columns:1fr 46px;gap:8px;align-items:center;font-size:12px}
+.rname{font-family:var(--mono);font-size:11.5px;color:var(--ink-dim);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rname.silent{color:var(--muted);font-style:italic}
+.rbarwrap{grid-column:1/-1;height:3px;background:var(--surface-2);border-radius:2px;overflow:hidden;margin-top:-3px}
+.rbar{height:100%;background:var(--signal)}
+.rnum{font-family:var(--mono);font-size:11px;color:var(--muted);text-align:right;font-variant-numeric:tabular-nums}
+
+.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;
+  border-top:1px solid var(--line);padding-top:14px}
+.met{display:flex;flex-direction:column;gap:5px}
+.met .ml{font-family:var(--mono);font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.met .mv{font-family:var(--mono);font-size:14px;font-weight:600;font-variant-numeric:tabular-nums}
+.met .track{height:3px;background:var(--surface-2);border-radius:2px;overflow:hidden}
+.met .fill{height:100%}
+.m-pma .mv{color:var(--calm)}   .m-pma .fill{background:var(--calm)}
+.m-tilt .mv{color:var(--heat)}  .m-tilt .fill{background:var(--heat)}
+.m-chaos .mv{color:var(--chaos)}.m-chaos .fill{background:var(--chaos)}
+.m-mesh .mv{color:var(--signal)}.m-mesh .fill{background:var(--signal)}
+
+.sig{font-family:var(--mono);font-size:11px;color:var(--muted);line-height:1.7}
+.sig b{color:var(--ink-dim);font-weight:500}
+.sig span{color:var(--chaos)}
+
+/* ---------- superlatives ---------- */
+.awards{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:14px}
+.award{border:1px solid var(--line);border-radius:4px;padding:16px 18px;background:var(--surface)}
+.award h3{font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--muted);margin:0 0 12px;font-weight:500}
+.alist{display:flex;flex-direction:column;gap:7px}
+.aitem{display:grid;grid-template-columns:16px 1fr auto;gap:9px;align-items:baseline;font-size:13px}
+.apos{font-family:var(--mono);font-size:10px;color:var(--muted)}
+.aname{color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ateam{font-family:var(--mono);font-size:10px;color:var(--muted)}
+.aval{font-family:var(--mono);font-size:12px;color:var(--signal);font-variant-numeric:tabular-nums}
+.aitem:first-child .aname{font-weight:600}
+
+/* ---------- method ---------- */
+.method{border:1px solid var(--line);border-radius:4px;padding:26px 28px;background:var(--surface)}
+.method h3{font-family:var(--disp);font-size:18px;margin:0 0 14px;font-weight:700}
+.method p{color:var(--ink-dim);font-size:14px;max-width:70ch;margin:0 0 12px}
+.method code{font-family:var(--mono);font-size:12.5px;background:var(--surface-2);
+  padding:1px 5px;border-radius:2px;color:var(--ink-dim)}
+.caveat{border-left:2px solid var(--heat);padding-left:14px;margin-top:18px}
+.caveat p{margin-bottom:8px}
+.caveat p:last-child{margin-bottom:0}
+footer{margin-top:46px;padding-top:22px;border-top:1px solid var(--line);
+  font-family:var(--mono);font-size:11px;color:var(--muted);
+  display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap}
+
+@media (max-width:640px){
+  .crow{grid-template-columns:104px 1fr 60px;gap:9px}
+  .cname{font-size:10.5px}
+  .metrics{grid-template-columns:repeat(2,1fr)}
+}
+@media (prefers-reduced-motion:no-preference){
+  .cbar .seg,.rbar,.met .fill{transition:width .5s cubic-bezier(.4,0,.2,1)}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="mast">
+    <p class="kicker">RD2L EST&#8209;WED &middot; Ability Draft &middot; Season 39</p>
+    <h1>Fourteen teams.<br>Zero games. <br>Twenty thousand messages.</h1>
+    <p class="dek">
+      The Season 39 draft finished Wednesday. These fourteen rosters have never played a
+      match together &mdash; <b>not one game of shared history</b> exists for any of them.
+      The players on them are hardly strangers, though: this division ran all of Season 38,
+      and the server kept the receipts. <b>20,396 messages</b> of them.
+      So this report scouts the thing that does exist &mdash; not how these teams play,
+      but how these people behave.
+    </p>
+    <div class="statline" id="statline"></div>
+  </header>
+
+  <section>
+    <div class="sechead">
+      <div class="secnum">Finding 01</div>
+      <h2>The chemistry index</h2>
+    </div>
+    <p class="lede">
+      All fourteen rosters, ranked 1&ndash;14 on how <em>socially</em> ready they look.
+      This predicts <b>nothing about winning</b> &mdash; it is built from Discord behaviour
+      and there is no game data to build anything else from. Each component is a percentile
+      rank against the other thirteen teams, then weighted.
+    </p>
+    <div class="weights" id="weights"></div>
+    <div class="standings" id="standings"></div>
+  </section>
+
+  <section>
+    <div class="sechead">
+      <div class="secnum">Finding 02</div>
+      <h2>Most teams are just one guy typing</h2>
+    </div>
+    <p class="lede">
+      Each bar is one roster, split into its five members by share of the team's total
+      messages. A single dominant block means one person <em>is</em> that team's entire
+      public presence. Bars are normalised to 100% so concentration is comparable across
+      rosters; raw volume is at right.
+    </p>
+    <div class="conc" id="conc"></div>
+    <div class="clegend">
+      <span><i style="background:var(--signal)"></i>loudest member</span>
+      <span><i style="background:color-mix(in srgb,var(--signal) 46%,var(--surface-2))"></i>2nd</span>
+      <span><i style="background:color-mix(in srgb,var(--signal) 26%,var(--surface-2))"></i>3rd</span>
+      <span><i style="background:color-mix(in srgb,var(--signal) 14%,var(--surface-2))"></i>4th</span>
+      <span><i style="background:color-mix(in srgb,var(--signal) 7%,var(--surface-2))"></i>5th</span>
+    </div>
+  </section>
+
+  <section>
+    <div class="sechead">
+      <div class="secnum">Finding 03</div>
+      <h2>The dossiers</h2>
+    </div>
+    <p class="lede">
+      Ordered by total volume. <b>PMA</b> and <b>Tilt</b> are the share of messages containing
+      positive or hostile vocabulary; <b>Chaos</b> covers irony and joke markers; <b>Mesh</b>
+      counts times these five specifically replied to or @&#8288;mentioned each other &mdash;
+      the closest thing to evidence that a roster already functions as a group.
+    </p>
+    <div class="grid" id="cards"></div>
+  </section>
+
+  <section>
+    <div class="sechead">
+      <div class="secnum">Finding 04</div>
+      <h2>Individual honours</h2>
+    </div>
+    <p class="lede">
+      Per&#8209;player extremes across all 69 rostered players the analysis could locate in
+      the server. Rate metrics require a 40&#8209;message minimum so a single lucky post
+      can't win a category.
+    </p>
+    <div class="awards" id="awards"></div>
+  </section>
+
+  <section>
+    <div class="sechead">
+      <div class="secnum">Appendix</div>
+      <h2>How this was built</h2>
+    </div>
+    <div class="method">
+      <h3>Method</h3>
+      <p>
+        Every readable channel in the RD2L EST&#8209;WED server was pulled via the Discord API &mdash;
+        <b>20,396 human messages across 26 channels</b>, from 13 March to 4 September 2026. That
+        window covers all of Season 38 plus the Season 39 signups and draft, so these are habits
+        built up over a full season together, not first impressions. Bot messages excluded.
+        Private channels the bot can't read (team rooms, admin channels) are not included, which
+        means rosters coordinating privately look quieter here than they are.
+      </p>
+      <p>
+        Rosters came from the RD2L season&#8209;39 team pages. Each of the 70 drafted players was
+        matched to a Discord account through the handle on their RD2L profile, with fuzzy matching
+        for legacy <code>name#1234</code> handles and self&#8209;reported junk.
+        <b>69 of 70 matched.</b> The exception is <code>giga male</code> (Actor), who has never
+        posted a message in this server.
+      </p>
+      <p>
+        Sentiment is lexicon&#8209;based, not a model: word lists tuned for Dota vernacular
+        (<code>gg</code>, <code>ty</code>, <code>lets go</code> versus <code>tilt</code>,
+        <code>throw</code>, <code>report</code>), counted per message and reported as a rate.
+        Every number here traces back to something countable.
+      </p>
+      <div class="caveat">
+        <p><b>What this cannot tell you.</b> A lexicon cannot hear tone. &ldquo;you're trash&rdquo;
+        between friends and the same words meant seriously score identically. A high Tilt rate is
+        a flag to look closer, not a verdict.</p>
+        <p>Volume is not virtue. Some of the quietest rosters here are veterans who simply
+        coordinate elsewhere. Silence in <code>#general</code> is not evidence of anything except
+        silence in <code>#general</code>.</p>
+        <p>And none of it measures Dota. Zero games of shared history exist. This is a read on
+        temperament, not on skill &mdash; the standings will disagree with this page, and the
+        standings will be right.</p>
+      </div>
+    </div>
+    <footer>
+      <span>Generated by Claude &middot; botstats</span>
+      <span id="fstamp"></span>
+    </footer>
+  </section>
+
+</div>
+
+<script>
+const DATA = {"corpus":{"messages":20396,"channels":26,"authors":332,"roster_players":70,"resolved":69,"span":["2026-03-13","2026-09-04"]},"superlatives":{"loudest":[{"team":"MGHappyhobo","name":"redground","v":4270},{"team":"Jynx","name":"Jynx","v":1573},{"team":"Loves Muffins","name":"Loves Muffins","v":1455},{"team":"HEFFDAWGZ","name":"Talk = Consequences","v":1443},{"team":"Loves Muffins","name":"Icicle","v":1199}],"most_pma":[{"team":"Budget","name":"Budget","v":27.4},{"team":"MGHappyhobo","name":"MGHappyhobo","v":24.4},{"team":"TheFoxInTheBox","name":"TheFoxInTheBox","v":19.3},{"team":"MGHappyhobo","name":"redground","v":12.8},{"team":"Loves Muffins","name":"Icicle","v":12.6}],"most_tilt":[{"team":"SOFABOYS","name":"ExO","v":6.9},{"team":"Dirj","name":"Dirj","v":6.7},{"team":"Vanity","name":"Vanity","v":6.2},{"team":"Dirj","name":"Elcoco","v":5.7},{"team":"HEFFDAWGZ","name":"Talk = Consequences","v":5.3}],"most_chaos":[{"team":"TheFoxInTheBox","name":"TheFoxInTheBox","v":11.2},{"team":"Rainmaker","name":"Konjiki no majo","v":7.8},{"team":"golden","name":"Ya Filthy Animal","v":6.9},{"team":"Loves Muffins","name":"hanmingzyy","v":5.7},{"team":"Loves Muffins","name":"Loves Muffins","v":5.1}],"funniest":[{"team":"Budget","name":"Budget","v":0.94},{"team":"Rainmaker","name":"Konjiki no majo","v":0.91},{"team":"Actor","name":"cummy","v":0.74},{"team":"Vanity","name":"Vanity","v":0.72},{"team":"HEFFDAWGZ","name":"toolugg","v":0.7}],"essayist":[{"team":"Budget","name":"Budget","v":66.6},{"team":"TheFoxInTheBox","name":"TheFoxInTheBox","v":58.4},{"team":"MGHappyhobo","name":"redground","v":53.8},{"team":"SOFABOYS","name":"ExO","v":50.3},{"team":"golden","name":"Ya Filthy Animal","v":49.9}],"one_worder":[{"team":"Rainmaker","name":"Bonedini","v":4.8},{"team":"Rainmaker","name":"Konjiki no majo","v":19.8},{"team":"Budget","name":"erik","v":24.7},{"team":"Jynx","name":"MAPPO","v":28.1},{"team":"Dirj","name":"Elcoco","v":28.4}],"night_owl":[{"team":"golden","name":"golden","v":13},{"team":"MGHappyhobo","name":"MGHappyhobo","v":15},{"team":"TheFoxInTheBox","name":"grey poupon","v":16},{"team":"SOFABOYS","name":"ExO","v":17},{"team":"HEFFDAWGZ","name":"toolugg","v":17}],"emoji_lord":[{"team":"Jynx","name":"Newbycakes","v":0.17},{"team":"Loves Muffins","name":"Loves Muffins","v":0.08},{"team":"golden","name":"golden","v":0.07},{"team":"Budget","name":"erik","v":0.06},{"team":"HEFFDAWGZ","name":"toolugg","v":0.06}],"questioner":[{"team":"MGHappyhobo","name":"MGHappyhobo","v":31.7},{"team":"Actor","name":"Plupo","v":16.7},{"team":"golden","name":"Ya Filthy Animal","v":15.8},{"team":"Strangletown","name":"Sockstrangler","v":15.0},{"team":"Budget","name":"Budget","v":14.5}]},"teams":[{"name":"MGHappyhobo","arch":"The Monologue","blurb":"One person is the entire team's Discord presence. The other four are rumours.","msgs":4326,"top1":98.7,"speak":2,"intra":25,"overlap":31.0,"pma":12.9,"tilt":4.1,"chaos":2.2,"laugh":1.7,"q":5.7,"len":53.5,"sig":["wrote","workable","windrun's","vacuum","unforunately"],"mem":[{"n":"redground","m":4270},{"n":"MGHappyhobo","m":41},{"n":"RYOGO","m":7},{"n":"[RD] ruN","m":5},{"n":"[ ] created","m":3}]},{"name":"Loves Muffins","arch":"Actual Group Chat","blurb":"These people already talk to each other, unprompted, on purpose.","msgs":2925,"top1":49.7,"speak":3,"intra":34,"overlap":30.0,"pma":10.2,"tilt":4.5,"chaos":4.6,"laugh":5.5,"q":5.2,"len":41.0,"sig":["wanta","smthin","slave","pref","percentage"],"mem":[{"n":"Loves Muffins","m":1455},{"n":"Icicle","m":1199},{"n":"hanmingzyy","m":263},{"n":"awu","m":6},{"n":"Kizu","m":2}]},{"name":"Jynx","arch":"Captain And The Quiet","blurb":"A loud captain and a support cast still deciding whether to unmute.","msgs":1935,"top1":81.3,"speak":4,"intra":4,"overlap":27.0,"pma":8.0,"tilt":4.5,"chaos":2.2,"laugh":1.9,"q":7.2,"len":39.1,"sig":["mabye","weren't","respec","purchase","monies"],"mem":[{"n":"Jynx","m":1573},{"n":"MAPPO","m":196},{"n":"Newbycakes","m":126},{"n":"JIVEE","m":39},{"n":"Verve","m":1}]},{"name":"golden","arch":"Distributed Load","blurb":"No single main character. Volume spread across the roster.","msgs":1529,"top1":53.0,"speak":4,"intra":13,"overlap":26.0,"pma":8.0,"tilt":4.3,"chaos":3.7,"laugh":3.9,"q":8.4,"len":34.6,"sig":["tittyknack","noscope","gents","gackered","brotha"],"mem":[{"n":"YnitseD","m":811},{"n":"Space Cowboy","m":345},{"n":"Ya Filthy Animal","m":247},{"n":"golden","m":110},{"n":"Ratman","m":16}]},{"name":"HEFFDAWGZ","arch":"The Monologue","blurb":"One person is the entire team's Discord presence. The other four are rumours.","msgs":1498,"top1":96.3,"speak":2,"intra":0,"overlap":35.0,"pma":6.6,"tilt":5.1,"chaos":4.9,"laugh":4.3,"q":2.6,"len":36.3,"sig":["trinity","must've","itemization","doens't","counterpicking"],"mem":[{"n":"Talk = Consequences","m":1443},{"n":"toolugg","m":47},{"n":"Squid","m":4},{"n":"HEFFDAWGZ","m":2},{"n":"slugxx","m":2}]},{"name":"Gym Esports (For Aniki)","arch":"The Monologue","blurb":"One person is the entire team's Discord presence. The other four are rumours.","msgs":781,"top1":95.5,"speak":2,"intra":1,"overlap":30.0,"pma":11.8,"tilt":4.5,"chaos":0.7,"laugh":0.8,"q":8.7,"len":30.5,"sig":["messaged","kachiclash","banana","addog","maslyata"],"mem":[{"n":"Yokozuna Hoshoryu","m":746},{"n":"Fraggle","m":24},{"n":"Kaaras","m":7},{"n":"poodge","m":3},{"n":"CSherm","m":1}]},{"name":"Rainmaker","arch":"Quiet Professionals","blurb":"Low volume, low drama, nothing to report. Genuinely might be fine.","msgs":696,"top1":74.9,"speak":3,"intra":1,"overlap":22.0,"pma":9.8,"tilt":3.2,"chaos":2.9,"laugh":3.0,"q":9.8,"len":36.9,"sig":["holics","unkillable","diving","couldve","sockstrangler"],"mem":[{"n":"Rainmaker","m":521},{"n":"Konjiki no majo","m":116},{"n":"Bonedini","m":57},{"n":"Spirit","m":1},{"n":"Zoltraaaaaaak","m":1}]},{"name":"Dirj","arch":"Powder Keg","blurb":"The vocabulary skews sharp. Could be banter. Could be a Week 3 incident.","msgs":686,"top1":75.7,"speak":2,"intra":0,"overlap":23.0,"pma":7.7,"tilt":6.4,"chaos":4.1,"laugh":3.7,"q":5.6,"len":35.6,"sig":["doggie","bungus","assasinate","nilc","laner"],"mem":[{"n":"Dirj","m":519},{"n":"Elcoco","m":157},{"n":"7SiNs^","m":4},{"n":"Clark","m":4},{"n":"Godbalove","m":2}]},{"name":"SOFABOYS","arch":"Quiet Professionals","blurb":"Low volume, low drama, nothing to report. Genuinely might be fine.","msgs":682,"top1":63.8,"speak":3,"intra":3,"overlap":19.0,"pma":8.2,"tilt":5.3,"chaos":4.1,"laugh":3.1,"q":10.9,"len":47.2,"sig":["repo","drivesdk","helping","vengeance","neat"],"mem":[{"n":"ExO","m":435},{"n":"Sofaking","m":223},{"n":"Poof","m":22},{"n":"keyness dominus","m":1},{"n":"Toy Story 2 was OK","m":1}]},{"name":"TheFoxInTheBox","arch":"Unserious Division","blurb":"High jokes-per-message. Low apparent concern about anything.","msgs":277,"top1":67.5,"speak":2,"intra":0,"overlap":21.0,"pma":17.4,"tilt":4.0,"chaos":8.6,"laugh":7.6,"q":11.9,"len":53.3,"sig":["muffs","rolling","billy","split","aren't"],"mem":[{"n":"TheFoxInTheBox","m":187},{"n":"grey poupon","m":70},{"n":"Cam","m":10},{"n":"One for All","m":5},{"n":"Regular Cheese Guy","m":5}]},{"name":"Vanity","arch":"Captain And The Quiet","blurb":"A loud captain and a support cast still deciding whether to unmute.","msgs":233,"top1":83.3,"speak":2,"intra":0,"overlap":35.0,"pma":9.8,"tilt":6.9,"chaos":3.0,"laugh":7.3,"q":3.4,"len":34.7,"sig":["effjai","jingu","mine","minutes","stop"],"mem":[{"n":"Vanity","m":194},{"n":"FJFJFJJ","m":27},{"n":"Cam","m":10},{"n":"Get Mekd","m":1},{"n":"Kana","m":1}]},{"name":"Budget","arch":"Witness Protection","blurb":"Five people who have collectively said almost nothing in public.","msgs":156,"top1":40.4,"speak":2,"intra":1,"overlap":37.0,"pma":17.9,"tilt":2.6,"chaos":0.6,"laugh":2.6,"q":10.3,"len":43.8,"sig":["registered","aight","profile","thanks","we're"],"mem":[{"n":"erik","m":63},{"n":"Budget","m":62},{"n":"Cat","m":14},{"n":"巨大的白人龙头","m":12},{"n":"gymnastrandolph","m":5}]},{"name":"Actor","arch":"Witness Protection","blurb":"Five people who have collectively said almost nothing in public.","msgs":144,"top1":50.7,"speak":3,"intra":0,"overlap":25.0,"pma":11.1,"tilt":2.8,"chaos":3.5,"laugh":3.5,"q":9.0,"len":35.9,"sig":["rigged","stand","supp","tonight","great"],"mem":[{"n":"cummy","m":73},{"n":"Plupo","m":42},{"n":"Actor","m":21},{"n":"Doughnut.","m":8},{"n":"giga male","m":0}]},{"name":"Strangletown","arch":"Witness Protection","blurb":"Five people who have collectively said almost nothing in public.","msgs":81,"top1":74.1,"speak":1,"intra":0,"overlap":32.0,"pma":8.6,"tilt":1.2,"chaos":1.2,"laugh":1.2,"q":14.8,"len":28.7,"sig":["match","around","inhouse","draft","game"],"mem":[{"n":"Sockstrangler","m":60},{"n":"Death Omen","m":17},{"n":"Ham_boy","m":2},{"n":"♡Lain♡","m":1},{"n":"-Logh+","m":1}]}],"rankings":[{"name":"Loves Muffins","score":85.0,"connection":100,"distribution":92,"warmth":46,"levity":85,"presence":92,"verdict":"Best mesh in the division by a distance. Three members genuinely talking, and talking to each other."},{"name":"golden","score":70.4,"connection":85,"distribution":77,"warmth":38,"levity":62,"presence":77,"verdict":"No main-character problem. Four speakers, second-best mesh, broadly sunny."},{"name":"Budget","score":66.9,"connection":54,"distribution":100,"warmth":100,"levity":15,"presence":15,"verdict":"The most evenly distributed and most positive roster in the league. Also nearly silent - 156 messages, total."},{"name":"MGHappyhobo","score":61.5,"connection":92,"distribution":0,"warmth":85,"levity":23,"presence":100,"verdict":"Enormous presence, zero distribution. redground is 98.7% of this team's voice."},{"name":"SOFABOYS","score":53.8,"connection":69,"distribution":69,"warmth":15,"levity":54,"presence":38,"verdict":"Middle of everything. Three speakers, a little mesh, no red flags in either direction."},{"name":"TheFoxInTheBox","score":53.7,"connection":19,"distribution":62,"warmth":92,"levity":100,"presence":31,"verdict":"The funniest and second-warmest roster here. They just haven't said much, and never to each other."},{"name":"Jynx","score":52.3,"connection":77,"distribution":31,"warmth":31,"levity":31,"presence":85,"verdict":"High volume and four members speaking, but the captain is 81% of it."},{"name":"Rainmaker","score":50.4,"connection":54,"distribution":46,"warmth":54,"levity":38,"presence":54,"verdict":"Unremarkable in every direction, which after the rest of this list is arguably a compliment."},{"name":"Actor","score":48.7,"connection":19,"distribution":85,"warmth":77,"levity":46,"presence":8,"verdict":"Well-distributed and warm across only 144 messages. Small sample, decent signs."},{"name":"Gym Esports (For Aniki)","score":41.2,"connection":54,"distribution":15,"warmth":62,"levity":0,"presence":62,"verdict":"Warm, but a monologue - Yokozuna is 95.5% of the output."},{"name":"Strangletown","score":34.8,"connection":19,"distribution":54,"warmth":69,"levity":8,"presence":0,"verdict":"81 messages. Not enough signal to conclude anything, which is itself the conclusion."},{"name":"Vanity","score":28.7,"connection":19,"distribution":23,"warmth":23,"levity":92,"presence":23,"verdict":"Second-highest joke density, undercut by sharp vocabulary and a captain doing 83% of the talking."},{"name":"Dirj","score":27.9,"connection":19,"distribution":38,"warmth":0,"levity":69,"presence":46,"verdict":"The sharpest vocabulary in the league, offset by a decent sense of humour. Read that how you like."},{"name":"HEFFDAWGZ","score":24.8,"connection":19,"distribution":8,"warmth":8,"levity":77,"presence":69,"verdict":"1,498 messages, not one of them to a teammate. The loudest strangers in the division."}],"weights":{"connection":35,"distribution":25,"warmth":20,"levity":10,"presence":10}};
+</script>
+<script>
+(function(){
+  const $ = (s)=>document.querySelector(s);
+  const esc = (s)=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const C = DATA.corpus, T = DATA.teams, S = DATA.superlatives;
+
+  // ---- statline
+  const monologues = T.filter(t=>t.top1>=95).length;
+  $('#statline').innerHTML = [
+    [C.messages.toLocaleString(),'messages read'],
+    [T.length,'rosters'],
+    ['0','games played'],
+    [C.resolved+'/'+C.roster_players,'players located'],
+    [monologues,'one-man teams'],
+  ].map(([v,l])=>`<div class="stat"><div class="v">${v}</div><div class="l">${l}</div></div>`).join('');
+
+  // ---- chemistry standings
+  const WDESC = {
+    connection:'Times these five replied to or @-mentioned each other.',
+    distribution:'How evenly the talking is spread across the roster.',
+    warmth:'Positive vocabulary minus hostile vocabulary.',
+    levity:'Jokes, irony and laugh markers per message.',
+    presence:'Raw engagement with the server, on a log scale.',
+  };
+  const WORDER = ['connection','distribution','warmth','levity','presence'];
+  $('#weights').innerHTML = WORDER.map(k=>`
+    <div class="wcell">
+      <div class="wn">${k}</div>
+      <div class="ww">${DATA.weights[k]}%</div>
+      <div class="wd">${WDESC[k]}</div>
+    </div>`).join('');
+
+  $('#standings').innerHTML = DATA.rankings.map((r,i)=>{
+    const bars = WORDER.map(k=>`
+      <div class="sbarcol" title="${k}: ${r[k]}/100">
+        <div class="sbar" style="height:${Math.max(4,r[k])}%"></div>
+        <div class="sbarlab">${k.slice(0,4)}</div>
+      </div>`).join('');
+    return `<div class="srow${i<3?' top3':''}">
+      <div class="spos">${i+1}</div>
+      <div class="sbody">
+        <div class="sname">${esc(r.name)}</div>
+        <div class="sverdict">${esc(r.verdict)}</div>
+      </div>
+      <div class="sbars">${bars}</div>
+      <div class="sscore">${r.score.toFixed(0)}</div>
+    </div>`;
+  }).join('');
+
+  // ---- concentration
+  $('#conc').innerHTML = T.map(t=>{
+    const tot = t.mem.reduce((a,m)=>a+m.m,0) || 1;
+    const segs = t.mem.map(m=>{
+      const pct = 100*m.m/tot;
+      const ttl = `${m.n}: ${m.m} msg${m.m===1?'':'s'} (${pct.toFixed(1)}%)`;
+      return `<div class="seg" style="width:${pct}%" title="${esc(ttl)}"></div>`;
+    }).join('');
+    return `<div class="crow">
+      <div class="cname" title="${esc(t.name)}">${esc(t.name)}</div>
+      <div class="cbar">${segs}</div>
+      <div class="ctot">${t.msgs.toLocaleString()}</div>
+    </div>`;
+  }).join('');
+
+  // ---- dossier cards
+  const maxOf = k => Math.max(...T.map(t=>t[k]));
+  const mx = {pma:maxOf('pma'), tilt:maxOf('tilt'), chaos:maxOf('chaos'), intra:maxOf('intra')};
+  $('#cards').innerHTML = T.map((t,i)=>{
+    const top = t.mem[0] ? t.mem[0].m : 1;
+    const roster = t.mem.map(m=>{
+      const w = top>0 ? 100*m.m/top : 0;
+      const silent = m.m < 20;
+      return `<div class="rrow">
+          <div class="rname${silent?' silent':''}">${esc(m.n)}</div>
+          <div class="rnum">${m.m}</div>
+          <div class="rbarwrap"><div class="rbar" style="width:${w}%"></div></div>
+        </div>`;
+    }).join('');
+    const met = (cls,label,val,suffix,max)=>`
+      <div class="met ${cls}">
+        <div class="ml">${label}</div>
+        <div class="mv">${val}${suffix}</div>
+        <div class="track"><div class="fill" style="width:${max>0?Math.min(100,100*val/max):0}%"></div></div>
+      </div>`;
+    return `<article class="card">
+      <div class="chead">
+        <div class="tname">${esc(t.name)}</div>
+        <div class="rank">#${String(i+1).padStart(2,'0')}</div>
+      </div>
+      <div class="arch">${esc(t.arch)}</div>
+      <p class="blurb">${esc(t.blurb)}</p>
+      <div class="roster">${roster}</div>
+      <div class="metrics">
+        ${met('m-pma','PMA',t.pma,'%',mx.pma)}
+        ${met('m-tilt','Tilt',t.tilt,'%',mx.tilt)}
+        ${met('m-chaos','Chaos',t.chaos,'%',mx.chaos)}
+        ${met('m-mesh','Mesh',t.intra,'',mx.intra)}
+      </div>
+      ${t.sig.length?`<div class="sig"><b>Signature vocabulary</b><br>${t.sig.map(w=>`<span>${esc(w)}</span>`).join(' &middot; ')}</div>`:''}
+    </article>`;
+  }).join('');
+
+  // ---- awards
+  const AW = [
+    ['loudest','Highest volume','msgs'],
+    ['most_pma','Most positive vocabulary','%'],
+    ['most_chaos','Most irony &amp; joke markers','%'],
+    ['most_tilt','Sharpest vocabulary','%'],
+    ['funniest','Most reactions earned','/msg'],
+    ['essayist','Longest average message','chars'],
+    ['one_worder','Shortest average message','chars'],
+    ['questioner','Most questions asked','%'],
+  ];
+  $('#awards').innerHTML = AW.map(([key,label,unit])=>{
+    const rows = (S[key]||[]).slice(0,5).map((x,i)=>`
+      <div class="aitem">
+        <div class="apos">${i+1}</div>
+        <div class="aname">${esc(x.name)} <span class="ateam">${esc(x.team)}</span></div>
+        <div class="aval">${x.v}${unit==='msgs'||unit==='chars'||unit==='/msg'?'':unit}</div>
+      </div>`).join('');
+    return `<div class="award"><h3>${label}</h3><div class="alist">${rows}</div></div>`;
+  }).join('');
+
+  $('#fstamp').textContent = C.span[0] + ' → ' + C.span[1];
+})();
+</script>
+</body>
+</html>

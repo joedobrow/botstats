@@ -1,16 +1,22 @@
 """
-Static mapping of in-DB captain names to RD2L team metadata (real team name +
-logo URL). Source: https://rd2l.gg/seasons/.../divisions/.../teams (S38).
+Team identity (real team name + logo) for a captain, per season.
 
-To refresh, re-scrape the RD2L teams page and overwrite this dict. Keys are
-matched case-insensitively against the `captain` field in player_costs.
+Backed by the `season_teams` DB table — populated by /start_new_season from
+the RD2L teams page, so rolling a new season is a data change, not a code
+change. The S38 dict below is kept only as the seed for that table (see
+_seed_s38_season_teams in db.py) and as a last-resort fallback.
 """
 
 from __future__ import annotations
 
+import logging
 
-# Lower-cased captain name (as it appears in player_costs) → metadata.
-_TEAMS_BY_CAPTAIN: dict[str, dict] = {
+logger = logging.getLogger(__name__)
+
+
+# Legacy S38 data. Seeded into season_teams on first startup after that table
+# was added; not consulted at runtime once the DB has rows. Don't add to this.
+_LEGACY_S38_TEAMS: dict[str, dict] = {
     "bonedini":           {"team_name": "Bonedini",                                              "logo_url": None},
     "thefoxinthebox":     {"team_name": "Bottom Feeders",                                        "logo_url": "https://i.ibb.co/WvrNJPZH/bottom-feeders-logo.png"},
     "yokozuna hoshoryu":  {"team_name": "Gym Esports (For Aniki)",                               "logo_url": "https://i.ibb.co/hJBrGwNx/GYMesports.png"},
@@ -20,18 +26,33 @@ _TEAMS_BY_CAPTAIN: dict[str, dict] = {
     "loves muffins":      {"team_name": "Out of the Box Thinkers",                               "logo_url": "https://i.ibb.co/bjW4zBs2/muffs.png"},
     "icicle":             {"team_name": "Prestige Worldwide: The First Word in Entertainment",   "logo_url": "https://i.ibb.co/2YpWfHmP/pw.png"},
     "space chicken":      {"team_name": "Space Chicken",                                         "logo_url": None},
-    # RD2L lists "Dr. Sulaiman Al Habib" as the Turtle Club captain; our DB
-    # has him as "Dingus". Alias-mapped here.
     "dingus":             {"team_name": "Turtle Club",                                           "logo_url": "https://i.ibb.co/8LmYj1Kx/turtle.png"},
 }
 
 
-def get_team_info(captain: str | None) -> dict:
-    """Return {team_name, logo_url} for the captain string. Falls back to
-    using the captain string as the team name and no logo if unknown."""
+def get_team_info(captain: str | None,
+                  guild_id: int | None = None,
+                  season_start: str | None = None) -> dict:
+    """Return {team_name, logo_url} for a captain.
+
+    Reads season_teams for the given guild/season. Falls back to the captain
+    string as the team name (and no logo) when we have no identity on file —
+    which is the correct display for an un-branded team, not an error.
+    """
     if not captain:
         return {"team_name": captain or "", "logo_url": None}
-    info = _TEAMS_BY_CAPTAIN.get(captain.strip().lower())
+    key = captain.strip().lower()
+
+    if guild_id and season_start:
+        try:
+            from db import get_season_teams
+            info = get_season_teams(guild_id, season_start).get(key)
+            if info:
+                return info
+        except Exception:
+            logger.exception("season_teams lookup failed for %s", captain)
+
+    info = _LEGACY_S38_TEAMS.get(key)
     if info:
         return info
     return {"team_name": captain, "logo_url": None}
