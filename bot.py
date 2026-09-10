@@ -30,6 +30,10 @@ def _require_division(interaction: discord.Interaction):
     return get_division(interaction.guild_id)
 
 
+# Commands reply privately (ephemeral) by default; public=True posts to the channel instead
+PUBLIC_PARAM_DESCRIPTION = "Post the result in the channel instead of only showing it to you (default: False)"
+
+
 # ---------------------------------------------------------------------------
 # Slash commands
 # ---------------------------------------------------------------------------
@@ -306,6 +310,7 @@ async def list_weeks(interaction: discord.Interaction):
     pos="Filter by position (1-5, optional)",
     all="Show every player (no top-10 cap, no min-games threshold)",
     debug="[Owner only] expose value components (cost, diff)",
+    public=PUBLIC_PARAM_DESCRIPTION,
 )
 @app_commands.choices(stat=[
     app_commands.Choice(name="Fantasy Points",          value="fantasy_points"),
@@ -341,8 +346,8 @@ async def list_weeks(interaction: discord.Interaction):
     app_commands.Choice(name="Position 5 (Hard Support)", value=5),
 ])
 @app_commands.autocomplete(season=_season_autocomplete)
-async def leaderboard(interaction: discord.Interaction, stat: app_commands.Choice[str], week: int = None, pos: int = None, all: bool = False, season: str = None, debug: bool = False):
-    await interaction.response.defer()
+async def leaderboard(interaction: discord.Interaction, stat: app_commands.Choice[str], week: int = None, pos: int = None, all: bool = False, season: str = None, debug: bool = False, public: bool = False):
+    await interaction.response.defer(ephemeral=not public)
 
     is_owner = ADMIN_USER_ID and interaction.user.id == ADMIN_USER_ID
     debug = bool(debug) and is_owner
@@ -406,7 +411,7 @@ async def leaderboard(interaction: discord.Interaction, stat: app_commands.Choic
 
         embeds = format_leaderboard(stats, sort_by=stat.value, week_label=week_label, threshold=threshold, max_games=max_games, limit=limit, debug=debug)
         for embed in embeds:
-            await interaction.followup.send(embed=embed)
+            await interaction.followup.send(embed=embed, ephemeral=not public)
     except Exception as e:
         logger.exception(f"Error in leaderboard command for week {week}")
         await interaction.followup.send(f"❌ Error loading leaderboard: {str(e)}", ephemeral=True)
@@ -417,10 +422,11 @@ async def leaderboard(interaction: discord.Interaction, stat: app_commands.Choic
     season="Which season to look at (defaults to the current one)",
     name="Player name (partial match), override nickname, or numeric account ID",
     week="Season week number (1, 2, 3...) or -1 for all-time. Leave blank for the current week.",
+    public=PUBLIC_PARAM_DESCRIPTION,
 )
 @app_commands.autocomplete(season=_season_autocomplete)
-async def player(interaction: discord.Interaction, name: str, week: int = None, season: str = None):
-    await interaction.response.defer()
+async def player(interaction: discord.Interaction, name: str, week: int = None, season: str = None, public: bool = False):
+    await interaction.response.defer(ephemeral=not public)
     debug = False
 
     division = _require_division(interaction)
@@ -583,7 +589,7 @@ async def player(interaction: discord.Interaction, name: str, week: int = None, 
                     inline=False,
                 )
             embed.set_footer(text=f"Account ID: {account_id}")
-            await interaction.followup.send(embed=embed)
+            await interaction.followup.send(embed=embed, ephemeral=not public)
             return
 
         # Pool of league players with enough games to give meaningful percentiles.
@@ -598,7 +604,7 @@ async def player(interaction: discord.Interaction, name: str, week: int = None, 
                 value="Steam match history is private, so OpenDota game counts are unavailable.",
                 inline=False,
             )
-        await interaction.followup.send(embed=embed)
+        await interaction.followup.send(embed=embed, ephemeral=not public)
     except Exception as e:
         logger.exception(f"Error in player command for week {week}")
         await interaction.followup.send(f"❌ Error loading player stats: {str(e)}", ephemeral=True)
@@ -609,9 +615,10 @@ async def player(interaction: discord.Interaction, name: str, week: int = None, 
 @app_commands.autocomplete(season=_season_autocomplete)
 @app_commands.describe(
     season="Which season to look at (defaults to the current one)",
+    public=PUBLIC_PARAM_DESCRIPTION,
 )
-async def team_stats(interaction: discord.Interaction, name: str, season: str = None):
-    await interaction.response.defer()
+async def team_stats(interaction: discord.Interaction, name: str, season: str = None, public: bool = False):
+    await interaction.response.defer(ephemeral=not public)
 
     division = _require_division(interaction)
     if not division:
@@ -666,7 +673,7 @@ async def team_stats(interaction: discord.Interaction, name: str, season: str = 
         target_agg=target_agg,
         all_team_aggs=list(team_aggs.values()),
     )
-    await interaction.followup.send(embed=embed)
+    await interaction.followup.send(embed=embed, ephemeral=not public)
 
 
 # Shortened stat labels for stream-card display only. Falls back to the
@@ -711,9 +718,9 @@ def _clean_card_line(line: str) -> str:
 
 
 @tree.command(name="player_card", description="Render a stream-friendly PNG card for a player")
-@app_commands.describe(name="Player name (partial), override nickname, or numeric account ID")
-async def player_card(interaction: discord.Interaction, name: str):
-    await interaction.response.defer()
+@app_commands.describe(name="Player name (partial), override nickname, or numeric account ID", public=PUBLIC_PARAM_DESCRIPTION)
+async def player_card(interaction: discord.Interaction, name: str, public: bool = False):
+    await interaction.response.defer(ephemeral=not public)
     division = _require_division(interaction)
     if not division:
         await interaction.followup.send("⚠️ No division configured.", ephemeral=True)
@@ -785,13 +792,14 @@ async def player_card(interaction: discord.Interaction, name: str):
     )
     await interaction.followup.send(
         file=discord.File(buf, filename=f"player_{account_id}.png"),
+        ephemeral=not public,
     )
 
 
 @tree.command(name="team_card", description="Render a stream-friendly PNG card for a player's team")
-@app_commands.describe(name="Any player on the team — partial name, override nickname, or numeric account ID")
-async def team_card(interaction: discord.Interaction, name: str):
-    await interaction.response.defer()
+@app_commands.describe(name="Any player on the team — partial name, override nickname, or numeric account ID", public=PUBLIC_PARAM_DESCRIPTION)
+async def team_card(interaction: discord.Interaction, name: str, public: bool = False):
+    await interaction.response.defer(ephemeral=not public)
     division = _require_division(interaction)
     if not division:
         await interaction.followup.send("⚠️ No division configured.", ephemeral=True)
@@ -899,6 +907,7 @@ async def team_card(interaction: discord.Interaction, name: str):
     )
     await interaction.followup.send(
         file=discord.File(buf, filename=f"team_{captain}.png"),
+        ephemeral=not public,
     )
 
 
@@ -907,10 +916,11 @@ async def team_card(interaction: discord.Interaction, name: str):
     season="Which season to look at (defaults to the current one)",
     team1="Any player on team 1 (or the captain's name)",
     team2="Any player on team 2 (or the captain's name)",
+    public=PUBLIC_PARAM_DESCRIPTION,
 )
 @app_commands.autocomplete(season=_season_autocomplete)
-async def h2h_card(interaction: discord.Interaction, team1: str, team2: str, season: str = None):
-    await interaction.response.defer()
+async def h2h_card(interaction: discord.Interaction, team1: str, team2: str, season: str = None, public: bool = False):
+    await interaction.response.defer(ephemeral=not public)
 
     division = _require_division(interaction)
     if not division:
@@ -1024,6 +1034,7 @@ async def h2h_card(interaction: discord.Interaction, team1: str, team2: str, sea
     )
     await interaction.followup.send(
         file=discord.File(buf, filename=f"h2h_{cap_a}_vs_{cap_b}.png"),
+        ephemeral=not public,
     )
 
 
@@ -1031,9 +1042,10 @@ async def h2h_card(interaction: discord.Interaction, team1: str, team2: str, sea
 @app_commands.describe(
     player1="First player (partial name, override nickname, or numeric account ID)",
     player2="Second player (partial name, override nickname, or numeric account ID)",
+    public=PUBLIC_PARAM_DESCRIPTION,
 )
-async def h2h_player(interaction: discord.Interaction, player1: str, player2: str):
-    await interaction.response.defer()
+async def h2h_player(interaction: discord.Interaction, player1: str, player2: str, public: bool = False):
+    await interaction.response.defer(ephemeral=not public)
     division = _require_division(interaction)
     if not division:
         await interaction.followup.send("⚠️ No division configured.", ephemeral=True)
@@ -1130,6 +1142,7 @@ async def h2h_player(interaction: discord.Interaction, player1: str, player2: st
     )
     await interaction.followup.send(
         file=discord.File(buf, filename=f"h2h_{aid_a}_vs_{aid_b}.png"),
+        ephemeral=not public,
     )
 
 
@@ -1138,8 +1151,9 @@ async def h2h_player(interaction: discord.Interaction, player1: str, player2: st
 @app_commands.describe(
     query="Player name (partial match) or numeric account ID",
     force_refresh="Skip the cache and re-fetch from windrun/OpenDota",
+    public=PUBLIC_PARAM_DESCRIPTION,
 )
-async def lookup(interaction: discord.Interaction, query: str, force_refresh: bool = False):
+async def lookup(interaction: discord.Interaction, query: str, force_refresh: bool = False, public: bool = False):
     is_owner = ADMIN_USER_ID and interaction.user.id == ADMIN_USER_ID
     in_admin_channel = interaction.channel_id in LOOKUP_CHANNEL_IDS
     if not (is_owner or in_admin_channel):
@@ -1149,7 +1163,7 @@ async def lookup(interaction: discord.Interaction, query: str, force_refresh: bo
         )
         return
 
-    await interaction.response.defer()
+    await interaction.response.defer(ephemeral=not public)
     debug = True
     force_refresh = bool(force_refresh) and is_owner
 
@@ -1206,7 +1220,7 @@ async def lookup(interaction: discord.Interaction, query: str, force_refresh: bo
             updated_at=cache_row.get("updated_at"),
             adjustment_pct=adjustment_pct,
         )
-        await interaction.followup.send(embed=embed)
+        await interaction.followup.send(embed=embed, ephemeral=not public)
         return
 
     # Fetch in parallel: windrun (profile + matches) and OpenDota (profile + counts).
@@ -1326,7 +1340,7 @@ async def lookup(interaction: discord.Interaction, query: str, force_refresh: bo
         adjustment_pct=adjustment_pct,
         fetch_error=fetch_error,
     )
-    await interaction.followup.send(embed=embed)
+    await interaction.followup.send(embed=embed, ephemeral=not public)
 
     # Side-effect: refresh this player's cache row so /players stays current
     # without anyone needing to run /refresh_ratings. Write whenever we got
@@ -1806,9 +1820,10 @@ async def refresh_ratings(interaction: discord.Interaction):
 @app_commands.describe(
     show_all="Include every cached player, not just those in this server's matches/roster",
     debug="[Owner only] show methodology details (residual %, expected vs actual)",
+    public=PUBLIC_PARAM_DESCRIPTION,
 )
-async def players(interaction: discord.Interaction, show_all: bool = False, debug: bool = False):
-    await interaction.response.defer()
+async def players(interaction: discord.Interaction, show_all: bool = False, debug: bool = False, public: bool = False):
+    await interaction.response.defer(ephemeral=not public)
 
     is_owner = ADMIN_USER_ID and interaction.user.id == ADMIN_USER_ID
     debug = bool(debug) and is_owner
@@ -1847,19 +1862,20 @@ async def players(interaction: discord.Interaction, show_all: bool = False, debu
     # Discord's 6000-char limit is across all embeds in a single message, so
     # we send one followup message per embed instead of cramming them together.
     for embed in embeds:
-        await interaction.followup.send(embed=embed)
+        await interaction.followup.send(embed=embed, ephemeral=not public)
 
 
 @tree.command(name="matches", description="Show matches with Dotabuff links")
 @app_commands.describe(
     season="Which season to look at (defaults to the current one)",
     week="Season week number (1, 2, 3...) or -1 for all matches. Leave blank for the current week.",
-    player="Filter to matches a specific player appeared in (partial name match)."
+    player="Filter to matches a specific player appeared in (partial name match).",
+    public=PUBLIC_PARAM_DESCRIPTION,
 )
 @app_commands.autocomplete(season=_season_autocomplete)
-async def matches(interaction: discord.Interaction, week: int = None, player: str = None, season: str = None):
+async def matches(interaction: discord.Interaction, week: int = None, player: str = None, season: str = None, public: bool = False):
     # Defer immediately to avoid 3-second timeout
-    await interaction.response.defer()
+    await interaction.response.defer(ephemeral=not public)
 
     division = _require_division(interaction)
     if not division:
@@ -1899,16 +1915,17 @@ async def matches(interaction: discord.Interaction, week: int = None, player: st
 
     from formatters import format_matches_list
     embed = format_matches_list(match_list, week_label=week_label)
-    await interaction.followup.send(embed=embed)
+    await interaction.followup.send(embed=embed, ephemeral=not public)
 
 
 @tree.command(name="summary", description="Show 10 fantasy-points leaderboards: each position × latest-week and all-time")
 @app_commands.autocomplete(season=_season_autocomplete)
 @app_commands.describe(
     season="Which season to look at (defaults to the current one)",
+    public=PUBLIC_PARAM_DESCRIPTION,
 )
-async def summary(interaction: discord.Interaction, season: str = None):
-    await interaction.response.defer()
+async def summary(interaction: discord.Interaction, season: str = None, public: bool = False):
+    await interaction.response.defer(ephemeral=not public)
 
     division = _require_division(interaction)
     if not division:
@@ -1959,14 +1976,15 @@ async def summary(interaction: discord.Interaction, season: str = None):
                     limit=10,
                 )
                 for embed in embeds:
-                    await interaction.followup.send(embed=embed)
+                    await interaction.followup.send(embed=embed, ephemeral=not public)
     except Exception as e:
         logger.exception("Error in summary command")
         await interaction.followup.send(f"❌ Error loading summary: {str(e)}", ephemeral=True)
 
 
 @tree.command(name="quote", description="Display a random chat message from league matches")
-async def quote(interaction: discord.Interaction):
+@app_commands.describe(public=PUBLIC_PARAM_DESCRIPTION)
+async def quote(interaction: discord.Interaction, public: bool = False):
     division = _require_division(interaction)
     if not division:
         await interaction.response.send_message("⚠️ No division configured. Ask an admin to run `/config` first.", ephemeral=True)
@@ -1993,14 +2011,15 @@ async def quote(interaction: discord.Interaction):
 
     await interaction.response.send_message(
         f"💬 **\"{message}\"**\n"
-        f"— *{player_name}* at {time_str} ([match]({dotabuff_link}))"
+        f"— *{player_name}* at {time_str} ([match]({dotabuff_link}))",
+        ephemeral=not public,
     )
 
 
 @tree.command(name="draftorder", description="Show the Ability Draft pick order for a match")
-@app_commands.describe(match_id="The Dota 2 match ID (from Windrun or Dotabuff)")
-async def draftorder(interaction: discord.Interaction, match_id: str):
-    await interaction.response.defer()
+@app_commands.describe(match_id="The Dota 2 match ID (from Windrun or Dotabuff)", public=PUBLIC_PARAM_DESCRIPTION)
+async def draftorder(interaction: discord.Interaction, match_id: str, public: bool = False):
+    await interaction.response.defer(ephemeral=not public)
 
     try:
         mid = int(match_id.strip())
@@ -2024,16 +2043,16 @@ async def draftorder(interaction: discord.Interaction, match_id: str):
 
         image_bytes = await generate_draft_image(data)
         file = discord.File(image_bytes, filename=f"draft_{mid}.png")
-        await interaction.followup.send(file=file)
+        await interaction.followup.send(file=file, ephemeral=not public)
     except Exception as e:
         logger.exception("Error in draftorder command for match %s", match_id)
         await interaction.followup.send(f"❌ Error generating draft order: {e}", ephemeral=True)
 
 
 @tree.command(name="hi_vs_low", description="Split 10 players into hi-MMR vs lo-MMR teams and set random requirements")
-@app_commands.describe(players="10 comma-separated player names, override nicknames, or account IDs")
-async def hi_vs_low(interaction: discord.Interaction, players: str):
-    await interaction.response.defer()
+@app_commands.describe(players="10 comma-separated player names, override nicknames, or account IDs", public=PUBLIC_PARAM_DESCRIPTION)
+async def hi_vs_low(interaction: discord.Interaction, players: str, public: bool = False):
+    await interaction.response.defer(ephemeral=not public)
 
     raw = [p.strip() for p in players.split(",") if p.strip()]
     if len(raw) != 10:
@@ -2106,7 +2125,7 @@ async def hi_vs_low(interaction: discord.Interaction, players: str):
                     value=_team_field(high, high_avg), inline=True)
     embed.add_field(name="🔵 LOW",
                     value=_team_field(low, low_avg), inline=True)
-    await interaction.followup.send(embed=embed)
+    await interaction.followup.send(embed=embed, ephemeral=not public)
 
 
 

@@ -116,6 +116,8 @@ The bot ships with a `Dockerfile` and `fly.toml` configured for fly.io.
 | `/refresh` | *(Admin)* Manually trigger a data fetch right now. |
 | `/nuke` | *(Admin)* Wipe all data for this server and re-fetch from scratch. |
 
+Replies are only visible to you by default. Commands that show stats, matches, quotes, or image cards accept an optional `public:True` to post the result in the channel instead. Admin and owner commands always reply privately.
+
 ---
 
 ## How Fantasy Points Work
