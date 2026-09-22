@@ -342,7 +342,8 @@ async def ratings_api_handler(request: web.Request) -> web.Response:
 
     When guild_id + season_start are given, internal_rating is the same
     fantasy-adjusted number /player displays (base rating nudged up to
-    ±6% by how much someone over/underperformed expectations that season),
+    ±6% by how much someone over/underperformed expectations across every
+    season the guild has recorded),
     not the raw player_ratings_cache value — matching /player exactly for
     anyone with match history that season. Falls back to the raw rating for
     anyone without an adjustment entry (no match history / manually rated),
@@ -461,6 +462,78 @@ async def season_stats_api_handler(request: web.Request) -> web.Response:
     return web.json_response(data)
 
 
+# Players the bot has never rated are computed on request, which calls
+# windrun under the user-agent Noxville whitelisted for us — so each key gets
+# a small hourly budget of those. Cached players don't count against it.
+PLAYER_API_NEW_LOOKUPS_PER_HOUR = 20
+_new_lookups: dict[str, list[float]] = {}
+
+
+def _player_api_caller(request: web.Request) -> str | None:
+    """Who's calling /api/player: "owner" for the sheet's RATINGS_API_KEY, a
+    PLAYER_API_KEYS label for a handed-out key, or None."""
+    import hmac
+    from config import PLAYER_API_KEYS, RATINGS_API_KEY
+    given = request.headers.get("X-Api-Key", "")
+    if not given:
+        return None
+    if RATINGS_API_KEY and hmac.compare_digest(given.encode(), RATINGS_API_KEY.encode()):
+        return "owner"
+    for key, label in PLAYER_API_KEYS.items():
+        if hmac.compare_digest(given.encode(), key.encode()):
+            return label
+    return None
+
+
+async def player_api_handler(request: web.Request) -> web.Response:
+    """GET /api/player/{account_id} -> what /player shows.
+
+    account_id may be a Dotabuff/OpenDota id or a Steam64 id. The rating is
+    the one /player shows in API_DEFAULT_GUILD_ID's division. There's no
+    guild_id parameter on purpose: asking for a division where the player has
+    no games would return the unadjusted rating, and the difference would
+    reveal the adjustment. /set_player overrides are always applied. See
+    player_api.py for every field.
+
+    Auth: X-Api-Key, either RATINGS_API_KEY or one from PLAYER_API_KEYS.
+    """
+    import time
+    import player_api
+    from config import API_DEFAULT_GUILD_ID
+    from db import get_rating_cache_row, get_skill_override
+
+    caller = _player_api_caller(request)
+    if caller is None:
+        return web.json_response({"error": "missing or wrong X-Api-Key header"}, status=401)
+
+    account_id = player_api.account_id_from(request.match_info["account_id"])
+    if account_id is None:
+        return web.json_response({"error": "account id must be a number (Dotabuff id or Steam64)"},
+                                 status=400)
+    guild_id = API_DEFAULT_GUILD_ID
+
+    if get_rating_cache_row(account_id) is None and get_skill_override(account_id) is None:
+        now = time.time()
+        recent = [t for t in _new_lookups.get(caller, []) if now - t < 3600]
+        if len(recent) >= PLAYER_API_NEW_LOOKUPS_PER_HOUR and caller != "owner":
+            return web.json_response(
+                {"error": f"too many never-seen players this hour (limit "
+                          f"{PLAYER_API_NEW_LOOKUPS_PER_HOUR}); cached players still work"},
+                status=429, headers={"Retry-After": "3600"})
+        _new_lookups[caller] = recent + [now]
+        from rating_compute import compute_and_cache_rating
+        try:
+            await compute_and_cache_rating(account_id)
+        except Exception:
+            logger.exception("player API: couldn't compute rating for %s", account_id)
+
+    payload = player_api.build(account_id, guild_id)
+    logger.info("player API: %s looked up %s", caller, account_id)
+    if payload is None:
+        return web.json_response({"error": "no data for that account"}, status=404)
+    return web.json_response(payload)
+
+
 # ---------------------------------------------------------------------------
 # AD helper (existing)
 # ---------------------------------------------------------------------------
@@ -503,6 +576,7 @@ def create_app() -> web.Application:
     app.router.add_get("/api/ratings",                ratings_api_handler)
     app.router.add_get("/api/costs",                  costs_api_handler)
     app.router.add_get("/api/season_stats",            season_stats_api_handler)
+    app.router.add_get("/api/player/{account_id}",      player_api_handler)
     # Serve the rd2l logo + any other static assets from the assets/ dir.
     if ASSETS_DIR.exists():
         app.router.add_static("/assets/", path=str(ASSETS_DIR), show_index=False)
