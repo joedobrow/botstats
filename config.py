@@ -22,6 +22,20 @@ STEAM_API_KEY = os.environ.get("STEAM_API_KEY", "")
 # e.g. `python -c "import secrets; print(secrets.token_urlsafe(32))"`.
 RATINGS_API_KEY: str | None = os.environ.get("RATINGS_API_KEY")
 
+# Keys handed to other people for GET /api/player only, as "label:key" pairs
+# separated by commas — e.g. "sam:abc123,pat:def456". Each person gets their
+# own, so one can be revoked (remove it, redeploy) without breaking the rest
+# or the sheet's RATINGS_API_KEY. The label shows in the logs, never the key.
+PLAYER_API_KEYS: dict[str, str] = {
+    key.strip(): label.strip()
+    for label, _, key in (pair.partition(":") for pair in os.environ.get("PLAYER_API_KEYS", "").split(","))
+    if key.strip()
+}
+
+# The division /api/player uses for the season fantasy adjustment when the
+# caller doesn't pass guild_id — the same adjustment /player shows there.
+API_DEFAULT_GUILD_ID: int = int(os.environ.get("API_DEFAULT_GUILD_ID", "1481800158826991718"))
+
 # Channels where /lookup is open to anyone (typically admin-only Discord
 # channels). Owner can always use /lookup anywhere.
 LOOKUP_CHANNEL_IDS: set[int] = {1512177911711662272}

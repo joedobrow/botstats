@@ -923,6 +923,32 @@ def _all_time_start_ts(guild_id: int, season_start_date: str | None) -> int:
     return int(week_zero_start.timestamp())
 
 
+def _apply_override_nicknames(results: list[dict]) -> list[dict]:
+    """Swap each stat row's in-game name for its /set_player nickname, if any.
+
+    Stat rows are aggregated from `players.name`, which is whatever the Steam
+    persona was at match time — so without this, a nickname only showed up in
+    cache-backed views (/players, /lookup) and not in /player or /leaderboard.
+    """
+    aids = [r["account_id"] for r in results if r.get("account_id") is not None]
+    if not aids:
+        return results
+    with _conn() as conn:
+        nick = {
+            row["account_id"]: row["nickname"]
+            for row in conn.execute(
+                f"SELECT account_id, nickname FROM skill_overrides "
+                f"WHERE nickname IS NOT NULL AND TRIM(nickname) != '' "
+                f"AND account_id IN ({','.join('?' * len(aids))})",
+                aids,
+            ).fetchall()
+        }
+    for r in results:
+        if r.get("account_id") in nick:
+            r["name"] = nick[r["account_id"]]
+    return results
+
+
 def get_latest_week_stats(guild_id: int, week_offset: int = 0) -> list[dict]:
     """Return aggregated per-player stats for the given week.
 
@@ -1000,7 +1026,7 @@ def get_latest_week_stats(guild_id: int, week_offset: int = 0) -> list[dict]:
         d["diff"] = diffs.get(d["account_id"], 0.0)
         d["diff_vs_lobby"] = diffs_vs_lobby.get(d["account_id"], 0.0)
         results.append(d)
-    return results
+    return _apply_override_nicknames(results)
 
 
 def get_stats_for_season_week(guild_id: int, week_number: int, season_start_date: str) -> list[dict]:
@@ -1087,7 +1113,7 @@ def get_stats_for_season_week(guild_id: int, week_number: int, season_start_date
     attendance_map = _compute_attendance(guild_id, start, end, costs)
     for s in results:
         s["attendance"] = attendance_map.get(s["account_id"])
-    return results
+    return _apply_override_nicknames(results)
 
 
 def get_all_time_stats(guild_id: int, season_start_date: str = None,
@@ -1205,7 +1231,7 @@ def get_all_time_stats(guild_id: int, season_start_date: str = None,
             mirrored["account_id"] = alt_id
             results.append(mirrored)
 
-    return results
+    return _apply_override_nicknames(results)
 
 
 def _per_match_fp(row: dict) -> float:
@@ -1482,6 +1508,12 @@ def compute_fantasy_adjusted_ratings(guild_id: int, season_start: str) -> dict[i
     match history (just added via /set_player) get no entry in the result
     and should be shown at their base rating.
 
+    Uses every match the guild has ever recorded, across all seasons: a
+    rating is a judgement of the player, not of their current season.
+    (season_start only scopes the draft-cost fields get_all_time_stats also
+    returns, which this doesn't use.) Before this was explicit, the S39
+    rollover quietly narrowed it to the current season's games.
+
     Returns: {account_id: {
         "base_rating": int,
         "adjusted_rating": int,
@@ -1493,7 +1525,7 @@ def compute_fantasy_adjusted_ratings(guild_id: int, season_start: str) -> dict[i
     if not rows:
         return {}
 
-    stats = get_all_time_stats(guild_id, season_start)
+    stats = get_all_time_stats(guild_id, season_start, cross_season=True)
     diff_by_aid: dict[int, float] = {}
     games_by_aid: dict[int, int] = {}
     for s in stats:
@@ -2790,7 +2822,8 @@ def get_all_matches(guild_id: int) -> list[dict]:
 def get_match_ids_for_player(guild_id: int, player_name: str) -> set[int]:
     """Return the set of match IDs (for this guild) where a player matching the name played.
 
-    Partial, case-insensitive match against the stored player name.
+    Partial, case-insensitive match against the in-game name or the
+    /set_player nickname.
     """
     with _conn() as conn:
         rows = conn.execute("""
@@ -2798,8 +2831,12 @@ def get_match_ids_for_player(guild_id: int, player_name: str) -> set[int]:
             FROM players p
             JOIN matches m ON p.match_id = m.match_id
             WHERE m.guild_id = ?
-              AND LOWER(p.name) LIKE LOWER(?)
-        """, (guild_id, f"%{player_name}%")).fetchall()
+              AND (LOWER(p.name) LIKE LOWER(?)
+                   OR p.account_id IN (
+                       SELECT account_id FROM skill_overrides
+                       WHERE LOWER(nickname) LIKE LOWER(?)
+                   ))
+        """, (guild_id, f"%{player_name}%", f"%{player_name}%")).fetchall()
     return {r["match_id"] for r in rows}
 
 

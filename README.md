@@ -10,7 +10,7 @@ A multi-guild Discord bot that pulls match data from the [OpenDota API](https://
 |---|---|
 | **Per-server config** | Each Discord server (guild) configures its own league, region, mode, and season start via `/config`. |
 | **Game modes** | Captain's Mode (`cm`) or Ability Draft (`ad`, game_mode 18). |
-| **Weekly auto-fetch** | Runs every Monday at 06:00 UTC. Pulls new matches and parses any new AD drafts. |
+| **Weekly auto-fetch** | Runs every Thursday at 09:00 UTC (early morning ET, after Wednesday league night). Pulls new matches and parses any new AD drafts. |
 | **SQLite caching** | Match data is stored locally on a persistent fly.io volume. |
 | **Ability Draft replays** | A bundled Go parser (`parser/`) extracts pick order from Source 2 replays; OpenDota fills in ability/hero names. |
 | **Fantasy points** | A tunable per-game scoring formula with duration normalization. See `fantasy.py`. |
@@ -116,7 +116,7 @@ The bot ships with a `Dockerfile` and `fly.toml` configured for fly.io.
 | `/refresh` | *(Admin)* Manually trigger a data fetch right now. |
 | `/nuke` | *(Admin)* Wipe all data for this server and re-fetch from scratch. |
 
-`/leaderboard`, `/player`, `/players`, `/matches`, `/summary`, `/team_stats`, and `/hi_vs_low` reply only to you by default; pass `public:True` to post the result in the channel instead. `/quote` posts in the channel by default (`public:False` keeps it to yourself). Image cards (`/player_card`, `/team_card`, `/h2h_card`, `/h2h_player`) and `/draftorder` always post in the channel.
+Stat, match and quote commands post their result in the channel. Pass `public:False` to any of them (`/leaderboard`, `/player`, `/players`, `/matches`, `/summary`, `/team_stats`, `/hi_vs_low`, `/quote`, `/lookup`) to get the reply as a whisper only you can see. Image cards (`/player_card`, `/team_card`, `/h2h_card`, `/h2h_player`) and `/draftorder` always post in the channel. Owner-only commands (`/set_player`, `/start_new_season`, `/sync_roles_channels`, `/nuke`) always reply privately.
 
 ---
 

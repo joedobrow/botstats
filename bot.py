@@ -30,9 +30,10 @@ def _require_division(interaction: discord.Interaction):
     return get_division(interaction.guild_id)
 
 
-# Stat commands reply privately (ephemeral) by default; public=True posts to the channel instead.
-# Commands meant for sharing (e.g. /quote) default the other way.
-PUBLIC_PARAM_DESCRIPTION = "Post the result in the channel instead of only showing it to you (default: False)"
+# Stat/match/quote commands post to the channel by default; pass public:False
+# to get the reply as a whisper only you can see. Owner-only commands
+# (set_player, start_new_season, sync_roles_channels, nuke) are always private
+# and take no public param.
 PUBLIC_BY_DEFAULT_PARAM_DESCRIPTION = "Post the result in the channel; set False to only show it to you (default: True)"
 
 
@@ -312,7 +313,7 @@ async def list_weeks(interaction: discord.Interaction):
     pos="Filter by position (1-5, optional)",
     all="Show every player (no top-10 cap, no min-games threshold)",
     debug="[Owner only] expose value components (cost, diff)",
-    public=PUBLIC_PARAM_DESCRIPTION,
+    public=PUBLIC_BY_DEFAULT_PARAM_DESCRIPTION,
 )
 @app_commands.choices(stat=[
     app_commands.Choice(name="Fantasy Points",          value="fantasy_points"),
@@ -348,7 +349,7 @@ async def list_weeks(interaction: discord.Interaction):
     app_commands.Choice(name="Position 5 (Hard Support)", value=5),
 ])
 @app_commands.autocomplete(season=_season_autocomplete)
-async def leaderboard(interaction: discord.Interaction, stat: app_commands.Choice[str], week: int = None, pos: int = None, all: bool = False, season: str = None, debug: bool = False, public: bool = False):
+async def leaderboard(interaction: discord.Interaction, stat: app_commands.Choice[str], week: int = None, pos: int = None, all: bool = False, season: str = None, debug: bool = False, public: bool = True):
     await interaction.response.defer(ephemeral=not public)
 
     is_owner = ADMIN_USER_ID and interaction.user.id == ADMIN_USER_ID
@@ -424,10 +425,10 @@ async def leaderboard(interaction: discord.Interaction, stat: app_commands.Choic
     season="Which season to look at (defaults to the current one)",
     name="Player name (partial match), override nickname, or numeric account ID",
     week="Season week number (1, 2, 3...) or -1 for all-time. Leave blank for the current week.",
-    public=PUBLIC_PARAM_DESCRIPTION,
+    public=PUBLIC_BY_DEFAULT_PARAM_DESCRIPTION,
 )
 @app_commands.autocomplete(season=_season_autocomplete)
-async def player(interaction: discord.Interaction, name: str, week: int = None, season: str = None, public: bool = False):
+async def player(interaction: discord.Interaction, name: str, week: int = None, season: str = None, public: bool = True):
     await interaction.response.defer(ephemeral=not public)
     debug = False
 
@@ -617,9 +618,9 @@ async def player(interaction: discord.Interaction, name: str, week: int = None, 
 @app_commands.autocomplete(season=_season_autocomplete)
 @app_commands.describe(
     season="Which season to look at (defaults to the current one)",
-    public=PUBLIC_PARAM_DESCRIPTION,
+    public=PUBLIC_BY_DEFAULT_PARAM_DESCRIPTION,
 )
-async def team_stats(interaction: discord.Interaction, name: str, season: str = None, public: bool = False):
+async def team_stats(interaction: discord.Interaction, name: str, season: str = None, public: bool = True):
     await interaction.response.defer(ephemeral=not public)
 
     division = _require_division(interaction)
@@ -1664,7 +1665,7 @@ async def set_player(
     info = _resolve_internal_rating(
         override=full,
         ad_last=existing.get("ad_last_year"),
-        ad_all=None,
+        ad_all=existing.get("ad_all_time"),
         ranked_last=existing.get("ranked_last_year"),
         wr_rating=eff_wr,
         ranked_in_wr_raw=ranked_in_wr_raw,
@@ -1816,9 +1817,9 @@ async def refresh_ratings(interaction: discord.Interaction):
 @app_commands.describe(
     show_all="Include every cached player, not just those in this server's matches/roster",
     debug="[Owner only] show methodology details (residual %, expected vs actual)",
-    public=PUBLIC_PARAM_DESCRIPTION,
+    public=PUBLIC_BY_DEFAULT_PARAM_DESCRIPTION,
 )
-async def players(interaction: discord.Interaction, show_all: bool = False, debug: bool = False, public: bool = False):
+async def players(interaction: discord.Interaction, show_all: bool = False, debug: bool = False, public: bool = True):
     await interaction.response.defer(ephemeral=not public)
 
     is_owner = ADMIN_USER_ID and interaction.user.id == ADMIN_USER_ID
@@ -1866,10 +1867,10 @@ async def players(interaction: discord.Interaction, show_all: bool = False, debu
     season="Which season to look at (defaults to the current one)",
     week="Season week number (1, 2, 3...) or -1 for all matches. Leave blank for the current week.",
     player="Filter to matches a specific player appeared in (partial name match).",
-    public=PUBLIC_PARAM_DESCRIPTION,
+    public=PUBLIC_BY_DEFAULT_PARAM_DESCRIPTION,
 )
 @app_commands.autocomplete(season=_season_autocomplete)
-async def matches(interaction: discord.Interaction, week: int = None, player: str = None, season: str = None, public: bool = False):
+async def matches(interaction: discord.Interaction, week: int = None, player: str = None, season: str = None, public: bool = True):
     # Defer immediately to avoid 3-second timeout
     await interaction.response.defer(ephemeral=not public)
 
@@ -1932,9 +1933,9 @@ async def matches(interaction: discord.Interaction, week: int = None, player: st
 @app_commands.autocomplete(season=_season_autocomplete)
 @app_commands.describe(
     season="Which season to look at (defaults to the current one)",
-    public=PUBLIC_PARAM_DESCRIPTION,
+    public=PUBLIC_BY_DEFAULT_PARAM_DESCRIPTION,
 )
-async def summary(interaction: discord.Interaction, season: str = None, public: bool = False):
+async def summary(interaction: discord.Interaction, season: str = None, public: bool = True):
     await interaction.response.defer(ephemeral=not public)
 
     division = _require_division(interaction)
@@ -2060,8 +2061,8 @@ async def draftorder(interaction: discord.Interaction, match_id: str):
 
 
 @tree.command(name="hi_vs_low", description="Split 10 players into hi-MMR vs lo-MMR teams and set random requirements")
-@app_commands.describe(players="10 comma-separated player names, override nicknames, or account IDs", public=PUBLIC_PARAM_DESCRIPTION)
-async def hi_vs_low(interaction: discord.Interaction, players: str, public: bool = False):
+@app_commands.describe(players="10 comma-separated player names, override nicknames, or account IDs", public=PUBLIC_BY_DEFAULT_PARAM_DESCRIPTION)
+async def hi_vs_low(interaction: discord.Interaction, players: str, public: bool = True):
     await interaction.response.defer(ephemeral=not public)
 
     raw = [p.strip() for p in players.split(",") if p.strip()]
@@ -2207,9 +2208,17 @@ async def start_new_season(
         await interaction.followup.send(
             "\u26a0\ufe0f No division configured here yet \u2014 run `/config` first.", ephemeral=True)
         return
-    if current["season_start"] == season_start and not dry_run:
+    # Re-running against the season that's already active is a legitimate
+    # repair: every write below is an upsert, so it tops up whatever didn't
+    # land the first time (a costs CSV that failed to parse, say). Only refuse
+    # when there's genuinely nothing to do — same season AND no data sources.
+    same_season = current["season_start"] == season_start
+    has_sources = bool(costs_url or costs_file or teams_url)
+    if same_season and not has_sources and not dry_run:
         await interaction.followup.send(
-            f"\u26a0\ufe0f `{season_start}` is already the active season. Nothing to roll over.",
+            f"\u26a0\ufe0f `{season_start}` is already the active season and you "
+            "didn't pass `costs_file`/`costs_url`/`teams_url`, so there's nothing "
+            "to do. Attach a roster CSV to top up an incomplete rollover.",
             ephemeral=True)
         return
 
@@ -2278,9 +2287,10 @@ async def start_new_season(
         f"**Weeks** {first_week}\u2013{first_week + weeks - 1} "
         f"({_d(weeks_preview[0][1])} \u2192 {_d(weeks_preview[-1][2])})",
         f"**Rosters** {len(drafted)} drafted players across {teams_in_costs} teams"
-        + ("" if costs_url else "  _(no costs_url \u2014 skipped)_"),
+        + ("" if (costs_url or costs_file) else "  _(no costs source given \u2014 skipped)_")
+        + ("  \u2014 captains are added separately, so this is 4/team" if drafted else ""),
         f"**Team identities** {len(identities)} teams"
-        + ("" if teams_url else "  _(no teams_url \u2014 skipped)_"),
+        + ("" if teams_url else "  _(no teams_url \u2014 skipped, existing kept)_"),
     ]
     if problems:
         lines.append("")
@@ -2309,12 +2319,19 @@ async def start_new_season(
         upsert_season_teams(guild_id, season_start, identities)
     upsert_season(guild_id, season_start, league_id=league, label=season_label_val)
 
-    prev_costs = len(get_player_costs(guild_id, current["season_start"]))
+    if same_season:
+        # Repair run: report what the season now holds, not what a previous one kept.
+        now_costs = len(get_player_costs(guild_id, season_start))
+        tail = (f"\n\nSeason `{season_start}` now has **{now_costs}** roster rows. "
+                "Existing matches and weeks were left alone.")
+    else:
+        prev_costs = len(get_player_costs(guild_id, current["season_start"]))
+        tail = (f"\n\nPrevious season `{current['season_start']}` kept its {prev_costs} "
+                "roster rows and all its matches \u2014 nothing was deleted.")
     await interaction.followup.send(
-        "\u2705 **Season rolled over.**\n\n" + "\n".join(lines) +
-        f"\n\nPrevious season `{current['season_start']}` kept its {prev_costs} roster rows "
-        "and all its matches \u2014 nothing was deleted.\n"
-        "Next: run `/refresh_leaderboard` to pull matches under the new league ID, "
+        ("\u2705 **Season topped up.**\n\n" if same_season
+         else "\u2705 **Season rolled over.**\n\n") + "\n".join(lines) + tail +
+        "\nNext: run `/refresh_leaderboard` to pull matches under the league ID, "
         "then `/sync_roles_channels` for Discord roles.",
         ephemeral=True)
 
@@ -2701,15 +2718,18 @@ async def on_message(message: discord.Message):
 
 
 # ---------------------------------------------------------------------------
-# Weekly auto-fetch (Monday 6:00 AM UTC)
+# Weekly auto-fetch (Thursday 09:00 UTC)
 # ---------------------------------------------------------------------------
+# League night is Wednesday evening ET and wraps up around 03:30 UTC Thursday.
+# 09:00 UTC (5am EDT / 4am EST) leaves OpenDota a few hours to ingest the
+# games and still has everything in place before anyone's awake.
 
-@tasks.loop(time=datetime.now(timezone.utc).replace(hour=6, minute=0, second=0, microsecond=0).time())
+@tasks.loop(time=datetime.min.time().replace(hour=9, tzinfo=timezone.utc))
 async def weekly_fetch():
-    # Only run on Mondays (weekday() == 0)
-    if datetime.now(timezone.utc).weekday() != 0:
+    # Only run on Thursdays (weekday() == 3)
+    if datetime.now(timezone.utc).weekday() != 3:
         return
-    logger.info("Weekly fetch triggered (Monday 06:00 UTC)")
+    logger.info("Weekly fetch triggered (Thursday 09:00 UTC)")
 
     # Fetch for all configured divisions
     divisions = get_all_divisions()
