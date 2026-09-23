@@ -2760,6 +2760,18 @@ def get_matches_for_season_week(guild_id: int, week_number: int, season_start_da
     return [dict(r) for r in rows]
 
 
+def latest_match_fetch(guild_id: int) -> str | None:
+    """When this division last gained a match (matches.fetched_at). Ratings
+    move when anyone plays — the season fantasy adjustment is fitted across
+    the whole division — so this is half of "when did a player's numbers last
+    change", alongside their own cache row's updated_at."""
+    with _conn() as conn:
+        row = conn.execute(
+            "SELECT MAX(fetched_at) FROM matches WHERE guild_id = ?", (guild_id,)
+        ).fetchone()
+    return row[0] if row else None
+
+
 def get_latest_matches(guild_id: int, season_start_date: str | None = None) -> list[dict]:
     """Return all matches from the current season week (via
     get_current_season_week/get_season_week_range, so this respects explicit
