@@ -462,11 +462,53 @@ async def season_stats_api_handler(request: web.Request) -> web.Response:
     return web.json_response(data)
 
 
-# Players the bot has never rated are computed on request, which calls
-# windrun under the user-agent Noxville whitelisted for us — so each key gets
-# a small hourly budget of those. Cached players don't count against it.
-PLAYER_API_NEW_LOOKUPS_PER_HOUR = 20
+# Never-rated players are computed on request (a windrun call each), so each
+# key gets an hourly budget of those — see config.PLAYER_API_NEW_LOOKUPS_PER_HOUR.
+# Cached players don't count against it.
 _new_lookups: dict[str, list[float]] = {}
+
+
+def _conditional_headers(payload: dict) -> tuple[str, str]:
+    """(ETag, Last-Modified) for a player payload.
+
+    ETag is a hash of the response itself, so it changes exactly when the
+    answer does. Last-Modified comes from `changed_at`: the newer of the
+    player's own data and the division's latest match, because the season
+    adjustment moves a rating when anyone plays.
+    """
+    import hashlib
+    import json
+    from datetime import datetime, timezone
+    from email.utils import format_datetime
+
+    body = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    etag = '"' + hashlib.sha256(body).hexdigest()[:32] + '"'
+    changed = payload.get("changed_at")
+    try:
+        when = datetime.fromisoformat(changed) if changed else datetime.now(timezone.utc)
+    except ValueError:
+        when = datetime.now(timezone.utc)
+    # HTTP dates have no sub-second precision; round up so a client that
+    # echoes this back is never told "modified" by the fraction it lost.
+    when = when.astimezone(timezone.utc).replace(microsecond=0)
+    return etag, format_datetime(when, usegmt=True)
+
+
+def _not_modified(request: web.Request, etag: str, last_modified: str) -> bool:
+    """Whether the client already has this exact answer (RFC 9110: an
+    If-None-Match match wins outright; otherwise compare If-Modified-Since)."""
+    from email.utils import parsedate_to_datetime
+
+    if_none_match = request.headers.get("If-None-Match")
+    if if_none_match:
+        return any(tag.strip().lstrip("W/") == etag for tag in if_none_match.split(","))
+    since = request.headers.get("If-Modified-Since")
+    if since:
+        try:
+            return parsedate_to_datetime(last_modified) <= parsedate_to_datetime(since)
+        except (TypeError, ValueError):
+            return False
+    return False
 
 
 def _player_api_caller(request: web.Request) -> str | None:
@@ -496,10 +538,14 @@ async def player_api_handler(request: web.Request) -> web.Response:
     player_api.py for every field.
 
     Auth: X-Api-Key, either RATINGS_API_KEY or one from PLAYER_API_KEYS.
+
+    Responses carry ETag and Last-Modified; send them back as If-None-Match
+    or If-Modified-Since and an unchanged answer comes back as a bodiless
+    304, so polling stays cheap.
     """
     import time
     import player_api
-    from config import API_DEFAULT_GUILD_ID
+    from config import API_DEFAULT_GUILD_ID, PLAYER_API_NEW_LOOKUPS_PER_HOUR
     from db import get_rating_cache_row, get_skill_override
 
     caller = _player_api_caller(request)
@@ -528,10 +574,17 @@ async def player_api_handler(request: web.Request) -> web.Response:
             logger.exception("player API: couldn't compute rating for %s", account_id)
 
     payload = player_api.build(account_id, guild_id)
-    logger.info("player API: %s looked up %s", caller, account_id)
     if payload is None:
+        logger.info("player API: %s looked up %s (unknown)", caller, account_id)
         return web.json_response({"error": "no data for that account"}, status=404)
-    return web.json_response(payload)
+
+    etag, last_modified = _conditional_headers(payload)
+    headers = {"ETag": etag, "Last-Modified": last_modified, "Cache-Control": "private, no-cache"}
+    if _not_modified(request, etag, last_modified):
+        logger.info("player API: %s looked up %s (unchanged)", caller, account_id)
+        return web.Response(status=304, headers=headers)
+    logger.info("player API: %s looked up %s", caller, account_id)
+    return web.json_response(payload, headers=headers)
 
 
 # ---------------------------------------------------------------------------

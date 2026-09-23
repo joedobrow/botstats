@@ -32,6 +32,13 @@ PLAYER_API_KEYS: dict[str, str] = {
     if key.strip()
 }
 
+# How many never-before-seen players one /api/player key may have computed
+# per hour. Each costs a windrun call, and windrun is rate-limited to one
+# account every 5 seconds under the user-agent they whitelisted for us —
+# so this is really a budget for that, not for our own capacity. Cached
+# players are unlimited.
+PLAYER_API_NEW_LOOKUPS_PER_HOUR: int = int(os.environ.get("PLAYER_API_NEW_LOOKUPS_PER_HOUR", "60"))
+
 # The division /api/player uses for the season fantasy adjustment when the
 # caller doesn't pass guild_id — the same adjustment /player shows there.
 API_DEFAULT_GUILD_ID: int = int(os.environ.get("API_DEFAULT_GUILD_ID", "1481800158826991718"))

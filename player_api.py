@@ -38,7 +38,7 @@ def account_id_from(raw: str) -> int | None:
 def build(account_id: int, guild_id: int | None) -> dict | None:
     """The payload for one player, or None if the bot knows nothing about them."""
     from db import (compute_fantasy_adjusted_ratings, get_division, get_rating_cache_row,
-                    get_skill_override)
+                    get_skill_override, latest_match_fetch)
     from formatters import format_badge
 
     cache = get_rating_cache_row(account_id) or {}
@@ -75,6 +75,17 @@ def build(account_id: int, guild_id: int | None) -> dict | None:
         warnings.append("No windrun rating found.")
     if manual is None and rank_tier is None and base is not None:
         warnings.append("No ranked badge found.")
+    # Game counts as OpenDota reports them. With match history private it
+    # returns zeroes, which aren't real counts — and older cache rows stored
+    # those zeroes — so report null instead of claiming nobody has played.
+    games = {
+        "ability_draft_last_year": cache.get("ad_last_year"),
+        "ability_draft_all_time": cache.get("ad_all_time"),
+        "ranked_last_year": cache.get("ranked_last_year"),
+    }
+    if hidden:
+        games = dict.fromkeys(games)
+
     updated = cache.get("updated_at")
     if updated:
         try:
@@ -89,6 +100,7 @@ def build(account_id: int, guild_id: int | None) -> dict | None:
         "name": override.get("nickname") or cache.get("name"),
         "internal_rating": round(rating) if rating is not None else None,
         "windrun_rating": round(windrun) if windrun is not None else None,
+        "games": games,
         "rank_tier": rank_tier,
         "leaderboard_rank": lb_rank,
         "badge": format_badge(rank_tier, lb_rank) if rank_tier else None,
@@ -96,4 +108,8 @@ def build(account_id: int, guild_id: int | None) -> dict | None:
         "accurate": base is not None and not hidden,
         "warnings": warnings,
         "updated_at": updated,
+        # The newer of: this player's data, and the division's latest match —
+        # a rating moves when anyone in the division plays.
+        "changed_at": max(filter(None, [updated, latest_match_fetch(guild_id) if guild_id else None]),
+                          default=updated),
     }
