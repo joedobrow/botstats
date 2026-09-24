@@ -1430,14 +1430,74 @@ def upsert_rating_cache_row(row: dict) -> None:
         """, payload)
 
 
+def alt_links() -> dict[int, int]:
+    """{second account: main account} for every linked pair."""
+    with _conn() as conn:
+        return {r["account_id"]: r["alt_account_for"] for r in conn.execute(
+            "SELECT account_id, alt_account_for FROM skill_overrides "
+            "WHERE alt_account_for IS NOT NULL")}
+
+
+def account_groups(links: dict[int, int] | None = None) -> dict[int, list[int]]:
+    """{account: every account the same person plays on, itself included}.
+
+    Only accounts in a group appear; everyone else is a group of one and is
+    left out, so callers fall back to the account's own rating.
+    """
+    links = alt_links() if links is None else links
+    groups: dict[int, set[int]] = {}
+    for alt, main in links.items():
+        groups.setdefault(main, {main}).add(alt)
+    return {aid: sorted(group) for group in groups.values() for aid in group}
+
+
+def _best_of_group(group: list[int], own: dict[int, int | None]) -> tuple[int | None, int | None]:
+    """The highest rating anyone in the group earned on their own data, and
+    which account earned it. A person's skill is what their best account
+    shows: the others are the same player on a worse-known account, so the
+    maximum is the estimate — never an average, which a rusty or barely-played
+    second account would drag down.
+    """
+    rated = [(own[a], a) for a in group if own.get(a) is not None]
+    if not rated:
+        return None, None
+    rating, account = max(rated)
+    return rating, account
+
+
+def raw_cache_ratings(account_ids: list[int]) -> dict[int, dict]:
+    """{account_id: {name, internal_rating}} straight from the cache, without
+    the best-of-group swap — for showing what each account earned on its own."""
+    if not account_ids:
+        return {}
+    with _conn() as conn:
+        placeholders = ",".join("?" * len(account_ids))
+        return {r["account_id"]: {"name": r["name"], "internal_rating": r["internal_rating"]}
+                for r in conn.execute(
+                    f"SELECT account_id, name, internal_rating FROM player_ratings_cache "
+                    f"WHERE account_id IN ({placeholders})", tuple(account_ids))}
+
+
+def group_rating(account_id: int) -> tuple[int | None, int | None]:
+    """(rating, which account it came from) for this player across all their
+    accounts. Pre-fantasy: callers apply the season adjustment afterwards."""
+    with _conn() as conn:
+        group = account_groups().get(account_id, [account_id])
+        placeholders = ",".join("?" * len(group))
+        own = {r["account_id"]: r["internal_rating"] for r in conn.execute(
+            f"SELECT account_id, internal_rating FROM player_ratings_cache "
+            f"WHERE account_id IN ({placeholders})", tuple(group))}
+    return _best_of_group(group, own)
+
+
 def get_rating_cache_row(account_id: int) -> dict | None:
     """Return a single cached rating row (with override nickname + hide_avatar
     joined in), or None if not present.
 
-    If the override has alt_account_for set, the returned row substitutes the
-    main account's internal_rating (and explanation) into this row so callers
-    transparently treat the alt as having the main's skill. Alt's own name,
-    avatar, and stats are preserved.
+    When the player has more than one account (skill_overrides.alt_account_for),
+    internal_rating becomes the best rating across those accounts — see
+    _best_of_group — and `rating_from_account` / `linked_accounts` say where it
+    came from. Each row keeps its own name, avatar and stats.
     """
     with _conn() as conn:
         row = conn.execute("""
@@ -1451,17 +1511,24 @@ def get_rating_cache_row(account_id: int) -> dict | None:
         if not row:
             return None
         result = dict(row)
-        main_id = result.get("alt_account_for")
-        if main_id and main_id != account_id:
-            main_row = conn.execute(
-                "SELECT internal_rating, explanation, name FROM player_ratings_cache "
-                "WHERE account_id = ?",
-                (main_id,),
-            ).fetchone()
-            if main_row and main_row["internal_rating"] is not None:
-                main_name = main_row["name"] or f"#{main_id}"
-                result["internal_rating"] = main_row["internal_rating"]
-                result["explanation"] = f"linked to {main_name} ({main_row['explanation'] or 'main account'})"
+        group = account_groups().get(account_id, [account_id])
+        result["linked_accounts"] = group
+        result["rating_from_account"] = account_id
+        if len(group) > 1:
+            placeholders = ",".join("?" * len(group))
+            others = {r["account_id"]: r for r in conn.execute(
+                f"SELECT account_id, internal_rating, explanation, name FROM player_ratings_cache "
+                f"WHERE account_id IN ({placeholders})", tuple(group))}
+            own = {aid: r["internal_rating"] for aid, r in others.items()}
+            rating, source = _best_of_group(group, own)
+            if rating is not None:
+                result["internal_rating"] = rating
+                result["rating_from_account"] = source
+                if source != account_id:
+                    src = others[source]
+                    name = src["name"] or f"#{source}"
+                    result["explanation"] = (f"from their account {name} "
+                                             f"({src['explanation'] or 'higher rated'})")
         return result
 
 
@@ -1469,23 +1536,26 @@ def get_all_rating_cache_rows() -> list[dict]:
     """Return account_id + internal_rating (+ override nickname) for every
     cached player. Used by the /api/ratings endpoint.
 
-    Mirrors get_rating_cache_row's alt_account_for substitution: an alt's
-    internal_rating is swapped for its main account's, when the main has one.
+    Mirrors get_rating_cache_row: someone with several accounts is reported
+    at their best account's rating, on every one of their accounts.
     """
     with _conn() as conn:
-        rows = conn.execute("""
+        rows = [dict(r) for r in conn.execute("""
             SELECT prc.account_id,
                    COALESCE(so.nickname, prc.name) AS name,
-                   CASE
-                       WHEN so.alt_account_for IS NOT NULL AND main.internal_rating IS NOT NULL
-                       THEN main.internal_rating
-                       ELSE prc.internal_rating
-                   END AS internal_rating
+                   prc.internal_rating AS internal_rating
             FROM player_ratings_cache prc
             LEFT JOIN skill_overrides so ON so.account_id = prc.account_id
-            LEFT JOIN player_ratings_cache main ON main.account_id = so.alt_account_for
-        """).fetchall()
-    return [dict(r) for r in rows]
+        """).fetchall()]
+    own = {r["account_id"]: r["internal_rating"] for r in rows}
+    groups = account_groups()
+    for r in rows:
+        group = groups.get(r["account_id"])
+        if group:
+            best, _ = _best_of_group(group, own)
+            if best is not None:
+                r["internal_rating"] = best
+    return rows
 
 
 def is_avatar_hidden(account_id: int) -> bool:
@@ -1637,30 +1707,28 @@ def get_guild_cached_ratings(guild_id: int, include_all: bool = False) -> list[d
                 )
             """, (guild_id, guild_id)).fetchall()
 
-        # Substitute the main account's internal_rating for any alt-linked row,
-        # matching get_rating_cache_row's behavior so /players shows alts at
-        # their main's skill. Main may be outside this guild's roster, so pull
-        # any missing mains explicitly.
-        needed_mains = {r["alt_account_for"] for r in rows if r["alt_account_for"]}
-        have = {r["account_id"] for r in rows}
-        missing = needed_mains - have
-        main_ratings = {r["account_id"]: r["internal_rating"] for r in rows
-                        if r["internal_rating"] is not None}
+        # Anyone with several accounts is shown at their best account's
+        # rating, matching get_rating_cache_row. Other accounts in a group may
+        # sit outside this guild's roster, so pull any missing ones.
+        groups = account_groups()
+        own = {r["account_id"]: r["internal_rating"] for r in rows}
+        missing = {a for r in rows for a in groups.get(r["account_id"], []) if a not in own}
         if missing:
             placeholders = ",".join("?" * len(missing))
-            extra = conn.execute(
+            for e in conn.execute(
                 f"SELECT account_id, internal_rating FROM player_ratings_cache "
-                f"WHERE account_id IN ({placeholders}) AND internal_rating IS NOT NULL",
-                tuple(missing),
-            ).fetchall()
-            for e in extra:
-                main_ratings[e["account_id"]] = e["internal_rating"]
+                f"WHERE account_id IN ({placeholders})", tuple(missing),
+            ):
+                own[e["account_id"]] = e["internal_rating"]
         result = []
         for r in rows:
             d = dict(r)
-            main_id = d.get("alt_account_for")
-            if main_id and main_id in main_ratings:
-                d["internal_rating"] = main_ratings[main_id]
+            group = groups.get(d["account_id"])
+            if group:
+                best, source = _best_of_group(group, own)
+                if best is not None:
+                    d["internal_rating"] = best
+                    d["rating_from_account"] = source
             result.append(d)
     return result
 

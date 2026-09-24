@@ -20,53 +20,21 @@ async def compute_and_cache_rating(account_id: int) -> int | None:
     resolved rating, or None if there wasn't enough signal to compute one
     (in which case nothing meaningful is cached beyond raw stat fields).
 
-    If this account is set up as an alt (skill_overrides.alt_account_for),
-    its rating is deferred entirely to the main account's — mirrors
-    get_rating_cache_row's read-time substitution, but at write time, so a
-    freshly-backfilled alt is never cached with its own (wrong) rating."""
+    Every account is rated on its own data, second accounts included: when
+    someone plays on several (skill_overrides.alt_account_for), the reads pick
+    the best of them (db.group_rating), so each account's own rating has to be
+    there to compare."""
     from windrun import fetch_player as fetch_windrun_player
     from opendota_lookup import fetch_player_profile, fetch_player_game_counts
-    from db import get_skill_override, get_rating_cache_row, upsert_rating_cache_row
+    from db import get_skill_override, upsert_rating_cache_row
     from formatters import (
         _resolve_internal_rating, _rank_to_windrun, windrun_rating_for_formula,
         sanitize_od_counts,
     )
 
     override = get_skill_override(account_id)
-    main_id = override.get("alt_account_for") if override else None
 
     try:
-        if main_id and main_id != account_id:
-            main_row = get_rating_cache_row(main_id)
-            if not main_row or main_row.get("internal_rating") is None:
-                await compute_and_cache_rating(main_id)
-                main_row = get_rating_cache_row(main_id)
-            main_rating = main_row.get("internal_rating") if main_row else None
-            main_name = main_row.get("name") if main_row else None
-
-            # Still fetch the alt's own profile for name + avatar (display
-            # only) — never used to compute its rating.
-            alt_results = await asyncio.gather(
-                fetch_windrun_player(account_id),
-                fetch_player_profile(account_id),
-                return_exceptions=True,
-            )
-            alt_wr, alt_od = (None if isinstance(r, Exception) else r for r in alt_results)
-            alt_name = (alt_wr or {}).get("nickname") or ((alt_od or {}).get("profile") or {}).get("personaname")
-            alt_avatar = ((alt_od or {}).get("profile") or {}).get("avatarfull") or (alt_wr or {}).get("avatar")
-
-            upsert_rating_cache_row({
-                "account_id": account_id,
-                "name": alt_name,
-                "internal_rating": main_rating,
-                "explanation": (
-                    f"linked to {main_name or ('#' + str(main_id))} (alt account)"
-                    if main_rating is not None else None
-                ),
-                "avatar_url": alt_avatar,
-            })
-            return main_rating
-
         results = await asyncio.gather(
             fetch_windrun_player(account_id),
             fetch_player_profile(account_id),
