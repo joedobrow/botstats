@@ -684,19 +684,33 @@ def sanitize_od_counts(opendota: dict | None, od_counts: dict | None) -> dict | 
     return {k: None for k in od_counts}
 
 
+# Windrun's rating is conservative on small samples: it starts far below a
+# player's real level and climbs as their record builds. Measured against an
+# independent yardstick — each player's badge-derived equivalent — the median
+# gap runs -1411 under 25 games, -1200 at 25-49, -704 at 50-99, then flattens
+# to -339 at 100-299 and -267 beyond, so a rating is only trustworthy from
+# about 100 games on (57 players sampled, 2026-09).
+MIN_WINDRUN_GAMES = 100
+
+
 def windrun_rating_for_formula(wr_data: dict | None) -> float | None:
     """Return the windrun rating only when it's a meaningful signal.
 
-    Windrun assigns every account a numeric rating even after a single game,
-    which for near-zero-game accounts drifts to placeholder values like -183
-    that carry no skill signal. We defer to windrun's own decision: when the
-    player has no `overallRank` (i.e. windrun labels them Unranked), the
-    rating is discarded so the internal-rating formula falls back to ranked
-    MMR instead.
+    Windrun rates every account, even after one game, where the number is a
+    placeholder like -183 rather than a skill estimate. What separates a real
+    rating from a placeholder is how many games it rests on, so that's the
+    test — see MIN_WINDRUN_GAMES.
+
+    This used to defer to windrun's own `overallRank` being set, on the
+    assumption that unranked meant too few games. It doesn't: windrun also
+    drops players who simply haven't played lately, so a 1,361-game rating
+    was being thrown away and the rating fell back to the badge alone. Their
+    rank is now display only (/lookup) and never enters the maths.
     """
-    if not wr_data:
+    if not wr_data or wr_data.get("rating") is None:
         return None
-    if wr_data.get("overallRank") is None:
+    games = (wr_data.get("wins") or 0) + (wr_data.get("losses") or 0)
+    if games < MIN_WINDRUN_GAMES:
         return None
     return wr_data.get("rating")
 
