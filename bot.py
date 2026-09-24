@@ -551,6 +551,7 @@ async def player(interaction: discord.Interaction, name: str, week: int = None, 
                     # write-back for players with no cached row yet.
                     if info:
                         from db import upsert_rating_cache_row
+                        from rating_compute import windrun_games
                         upsert_rating_cache_row({
                             "account_id":       account_id,
                             "name":             display_name,
@@ -561,6 +562,7 @@ async def player(interaction: discord.Interaction, name: str, week: int = None, 
                             "ad_last_year":     ad_last,
                             "ad_all_time":      ad_all,
                             "ranked_last_year": ranked_last,
+                            "windrun_games":    windrun_games(wr),
                             "avatar_url":       avatar_url,
                         })
                 except Exception:
@@ -1201,7 +1203,7 @@ async def lookup(interaction: discord.Interaction, query: str, force_refresh: bo
             adjustment_pct = adj["pct"]
 
     # Other accounts this player uses: each keeps its own rating, and the
-    # best of them is what they're worth (db._best_of_group).
+    # rating shown pools the best of them (rating_group.py).
     from db import account_groups, raw_cache_ratings
     others = [a for a in account_groups().get(account_id, []) if a != account_id]
     linked_accounts = [{"account_id": a, **raw_cache_ratings(others).get(a, {})} for a in others]
@@ -1223,6 +1225,8 @@ async def lookup(interaction: discord.Interaction, query: str, force_refresh: bo
             updated_at=cache_row.get("updated_at"),
             adjustment_pct=adjustment_pct,
             linked_accounts=linked_accounts,
+            group_rating=cache_row.get("group_rating"),
+            group_note=cache_row.get("group_explanation"),
         )
         await interaction.followup.send(embed=embed, ephemeral=not public)
         return
@@ -1327,33 +1331,17 @@ async def lookup(interaction: discord.Interaction, query: str, force_refresh: bo
             else:
                 fetch_error = f"Couldn't reach: {sources}. No cached value available."
 
-    embed = format_lookup(
-        account_id=account_id,
-        fallback_name=player_name,
-        windrun=wr,
-        opendota=od,
-        ad_all_time=ad_all_time,
-        ad_last_year=ad_last_year,
-        od_counts=od_counts,
-        override=override,
-        debug=debug,
-        cached_rating=fallback_cached_rating,
-        cached_avatar=fallback_cached_avatar,
-        updated_at=fallback_updated_at,
-        is_stale=is_stale_render,
-        adjustment_pct=adjustment_pct,
-        fetch_error=fetch_error,
-        linked_accounts=linked_accounts,
-    )
-    await interaction.followup.send(embed=embed, ephemeral=not public)
-
-    # Side-effect: refresh this player's cache row so /players stays current
-    # without anyone needing to run /refresh_ratings. Write whenever we got
-    # ANY fresh signal — windrun-only or OpenDota-only is still better than
-    # leaving the cache stale.
+    # Refresh this player's cache row so /players stays current without anyone
+    # needing to run /refresh_ratings. Write whenever we got ANY fresh signal —
+    # windrun-only or OpenDota-only is still better than leaving the cache
+    # stale. This happens before the embed is built so that a player with
+    # several accounts gets their shared rating (rating_group) recomputed from
+    # what we just fetched, rather than from the previous refresh.
     if have_any_signal and not has_override_rating:
         try:
             from db import upsert_rating_cache_row
+            from rating_compute import windrun_games
+            import rating_group
             from formatters import _resolve_internal_rating, windrun_rating_for_formula, _rank_to_windrun
             raw_wr = (wr or {}).get("rating")
             formula_wr = windrun_rating_for_formula(wr)
@@ -1385,6 +1373,7 @@ async def lookup(interaction: discord.Interaction, query: str, force_refresh: bo
                 "ad_last_year":     ad_last_year,
                 "ad_all_time":      ad_all_time,
                 "ranked_last_year": ranked_last_year,
+                "windrun_games":    windrun_games(wr),
                 "explanation":      info[1] if info else None,
                 "avatar_url":       (
                     ((od or {}).get("profile") or {}).get("avatarfull")
@@ -1392,8 +1381,41 @@ async def lookup(interaction: discord.Interaction, query: str, force_refresh: bo
                 ),
                 "fh_unavailable":   bool((od or {}).get("profile", {}).get("fh_unavailable")) if od else None,
             })
+            rating_group.recompute(account_id)
         except Exception:
             logger.exception("cache write failed for %d after /lookup", account_id)
+
+    embed = format_lookup(
+        account_id=account_id,
+        fallback_name=player_name,
+        windrun=wr,
+        opendota=od,
+        ad_all_time=ad_all_time,
+        ad_last_year=ad_last_year,
+        od_counts=od_counts,
+        override=override,
+        debug=debug,
+        cached_rating=fallback_cached_rating,
+        cached_avatar=fallback_cached_avatar,
+        updated_at=fallback_updated_at,
+        is_stale=is_stale_render,
+        adjustment_pct=adjustment_pct,
+        fetch_error=fetch_error,
+        linked_accounts=linked_accounts,
+        **(_group_rating_kwargs(account_id) if linked_accounts else {}),
+    )
+    await interaction.followup.send(embed=embed, ephemeral=not public)
+
+
+def _group_rating_kwargs(account_id: int) -> dict:
+    """The pooled rating for a player with several accounts, as format_lookup
+    kwargs. Read after the cache write-back so it reflects what we just
+    fetched; empty for anyone playing a single account."""
+    from db import get_rating_cache_row
+    row = get_rating_cache_row(account_id) or {}
+    if row.get("group_rating") is None:
+        return {}
+    return {"group_rating": row["group_rating"], "group_note": row.get("group_explanation")}
 
 
 async def _resolve_player_query(interaction: discord.Interaction, q: str) -> tuple[int | None, str | None, str | None]:
@@ -1570,7 +1592,14 @@ async def set_player(
         return
 
     if clear:
+        # Note the group before the override goes: clearing it may be what
+        # unlinks a second account, and every member then needs re-pooling.
+        from db import account_groups
+        import rating_group
+        was_grouped = account_groups().get(account_id, [account_id])
         removed = delete_skill_override(account_id)
+        for aid in was_grouped:
+            rating_group.recompute(aid)
         msg = f"✅ Cleared override for {label}." if removed else f"ℹ️ No override existed for {label}."
         await interaction.followup.send(msg, ephemeral=True)
         return
@@ -1734,6 +1763,11 @@ async def set_player(
         "explanation":      info[1] if info else existing.get("explanation"),
         "avatar_url":       existing.get("avatar_url"),
     })
+    # Overrides and account links both change what a group is worth, so
+    # re-pool. Both ends, since add_account may have just joined two groups.
+    import rating_group
+    for aid in {account_id, parsed_alt_id} - {None}:
+        rating_group.recompute(aid)
 
     parts = []
     if nickname is not None:    parts.append(f"nickname=`{nickname}`")
@@ -1760,6 +1794,7 @@ async def _refresh_ratings_task(aids: list[int], interaction: discord.Interactio
     from windrun import fetch_player as fetch_windrun_player
     from opendota_lookup import fetch_player_profile, fetch_player_game_counts
     from db import get_skill_override, upsert_rating_cache_row
+    from rating_compute import windrun_games
     from formatters import _resolve_internal_rating, _rank_to_windrun
 
     success = 0
@@ -1815,6 +1850,7 @@ async def _refresh_ratings_task(aids: list[int], interaction: discord.Interactio
                 "ad_last_year":     ad_last,
                 "ad_all_time":      ad_all,
                 "ranked_last_year": ranked_last,
+                "windrun_games":    windrun_games(wr_data),
                 "explanation":      info[1] if info else None,
                 "avatar_url":       (
                     ((od or {}).get("profile") or {}).get("avatarfull")
@@ -1829,6 +1865,13 @@ async def _refresh_ratings_task(aids: list[int], interaction: discord.Interactio
         except Exception:
             logger.exception("refresh failed for account %d", aid)
             failures += 1
+
+    # Every account now has fresh inputs, so pool the multi-account players.
+    try:
+        import rating_group
+        rating_group.recompute_all()
+    except Exception:
+        logger.exception("group rating recompute failed after refresh")
 
     # Try a final followup. Will silently fail if interaction has expired (>15 min).
     try:
@@ -2804,6 +2847,16 @@ async def on_ready():
 
     # Initialize database
     init_db()
+
+    # Re-pool multi-account players from what's already cached, so a formula
+    # change lands on them without waiting for a refresh. No API calls.
+    try:
+        import rating_group
+        n = rating_group.recompute_all()
+        if n:
+            logger.info("Recomputed %d multi-account rating group(s)", n)
+    except Exception:
+        logger.exception("Group rating recompute failed at startup")
 
     try:
         synced = await tree.sync()
