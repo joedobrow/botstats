@@ -1200,6 +1200,12 @@ async def lookup(interaction: discord.Interaction, query: str, force_refresh: bo
         if adj:
             adjustment_pct = adj["pct"]
 
+    # Other accounts this player uses: each keeps its own rating, and the
+    # best of them is what they're worth (db._best_of_group).
+    from db import account_groups, raw_cache_ratings
+    others = [a for a in account_groups().get(account_id, []) if a != account_id]
+    linked_accounts = [{"account_id": a, **raw_cache_ratings(others).get(a, {})} for a in others]
+
     from formatters import format_lookup
     if cache_row and is_fresh and not debug and not force_refresh:
         name = (
@@ -1216,6 +1222,7 @@ async def lookup(interaction: discord.Interaction, query: str, force_refresh: bo
             cached_avatar=None if (cache_row.get("hide_avatar") or (override and override.get("hide_avatar"))) else cache_row.get("avatar_url"),
             updated_at=cache_row.get("updated_at"),
             adjustment_pct=adjustment_pct,
+            linked_accounts=linked_accounts,
         )
         await interaction.followup.send(embed=embed, ephemeral=not public)
         return
@@ -1336,6 +1343,7 @@ async def lookup(interaction: discord.Interaction, query: str, force_refresh: bo
         is_stale=is_stale_render,
         adjustment_pct=adjustment_pct,
         fetch_error=fetch_error,
+        linked_accounts=linked_accounts,
     )
     await interaction.followup.send(embed=embed, ephemeral=not public)
 
@@ -1474,7 +1482,8 @@ async def _resolve_player_query(interaction: discord.Interaction, q: str) -> tup
     badge='Ranked badge: e.g. "divine 3", "legend 5", "immortal" (omit to keep existing)',
     rank="Immortal leaderboard rank (only meaningful with badge:immortal)",
     rating="Manual internal rating — overrides EVERYTHING; windrun/badge/trust-weights are ignored",
-    alt_account_for="Main account this alt belongs to (name/id/nickname/Steam64) — will inherit main's rating",
+    add_account="Another account this player uses (name/id/nickname/Steam64) — rating becomes the best of their accounts",
+    alt_account_for="The reverse: say THIS account is a second account of that player",
     discord_handle="Override Discord handle for /sync_roles_channels (use when rd2l has wrong info)",
     note="Optional note (e.g. 'smurf — real rank is 10k')",
     hide_avatar="True to hide their Steam avatar everywhere (inappropriate profile pic). False to unhide.",
@@ -1490,6 +1499,7 @@ async def set_player(
     badge: str = None,
     rank: int = None,
     rating: int = None,
+    add_account: str = None,
     alt_account_for: str = None,
     discord_handle: str = None,
     note: str = None,
@@ -1566,7 +1576,7 @@ async def set_player(
         return
 
     if (windrun is None and badge is None and rank is None and rating is None
-            and alt_account_for is None and discord_handle is None
+            and alt_account_for is None and add_account is None and discord_handle is None
             and note is None and nickname is None and hide_avatar is None):
         # Show current state
         from formatters import format_badge
@@ -1632,6 +1642,42 @@ async def set_player(
             )
             return
 
+    # add_account is alt_account_for from the other side: "this player also
+    # plays on X" rather than "this account belongs to X".
+    added_account: tuple[int, str] | None = None
+    if add_account is not None:
+        other_id, other_name, other_err = await _resolve_player_query(interaction, add_account)
+        if other_err or other_id is None:
+            await interaction.followup.send(
+                f"⚠️ Couldn't resolve `add_account:{add_account}` — {other_err or 'not found'}.",
+                ephemeral=True)
+            return
+        if other_id == account_id:
+            await interaction.followup.send(
+                "⚠️ `add_account:` can't point at the same account.", ephemeral=True)
+            return
+        existing_link = (get_skill_override(other_id) or {}).get("alt_account_for")
+        if existing_link and existing_link != account_id:
+            await interaction.followup.send(
+                f"⚠️ `{other_id}` is already linked to `{existing_link}`. Clear that first "
+                f"(`/set_player name:{other_id} clear:True`).", ephemeral=True)
+            return
+        this_link = (get_skill_override(account_id) or {}).get("alt_account_for")
+        if this_link:
+            await interaction.followup.send(
+                f"⚠️ `{account_id}` is itself listed as a second account of `{this_link}` — "
+                f"add the new one to `{this_link}` instead, so all their accounts sit in one group.",
+                ephemeral=True)
+            return
+        upsert_skill_override(
+            account_id=other_id,
+            windrun_rating=None, rank_tier=None, leaderboard_rank=None, note=None,
+            alt_account_for=account_id,
+            set_by_user_id=interaction.user.id,
+            set_by_name=interaction.user.display_name,
+        )
+        added_account = (other_id, other_name or str(other_id))
+
     upsert_skill_override(
         account_id=account_id,
         windrun_rating=windrun,
@@ -1695,6 +1741,9 @@ async def set_player(
     if badge is not None:       parts.append(f"badge=`{format_badge(parsed_rank_tier, rank)}`")
     if rating is not None:      parts.append(f"rating=`{rating}`")
     if parsed_alt_id is not None: parts.append(f"alt_account_for=`{parsed_alt_id}`")
+    if added_account is not None:
+        parts.append(f"also plays on `{added_account[0]}` ({added_account[1]}) — "
+                     f"rating is now the best of their accounts")
     if discord_handle is not None: parts.append(f"discord_handle=`{discord_handle}`")
     if note is not None:        parts.append(f"note=`{note}`")
     if hide_avatar is not None: parts.append(f"hide_avatar=`{hide_avatar}`")

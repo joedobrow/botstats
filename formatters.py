@@ -739,6 +739,7 @@ def format_lookup(
     is_stale: bool = False,
     adjustment_pct: float | None = None,
     fetch_error: str | None = None,
+    linked_accounts: list[dict] | None = None,
 ) -> discord.Embed:
     """Build the /lookup embed. `windrun` is the raw dict from windrun.io's
     /players/{id} endpoint (or None). `opendota` is the raw dict from
@@ -778,16 +779,18 @@ def format_lookup(
     if fetch_error:
         embed.add_field(name="⚠️ Refresh failed", value=fetch_error, inline=False)
 
-    # Alt-account disclosure — when the override links this account to a main,
-    # the internal rating shown here is inherited from that main.
-    alt_main_id = (override or {}).get("alt_account_for")
-    if alt_main_id:
+    # Second accounts — each is rated on its own data and the best one is
+    # used, so say which accounts exist and what each is worth on its own.
+    if linked_accounts:
+        lines = []
+        for other in linked_accounts:
+            worth = other.get("internal_rating")
+            lines.append(f"`{other['account_id']}` {other.get('name') or '?'}"
+                         + (f" — {worth} on its own" if worth is not None else " — not rated yet"))
         embed.add_field(
-            name="🔗 Alt account",
-            value=(
-                f"Linked to main account `{alt_main_id}`. "
-                "Internal rating below is inherited from that account."
-            ),
+            name="🔗 Also plays on",
+            value="\n".join(lines) + "\nThe rating below is the best of their accounts, "
+                                     "then this season's adjustment.",
             inline=False,
         )
 
@@ -926,6 +929,14 @@ def format_lookup(
     if rating is None and cached_rating is not None:
         rating = cached_rating
 
+    # Someone playing several accounts is worth what their best account shows
+    # — taken before the season adjustment, which is applied to the winner.
+    rating_source = None
+    for other in linked_accounts or []:
+        worth = other.get("internal_rating")
+        if worth is not None and (rating is None or worth > rating):
+            rating, rating_source = worth, other
+
     if rating is None:
         embed.add_field(
             name="✨ Internal Rating",
@@ -945,6 +956,9 @@ def format_lookup(
             value += f"\n_{explanation}_"
         else:
             value = f"**{rating}**"
+        if rating_source:
+            value += (f"\n_from their account {rating_source.get('name') or rating_source['account_id']}"
+                      f" (higher than this one)_")
         if is_stale:
             value += " _(cached)_"
         embed.add_field(name="✨ Internal Rating", value=value, inline=False)
