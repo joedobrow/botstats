@@ -740,6 +740,8 @@ def format_lookup(
     adjustment_pct: float | None = None,
     fetch_error: str | None = None,
     linked_accounts: list[dict] | None = None,
+    group_rating: int | None = None,
+    group_note: str | None = None,
 ) -> discord.Embed:
     """Build the /lookup embed. `windrun` is the raw dict from windrun.io's
     /players/{id} endpoint (or None). `opendota` is the raw dict from
@@ -779,8 +781,8 @@ def format_lookup(
     if fetch_error:
         embed.add_field(name="⚠️ Refresh failed", value=fetch_error, inline=False)
 
-    # Second accounts — each is rated on its own data and the best one is
-    # used, so say which accounts exist and what each is worth on its own.
+    # Second accounts — each is rated on its own data, and the rating below
+    # pools them, so say which accounts exist and what each is worth alone.
     if linked_accounts:
         lines = []
         for other in linked_accounts:
@@ -789,8 +791,9 @@ def format_lookup(
                          + (f" — {worth} on its own" if worth is not None else " — not rated yet"))
         embed.add_field(
             name="🔗 Also plays on",
-            value="\n".join(lines) + "\nThe rating below is the best of their accounts, "
-                                     "then this season's adjustment.",
+            value="\n".join(lines) + "\nThe rating below takes the best windrun rating and "
+                                     "the best badge across their accounts, then this "
+                                     "season's adjustment.",
             inline=False,
         )
 
@@ -929,13 +932,13 @@ def format_lookup(
     if rating is None and cached_rating is not None:
         rating = cached_rating
 
-    # Someone playing several accounts is worth what their best account shows
-    # — taken before the season adjustment, which is applied to the winner.
-    rating_source = None
-    for other in linked_accounts or []:
-        worth = other.get("internal_rating")
-        if worth is not None and (rating is None or worth > rating):
-            rating, rating_source = worth, other
+    # Someone playing several accounts is rated on all of them at once: the
+    # best windrun rating and the best badge among them, pooled by
+    # rating_group.py and passed in here. Taken before the season adjustment,
+    # which then applies to the pooled number.
+    if group_rating is not None:
+        rating = group_rating
+        explanation = group_note or explanation
 
     if rating is None:
         embed.add_field(
@@ -956,9 +959,8 @@ def format_lookup(
             value += f"\n_{explanation}_"
         else:
             value = f"**{rating}**"
-        if rating_source:
-            value += (f"\n_from their account {rating_source.get('name') or rating_source['account_id']}"
-                      f" (higher than this one)_")
+        if group_rating is not None and linked_accounts:
+            value += f"\n_pooled across {len(linked_accounts) + 1} accounts_"
         if is_stale:
             value += " _(cached)_"
         embed.add_field(name="✨ Internal Rating", value=value, inline=False)
