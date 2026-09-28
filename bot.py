@@ -1087,7 +1087,7 @@ async def h2h_player(interaction: discord.Interaction, player1: str, player2: st
 
 
 
-@tree.command(name="lookup", description="[Owner] Diagnostic lookup — full methodology breakdown for a player")
+@tree.command(name="lookup", description="Diagnostic lookup — full rating breakdown (in the admin/bot channels)")
 @app_commands.describe(
     query="Player name (partial match) or numeric account ID",
     force_refresh="Skip the cache and re-fetch from windrun/OpenDota",
@@ -1097,8 +1097,10 @@ async def lookup(interaction: discord.Interaction, query: str, force_refresh: bo
     is_owner = ADMIN_USER_ID and interaction.user.id == ADMIN_USER_ID
     in_admin_channel = interaction.channel_id in LOOKUP_CHANNEL_IDS
     if not (is_owner or in_admin_channel):
+        channels = " or ".join(f"<#{c}>" for c in sorted(LOOKUP_CHANNEL_IDS))
         await interaction.response.send_message(
-            "🔒 This command is for admins only — please use `/player` to look up a player.",
+            f"🔒 `/lookup` shows the full rating breakdown, so it only runs in {channels}. "
+            f"Anywhere else, `/player` has the rating itself.",
             ephemeral=True,
         )
         return

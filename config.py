@@ -43,9 +43,16 @@ PLAYER_API_NEW_LOOKUPS_PER_HOUR: int = int(os.environ.get("PLAYER_API_NEW_LOOKUP
 # caller doesn't pass guild_id — the same adjustment /player shows there.
 API_DEFAULT_GUILD_ID: int = int(os.environ.get("API_DEFAULT_GUILD_ID", "1481800158826991718"))
 
-# Channels where /lookup is open to anyone (typically admin-only Discord
-# channels). Owner can always use /lookup anywhere.
-LOOKUP_CHANNEL_IDS: set[int] = {1512177911711662272}
+# Channels where /lookup is open to anyone who can post in them, admins
+# included — the command shows the whole rating breakdown, so the Discord
+# channel's own permissions are the gate. The owner can use it anywhere.
+# Comma-separated channel ids in LOOKUP_CHANNEL_IDS override these.
+LOOKUP_CHANNEL_IDS: set[int] = {
+    int(c) for c in os.environ.get("LOOKUP_CHANNEL_IDS", "").split(",") if c.strip()
+} or {
+    1512177911711662272,   # #admin
+    1490019643996242152,   # #bot-debug
+}
 
 # Timezone used for every user-facing date/time. Match timestamps are stored
 # as UTC unix seconds; without this they render in the host's zone, which on
