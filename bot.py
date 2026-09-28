@@ -496,75 +496,16 @@ async def player(interaction: discord.Interaction, name: str, week: int = None, 
             )
 
             if rating is None:
+                # Nothing cached for them yet. Compute it the way every other
+                # writer does and cache it, so the next /player agrees with
+                # this one and with /lookup.
                 try:
-                    from windrun import fetch_player as fetch_windrun_player
-                    from opendota_lookup import fetch_player_profile, fetch_player_game_counts
-                    from db import get_skill_override
-                    from formatters import _resolve_internal_rating, _rank_to_windrun
-                    import asyncio as _asyncio
-                    results = await _asyncio.gather(
-                        fetch_windrun_player(account_id),
-                        fetch_player_profile(account_id),
-                        fetch_player_game_counts(account_id),
-                        return_exceptions=True,
-                    )
-                    wr, od, od_counts = (
-                        None if isinstance(r, Exception) else r for r in results
-                    )
-                    from formatters import windrun_rating_for_formula, sanitize_od_counts
-                    od_counts = sanitize_od_counts(od, od_counts)
-                    override = get_skill_override(account_id)
-                    raw_wr = (wr or {}).get("rating")
-                    formula_wr = windrun_rating_for_formula(wr)
-                    rank_tier = (od or {}).get("rank_tier")
-                    lb_rank   = (od or {}).get("leaderboard_rank")
-                    eff_wr  = (override["windrun_rating"]
-                               if override and override.get("windrun_rating") is not None
-                               else formula_wr)
-                    eff_rank_tier = override["rank_tier"] if override and override.get("rank_tier") is not None else rank_tier
-                    eff_lb_rank   = override["leaderboard_rank"] if override and override.get("rank_tier") is not None else lb_rank
-                    ranked_in_wr_raw = _rank_to_windrun(eff_rank_tier, eff_lb_rank)
-                    ad_last = (od_counts or {}).get("last_year_ad")
-                    ad_all  = (od_counts or {}).get("all_time_ad")
-                    ranked_last = (od_counts or {}).get("last_year_ranked")
-                    ranked_all  = (od_counts or {}).get("all_time_ranked")
-                    info = _resolve_internal_rating(
-                        override=override,
-                        ad_last=ad_last, ad_all=ad_all,
-                        ranked_last=ranked_last, ranked_all=ranked_all,
-                        wr_rating=eff_wr, ranked_in_wr_raw=ranked_in_wr_raw,
-                    )
-                    if info:
-                        rating = info[0]
-                    if not display_name:
-                        display_name = (
-                            (wr or {}).get("nickname")
-                            or ((od or {}).get("profile") or {}).get("personaname")
-                        )
-                    if not avatar_url:
-                        avatar_url = (
-                            ((od or {}).get("profile") or {}).get("avatarfull")
-                            or (wr or {}).get("avatar")
-                        )
-                    # Cache this live lookup so /api/ratings (and future /player
-                    # calls) don't need to recompute it — mirrors /lookup's
-                    # write-back for players with no cached row yet.
-                    if info:
-                        from db import upsert_rating_cache_row
-                        from rating_compute import windrun_games
-                        upsert_rating_cache_row({
-                            "account_id":       account_id,
-                            "name":             display_name,
-                            "internal_rating":  info[0],
-                            "raw_windrun":      raw_wr,
-                            "rank_tier":        rank_tier,
-                            "leaderboard_rank": lb_rank,
-                            "ad_last_year":     ad_last,
-                            "ad_all_time":      ad_all,
-                            "ranked_last_year": ranked_last,
-                            "windrun_games":    windrun_games(wr),
-                            "avatar_url":       avatar_url,
-                        })
+                    import rating_compute
+                    rating = await rating_compute.compute_and_cache_rating(
+                        account_id, name_fallback=display_name)
+                    fresh = get_rating_cache_row(account_id) or {}
+                    display_name = display_name or fresh.get("name")
+                    avatar_url = avatar_url or fresh.get("avatar_url")
                 except Exception:
                     logger.exception("Live lookup failed in /player for %d", account_id)
 
@@ -1231,73 +1172,14 @@ async def lookup(interaction: discord.Interaction, query: str, force_refresh: bo
         await interaction.followup.send(embed=embed, ephemeral=not public)
         return
 
-    # Fetch in parallel: windrun (profile + matches) and OpenDota (profile + counts).
-    # AD counts: prefer windrun since it's AD-native and indexes everyone with
-    # a league game (OpenDota requires public match history). OpenDota still
-    # provides the ranked counts that windrun can't.
-    from windrun import (
-        fetch_player as fetch_windrun_player,
-        fetch_player_matches as fetch_windrun_matches,
-    )
-    from opendota_lookup import fetch_player_profile, fetch_player_game_counts
-    import asyncio
-
-    wr_task         = asyncio.create_task(fetch_windrun_player(account_id))
-    wr_matches_task = asyncio.create_task(fetch_windrun_matches(account_id, limit=500))
-    od_task         = asyncio.create_task(fetch_player_profile(account_id))
-    od_counts_task  = asyncio.create_task(fetch_player_game_counts(account_id))
-
-    results = await asyncio.gather(
-        wr_task, wr_matches_task, od_task, od_counts_task, return_exceptions=True,
-    )
-    wr, wr_matches, od, od_counts = (None if isinstance(r, Exception) else r for r in results)
-    # If Steam match history is hidden, OpenDota's /wl counts are all 0/0 —
-    # convert those bogus 0s to None so display shows "hidden" and the rating
-    # formula doesn't apply an inexperience penalty for unverifiable history.
-    from formatters import sanitize_od_counts as _sanitize_od_counts
-    od_counts = _sanitize_od_counts(od, od_counts)
-    for label, r in zip(("windrun", "windrun-matches", "opendota", "opendota-counts"), results):
-        if isinstance(r, Exception):
-            logger.exception("%s fetch failed for %d", label, account_id, exc_info=r)
-
-    # AD all-time: take max of the two sources. They sometimes diverge —
-    # OpenDota's game_mode=18 filter can include AD variants windrun doesn't
-    # track, and windrun can miss matches for partially-indexed players.
-    # Max keeps the all-time count consistent with last-year (which is also
-    # OpenDota-or-windrun whichever is higher).
-    wr_lifetime: int | None = None
-    if wr and (wr.get("wins") is not None or wr.get("losses") is not None):
-        wr_lifetime = (wr.get("wins") or 0) + (wr.get("losses") or 0)
-    od_all_time = (od_counts or {}).get("all_time_ad")
-    if wr_lifetime is not None and od_all_time is not None:
-        ad_all_time = max(wr_lifetime, od_all_time)
-    else:
-        ad_all_time = wr_lifetime if wr_lifetime is not None else od_all_time
-
-    # AD last-year: OpenDota's actual count is the authoritative source when
-    # available. Windrun's /matches caps at ~30 returned items, so we use it
-    # as a floor — if OpenDota's count is lower than windrun's recent activity
-    # implies, OpenDota is undercounting (often because the account is only
-    # partially indexed). Take max(opendota, windrun_recent_count).
-    windrun_last_year_count = 0
-    if wr_matches:
-        from datetime import datetime, timezone as _tz, timedelta
-        cutoff = datetime.now(_tz.utc) - timedelta(days=365)
-        for m in wr_matches:
-            ts = m.get("gameStart")
-            if not ts:
-                continue
-            try:
-                dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-                if dt > cutoff:
-                    windrun_last_year_count += 1
-            except Exception:
-                pass
-    od_last_year = (od_counts or {}).get("last_year_ad")
-    if od_last_year is not None or windrun_last_year_count > 0:
-        ad_last_year = max(od_last_year or 0, windrun_last_year_count)
-    else:
-        ad_last_year = None
+    # One gatherer for every writer: /lookup, /refresh_ratings and the API all
+    # take their inputs from rating_compute, so the cached number doesn't
+    # depend on which of them ran last (and /player, which only reads, agrees
+    # with all three).
+    import rating_compute
+    inputs = await rating_compute.fetch_inputs(account_id)
+    wr, od, od_counts = inputs["windrun"], inputs["opendota"], inputs["od_counts"]
+    ad_all_time, ad_last_year = inputs["ad_all_time"], inputs["ad_last_year"]
 
     # If fetch couldn't produce a fresh rating but we have a stale cache row,
     # use the cached values as a fallback so the user still sees a number.
@@ -1317,13 +1199,8 @@ async def lookup(interaction: discord.Interaction, query: str, force_refresh: bo
     # Build a fetch-error message when we couldn't get fresh data.
     fetch_error: str | None = None
     if not have_any_signal:
-        failed_apis: list[str] = []
-        if isinstance(results[0], Exception) or results[0] is None:
-            failed_apis.append("windrun")
-        if isinstance(results[2], Exception) or results[2] is None:
-            failed_apis.append("OpenDota profile")
-        if isinstance(results[3], Exception) or results[3] is None:
-            failed_apis.append("OpenDota game counts")
+        failed_apis = [label for label, got in (("windrun", wr), ("OpenDota profile", od),
+                                                ("OpenDota game counts", od_counts)) if got is None]
         if failed_apis:
             sources = ", ".join(failed_apis)
             if cache_row:
@@ -1337,51 +1214,10 @@ async def lookup(interaction: discord.Interaction, query: str, force_refresh: bo
     # stale. This happens before the embed is built so that a player with
     # several accounts gets their shared rating (rating_group) recomputed from
     # what we just fetched, rather than from the previous refresh.
+    info = rating_compute.resolve(inputs, override)
     if have_any_signal and not has_override_rating:
         try:
-            from db import upsert_rating_cache_row
-            from rating_compute import windrun_games
-            import rating_group
-            from formatters import _resolve_internal_rating, windrun_rating_for_formula, _rank_to_windrun
-            raw_wr = (wr or {}).get("rating")
-            formula_wr = windrun_rating_for_formula(wr)
-            rank_tier = (od or {}).get("rank_tier")
-            lb_rank = (od or {}).get("leaderboard_rank")
-            eff_wr  = override["windrun_rating"] if override and override.get("windrun_rating") is not None else formula_wr
-            eff_rank_tier = override["rank_tier"] if override and override.get("rank_tier") is not None else rank_tier
-            eff_lb_rank   = override["leaderboard_rank"] if override and override.get("rank_tier") is not None else lb_rank
-            ranked_in_wr_raw = _rank_to_windrun(eff_rank_tier, eff_lb_rank)
-            ranked_last_year = (od_counts or {}).get("last_year_ranked")
-            ranked_all_time  = (od_counts or {}).get("all_time_ranked")
-            info = _resolve_internal_rating(
-                override=override,
-                ad_last=ad_last_year,
-                ad_all=ad_all_time,
-                ranked_last=ranked_last_year,
-                wr_rating=eff_wr,
-                ranked_in_wr_raw=ranked_in_wr_raw,
-                ranked_all=ranked_all_time,
-            )
-            name = (wr or {}).get("nickname") or ((od or {}).get("profile") or {}).get("personaname") or player_name
-            upsert_rating_cache_row({
-                "account_id":       account_id,
-                "name":             name,
-                "internal_rating":  info[0] if info else None,
-                "raw_windrun":      raw_wr,
-                "rank_tier":        rank_tier,
-                "leaderboard_rank": lb_rank,
-                "ad_last_year":     ad_last_year,
-                "ad_all_time":      ad_all_time,
-                "ranked_last_year": ranked_last_year,
-                "windrun_games":    windrun_games(wr),
-                "explanation":      info[1] if info else None,
-                "avatar_url":       (
-                    ((od or {}).get("profile") or {}).get("avatarfull")
-                    or (wr or {}).get("avatar")
-                ),
-                "fh_unavailable":   bool((od or {}).get("profile", {}).get("fh_unavailable")) if od else None,
-            })
-            rating_group.recompute(account_id)
+            rating_compute.cache(inputs, info, player_name)
         except Exception:
             logger.exception("cache write failed for %d after /lookup", account_id)
 
@@ -1402,6 +1238,7 @@ async def lookup(interaction: discord.Interaction, query: str, force_refresh: bo
         adjustment_pct=adjustment_pct,
         fetch_error=fetch_error,
         linked_accounts=linked_accounts,
+        rating_info=info,
         **(_group_rating_kwargs(account_id) if linked_accounts else {}),
     )
     await interaction.followup.send(embed=embed, ephemeral=not public)
@@ -1723,46 +1560,26 @@ async def set_player(
     )
 
     # Add the player to this guild's roster so they appear in /players even
-    # if they haven't played a match yet. Then seed/refresh their cache row
-    # using the effective override values (no API call — best effort, will
-    # get enriched next time someone runs /lookup on them).
-    from db import add_to_guild_roster, get_rating_cache_row, upsert_rating_cache_row
-    from formatters import _resolve_internal_rating
+    # if they haven't played a match yet, then re-rate them from what was last
+    # fetched — no API call, and through the same resolver every other writer
+    # uses, so an override doesn't leave a number /lookup would disagree with.
+    import rating_compute
+    from db import add_to_guild_roster, get_rating_cache_row
     add_to_guild_roster(guild_id=interaction.guild_id, account_id=account_id)
 
     full = get_skill_override(account_id) or {}
     existing = get_rating_cache_row(account_id) or {}
-    from formatters import _rank_to_windrun, format_badge
-    eff_wr  = full.get("windrun_rating") if full.get("windrun_rating") is not None else existing.get("raw_windrun")
-    eff_rank_tier = full.get("rank_tier") if full.get("rank_tier") is not None else existing.get("rank_tier")
-    eff_lb_rank   = full.get("leaderboard_rank") if full.get("rank_tier") is not None else existing.get("leaderboard_rank")
-    ranked_in_wr_raw = _rank_to_windrun(eff_rank_tier, eff_lb_rank)
-    info = _resolve_internal_rating(
-        override=full,
-        ad_last=existing.get("ad_last_year"),
-        ad_all=existing.get("ad_all_time"),
-        ranked_last=existing.get("ranked_last_year"),
-        wr_rating=eff_wr,
-        ranked_in_wr_raw=ranked_in_wr_raw,
-    )
+    from formatters import format_badge
+    inputs = rating_compute.inputs_from_cache(account_id)
+    info = rating_compute.resolve(inputs, full)
     display_name = (
         nickname or full.get("nickname")
         or existing.get("name") or player_name
         or f"Player_{account_id}"
     )
-    upsert_rating_cache_row({
-        "account_id":       account_id,
-        "name":             display_name,
-        "internal_rating":  info[0] if info else existing.get("internal_rating"),
-        "raw_windrun":      eff_wr,
-        "rank_tier":        existing.get("rank_tier"),
-        "leaderboard_rank": existing.get("leaderboard_rank"),
-        "ad_last_year":     existing.get("ad_last_year"),
-        "ad_all_time":      existing.get("ad_all_time"),
-        "ranked_last_year": existing.get("ranked_last_year"),
-        "explanation":      info[1] if info else existing.get("explanation"),
-        "avatar_url":       existing.get("avatar_url"),
-    })
+    inputs["name"] = display_name
+    rating_compute.cache(inputs, info or (existing.get("internal_rating"),
+                                          existing.get("explanation")))
     # Overrides and account links both change what a group is worth, so
     # re-pool. Both ends, since add_account may have just joined two groups.
     import rating_group
@@ -1789,79 +1606,26 @@ async def set_player(
 
 
 async def _refresh_ratings_task(aids: list[int], interaction: discord.Interaction):
-    """Long-running background task that fetches windrun + OpenDota for each
-    account_id and populates player_ratings_cache."""
-    from windrun import fetch_player as fetch_windrun_player
-    from opendota_lookup import fetch_player_profile, fetch_player_game_counts
-    from db import get_skill_override, upsert_rating_cache_row
-    from rating_compute import windrun_games
-    from formatters import _resolve_internal_rating, _rank_to_windrun
+    """Long-running background task that refreshes player_ratings_cache for
+    each account_id, using the same gatherer /lookup and the API use so every
+    writer leaves the same number behind."""
+    import rating_compute
+    from db import get_skill_override
 
     success = 0
     failures = 0
-    for i, aid in enumerate(aids):
+    for aid in aids:
         try:
-            results = await asyncio.gather(
-                fetch_windrun_player(aid),
-                fetch_player_profile(aid),
-                fetch_player_game_counts(aid),
-                return_exceptions=True,
-            )
-            wr_data, od, od_counts = (None if isinstance(r, Exception) else r for r in results)
-
-            raw_wr   = (wr_data or {}).get("rating")
-            from formatters import windrun_rating_for_formula
-            formula_wr = windrun_rating_for_formula(wr_data)
-            rank_tier = (od or {}).get("rank_tier")
-            lb_rank   = (od or {}).get("leaderboard_rank")
-
-            override = get_skill_override(aid)
-            eff_wr  = override["windrun_rating"] if override and override.get("windrun_rating") is not None else formula_wr
-            eff_rank_tier = override["rank_tier"] if override and override.get("rank_tier") is not None else rank_tier
-            eff_lb_rank   = override["leaderboard_rank"] if override and override.get("rank_tier") is not None else lb_rank
-            ranked_in_wr_raw = _rank_to_windrun(eff_rank_tier, eff_lb_rank)
-
-            from formatters import sanitize_od_counts
-            od_counts = sanitize_od_counts(od, od_counts)
-            ad_last     = (od_counts or {}).get("last_year_ad")
-            ad_all      = (od_counts or {}).get("all_time_ad")
-            ranked_last = (od_counts or {}).get("last_year_ranked")
-            ranked_all  = (od_counts or {}).get("all_time_ranked")
-
-            info = None
-            if od_counts is not None or (override and override.get("internal_rating_override") is not None):
-                info = _resolve_internal_rating(
-                    override=override,
-                    ad_last=ad_last, ad_all=ad_all, ranked_last=ranked_last,
-                    wr_rating=eff_wr, ranked_in_wr_raw=ranked_in_wr_raw, ranked_all=ranked_all,
-                )
-
-            name = (wr_data or {}).get("nickname")
-            if not name and od:
-                name = (od.get("profile") or {}).get("personaname")
-
-            upsert_rating_cache_row({
-                "account_id":       aid,
-                "name":             name,
-                "internal_rating":  info[0] if info else None,
-                "raw_windrun":      raw_wr,
-                "rank_tier":        rank_tier,
-                "leaderboard_rank": lb_rank,
-                "ad_last_year":     ad_last,
-                "ad_all_time":      ad_all,
-                "ranked_last_year": ranked_last,
-                "windrun_games":    windrun_games(wr_data),
-                "explanation":      info[1] if info else None,
-                "avatar_url":       (
-                    ((od or {}).get("profile") or {}).get("avatarfull")
-                    or (wr_data or {}).get("avatar")
-                ),
-                "fh_unavailable":   bool((od or {}).get("profile", {}).get("fh_unavailable")) if od else None,
-            })
+            inputs = await rating_compute.fetch_inputs(aid)
+            info = rating_compute.resolve(inputs, get_skill_override(aid))
+            rating_compute.cache(inputs, info)
             if info:
                 success += 1
             else:
                 failures += 1
+        except Exception:
+            logger.exception("refresh failed for account %d", aid)
+            failures += 1
         except Exception:
             logger.exception("refresh failed for account %d", aid)
             failures += 1
