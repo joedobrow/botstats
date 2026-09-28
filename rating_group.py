@@ -36,18 +36,14 @@ def _account_inputs(account_id: int) -> dict:
     same resolution rating_compute does, but from the cache rather than the
     APIs."""
     from db import get_rating_cache_row, get_skill_override
-    from formatters import MIN_WINDRUN_GAMES
+    from rating_compute import trusted_windrun
 
     full = get_rating_cache_row(account_id) or {}
     override = get_skill_override(account_id) or {}
 
     windrun = override.get("windrun_rating")
     if windrun is None:
-        games = full.get("windrun_games")
-        # Unknown game count means the row predates windrun_games; trust the
-        # rating that was cached rather than dropping evidence we once had.
-        if full.get("raw_windrun") is not None and (games is None or games >= MIN_WINDRUN_GAMES):
-            windrun = full.get("raw_windrun")
+        windrun = trusted_windrun(full.get("raw_windrun"), full.get("windrun_games"))
 
     if override.get("rank_tier") is not None:
         rank_tier, lb_rank = override["rank_tier"], override.get("leaderboard_rank")
