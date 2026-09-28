@@ -742,6 +742,7 @@ def format_lookup(
     linked_accounts: list[dict] | None = None,
     group_rating: int | None = None,
     group_note: str | None = None,
+    rating_info: tuple[int, str] | None = None,
 ) -> discord.Embed:
     """Build the /lookup embed. `windrun` is the raw dict from windrun.io's
     /players/{id} endpoint (or None). `opendota` is the raw dict from
@@ -914,9 +915,13 @@ def format_lookup(
         or windrun is not None
         or (override and override.get("internal_rating_override") is not None)
     )
-    if have_signal:
+    if rating_info is not None:
+        # What the caller resolved and cached. /lookup passes this so the
+        # number here is the number /player will read back (rating_compute).
+        rating, explanation = rating_info
+    elif have_signal:
         ranked_all_time = (od_counts or {}).get("all_time_ranked")
-        rating_info = _resolve_internal_rating(
+        computed = _resolve_internal_rating(
             override=override,
             ad_last=ad_last_year,
             ad_all=ad_all_time,
@@ -925,8 +930,8 @@ def format_lookup(
             ranked_in_wr_raw=ranked_in_wr_raw,
             ranked_all=ranked_all_time,
         )
-        if rating_info:
-            rating, explanation = rating_info
+        if computed:
+            rating, explanation = computed
 
     # Fall back to cached rating if fresh compute didn't yield one.
     if rating is None and cached_rating is not None:
