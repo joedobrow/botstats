@@ -144,14 +144,18 @@ def trusted_windrun(rating: float | None, games: int | None) -> float | None:
     numbers rather than a profile, so a rating rebuilt from the cache is judged
     exactly as the freshly fetched one was.
 
-    An unknown game count means the row was cached before the count was, so the
-    rating is trusted rather than thrown away — the next refresh fills it in.
+    An unknown game count is not a pass. windrun rates an account from its
+    first game, and those early numbers are placeholders — 695 for soxley, 342
+    for TThresh, both of which the fetch had discarded and both of which came
+    back as a rating when an unknown count was treated as good enough. Without
+    the count there is nothing to judge the rating by, and the next refresh
+    supplies it.
     """
     from formatters import MIN_WINDRUN_GAMES
 
-    if rating is None:
+    if rating is None or games is None:
         return None
-    return rating if games is None or games >= MIN_WINDRUN_GAMES else None
+    return rating if games >= MIN_WINDRUN_GAMES else None
 
 
 def inputs_from_cache(account_id: int) -> dict:
