@@ -130,6 +130,12 @@ def init_db():
             # a player's accounts are compared, not just at fetch time.
             logger.info("Migrating: adding windrun_games to player_ratings_cache")
             conn.execute("ALTER TABLE player_ratings_cache ADD COLUMN windrun_games INTEGER")
+        if prc_cols and "ranked_all_time" not in prc_cols:
+            # The last of the rating formula's inputs to go unstored, which
+            # left a rating rebuilt from the cache (rating_compute
+            # .inputs_from_cache) unable to reproduce the fetched one.
+            logger.info("Migrating: adding ranked_all_time to player_ratings_cache")
+            conn.execute("ALTER TABLE player_ratings_cache ADD COLUMN ranked_all_time INTEGER")
         if prc_cols and "group_rating" not in prc_cols:
             # One rating for everyone who plays several accounts, built from
             # the best evidence each account offers (see rating_group.py).
@@ -1393,10 +1399,24 @@ def get_guild_player_account_ids(guild_id: int) -> list[int]:
     return [r[0] for r in rows]
 
 
-def upsert_rating_cache_row(row: dict) -> None:
-    """Insert/update one row in player_ratings_cache. Expects keys account_id,
-    name, internal_rating, raw_windrun, mmr_estimate, ad_last_year, ad_all_time,
-    ranked_last_year, explanation, avatar_url."""
+_CACHE_COLUMNS = [
+    "name", "internal_rating", "raw_windrun", "mmr_estimate", "rank_tier",
+    "leaderboard_rank", "ad_last_year", "ad_all_time", "ranked_last_year",
+    "ranked_all_time", "windrun_games", "explanation", "avatar_url", "fh_unavailable",
+]
+
+
+def upsert_rating_cache_row(row: dict, authoritative: tuple[str, ...] = ()) -> None:
+    """Insert/update one row in player_ratings_cache.
+
+    A field left out, or set to None, normally keeps whatever was there: a
+    windrun-only refresh shouldn't wipe the OpenDota half of someone's row when
+    OpenDota is down. But that also made "we now know this is unknown"
+    unsayable — a private-history player kept a stale game count that the
+    rating had stopped using, so rebuilding the rating from the cache gave a
+    different answer than the fetch had. `authoritative` names the fields the
+    caller actually reached the source for, which are written as given, None
+    included."""
     from datetime import datetime, timezone
     payload = {
         "account_id":       row["account_id"],
@@ -1409,38 +1429,26 @@ def upsert_rating_cache_row(row: dict) -> None:
         "ad_last_year":     row.get("ad_last_year"),
         "ad_all_time":      row.get("ad_all_time"),
         "ranked_last_year": row.get("ranked_last_year"),
+        "ranked_all_time":  row.get("ranked_all_time"),
         "windrun_games":    row.get("windrun_games"),
         "explanation":      row.get("explanation"),
         "avatar_url":       row.get("avatar_url"),
         "fh_unavailable":   1 if row.get("fh_unavailable") else 0 if "fh_unavailable" in row else None,
         "updated_at":       datetime.now(timezone.utc).isoformat(),
     }
+    cols = ", ".join(_CACHE_COLUMNS)
+    values = ", ".join(f":{c}" for c in _CACHE_COLUMNS)
+    updates = ",\n                ".join(
+        f"{c} = excluded.{c}" if c in authoritative
+        else f"{c} = COALESCE(excluded.{c}, player_ratings_cache.{c})"
+        for c in _CACHE_COLUMNS)
     with _conn() as conn:
-        conn.execute("""
-            INSERT INTO player_ratings_cache
-                (account_id, name, internal_rating, raw_windrun, mmr_estimate,
-                 rank_tier, leaderboard_rank,
-                 ad_last_year, ad_all_time, ranked_last_year, windrun_games,
-                 explanation, avatar_url, fh_unavailable, updated_at)
-            VALUES (:account_id, :name, :internal_rating, :raw_windrun, :mmr_estimate,
-                    :rank_tier, :leaderboard_rank,
-                    :ad_last_year, :ad_all_time, :ranked_last_year, :windrun_games,
-                    :explanation, :avatar_url, :fh_unavailable, :updated_at)
+        conn.execute(f"""
+            INSERT INTO player_ratings_cache (account_id, {cols}, updated_at)
+            VALUES (:account_id, {values}, :updated_at)
             ON CONFLICT(account_id) DO UPDATE SET
-                name             = COALESCE(excluded.name, player_ratings_cache.name),
-                internal_rating  = COALESCE(excluded.internal_rating, player_ratings_cache.internal_rating),
-                raw_windrun      = COALESCE(excluded.raw_windrun, player_ratings_cache.raw_windrun),
-                mmr_estimate     = COALESCE(excluded.mmr_estimate, player_ratings_cache.mmr_estimate),
-                rank_tier        = COALESCE(excluded.rank_tier, player_ratings_cache.rank_tier),
-                leaderboard_rank = COALESCE(excluded.leaderboard_rank, player_ratings_cache.leaderboard_rank),
-                ad_last_year     = COALESCE(excluded.ad_last_year, player_ratings_cache.ad_last_year),
-                ad_all_time      = COALESCE(excluded.ad_all_time, player_ratings_cache.ad_all_time),
-                ranked_last_year = COALESCE(excluded.ranked_last_year, player_ratings_cache.ranked_last_year),
-                windrun_games    = COALESCE(excluded.windrun_games, player_ratings_cache.windrun_games),
-                explanation      = COALESCE(excluded.explanation, player_ratings_cache.explanation),
-                avatar_url       = COALESCE(excluded.avatar_url, player_ratings_cache.avatar_url),
-                fh_unavailable   = COALESCE(excluded.fh_unavailable, player_ratings_cache.fh_unavailable),
-                updated_at       = excluded.updated_at
+                {updates},
+                updated_at = excluded.updated_at
         """, payload)
 
 
