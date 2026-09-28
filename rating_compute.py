@@ -126,6 +126,16 @@ async def fetch_inputs(account_id: int) -> dict:
         "fh_unavailable": (bool((od.get("profile") or {}).get("fh_unavailable"))
                            if od else None),
         "reached_any_api": wr is not None or od is not None or od_counts is not None,
+        # Which fields we actually reached the source for, so "unknown" can be
+        # written as unknown instead of leaving a stale number behind (see
+        # db.upsert_rating_cache_row). A source that was down leaves its
+        # fields out, and the cache keeps what it had.
+        "authoritative": (
+            (("raw_windrun", "windrun_games") if wr is not None else ())
+            + (("rank_tier", "leaderboard_rank", "fh_unavailable") if od is not None else ())
+            + (("ad_last_year", "ad_all_time", "ranked_last_year", "ranked_all_time")
+               if od_counts is not None else ())
+        ),
     }
 
 
@@ -160,7 +170,7 @@ def inputs_from_cache(account_id: int) -> dict:
         "ad_last_year": row.get("ad_last_year"),
         "ad_all_time": row.get("ad_all_time"),
         "ranked_last_year": row.get("ranked_last_year"),
-        "ranked_all_time": None,
+        "ranked_all_time": row.get("ranked_all_time"),
         "name": row.get("name"),
         "avatar_url": row.get("avatar_url"),
         "fh_unavailable": row.get("fh_unavailable"),
@@ -216,11 +226,12 @@ def cache(inputs: dict, info: tuple[int, str] | None, name_fallback: str | None 
         "ad_last_year":     inputs["ad_last_year"],
         "ad_all_time":      inputs["ad_all_time"],
         "ranked_last_year": inputs["ranked_last_year"],
+        "ranked_all_time":  inputs["ranked_all_time"],
         "windrun_games":    inputs["windrun_games"],
         "explanation":      info[1] if info else None,
         "avatar_url":       inputs["avatar_url"],
         "fh_unavailable":   inputs["fh_unavailable"],
-    })
+    }, authoritative=inputs.get("authoritative", ()))
     rating_group.recompute(inputs["account_id"])
 
 
