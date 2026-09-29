@@ -252,9 +252,9 @@ def set_division_name(guild_id: int, name: str) -> None:
 
 
 def all_seasons() -> list[dict]:
-    """Every season of every division, newest first, with its status, signup
-    count and match window [start_ts, end_ts). A season's matches end where
-    the division's next season begins. A season's id is its Dota league id."""
+    """Every season of every division, newest first, with its status and
+    signup count. A season's id is its Dota league id, and its matches are
+    the ones played in that league (db.season_scope)."""
     names = division_names()
     with _conn() as conn:
         statuses = {r["season_id"]: r["status"] for r in conn.execute("SELECT * FROM site_season_settings")}
@@ -269,16 +269,13 @@ def all_seasons() -> list[dict]:
     out = []
     for guild_id, seasons in by_guild.items():
         seasons.sort(key=lambda s: s["season_start"])
-        for i, s in enumerate(seasons):
-            nxt = seasons[i + 1] if i + 1 < len(seasons) else None
+        for s in seasons:
             out.append({
                 "id": s["id"],
                 "guild_id": guild_id,
                 "season_start": s["season_start"],
                 "label": db.season_label(s),
                 "division": names[guild_id],
-                "start_ts": db._all_time_start_ts(s["id"]),
-                "end_ts": db._all_time_start_ts(nxt["id"]) if nxt else None,
                 "status": statuses.get(s["id"]),
                 "signup_count": signup_counts.get(s["id"], 0),
             })
@@ -336,11 +333,10 @@ def set_status(season_id: int, status: str) -> None:
         """, (season_id, status))
 
 
-def _season_for(seasons: list[dict], guild_id: int, ts: int) -> dict | None:
-    for s in seasons:
-        if s["guild_id"] == guild_id and s["start_ts"] <= ts and (s["end_ts"] is None or ts < s["end_ts"]):
-            return s
-    return None
+def season_of_match(seasons: list[dict], match: dict) -> dict | None:
+    """The season a match was played in: the one whose league it's in."""
+    return next((s for s in seasons
+                 if s["id"] == match["league_id"] and s["guild_id"] == match["guild_id"]), None)
 
 
 # ---------------------------------------------------------------------------
@@ -470,7 +466,7 @@ def search_players(q: str, limit: int = 200) -> list[dict]:
 def player_matches(account_id: int) -> list[dict]:
     with _conn() as conn:
         rows = conn.execute("""
-            SELECT p.*, m.start_time, m.guild_id, m.duration AS match_duration,
+            SELECT p.*, m.start_time, m.guild_id, m.league_id, m.duration AS match_duration,
                    m.radiant_score, m.dire_score
             FROM players p JOIN matches m ON m.match_id = p.match_id
             WHERE p.account_id = ?
@@ -480,8 +476,10 @@ def player_matches(account_id: int) -> list[dict]:
 
 
 def aggregate(rows: list[dict]) -> dict:
-    """Season-style aggregate of per-match player rows, with fantasy points
-    computed the same way the bot's leaderboard computes them."""
+    """Aggregate of per-match player rows, with fantasy points computed the
+    way the bot computes them. For totals the bot has no view of (a
+    player's career across divisions); per-season numbers come from
+    db.get_all_time_stats so they match the bot exactly."""
     from fantasy import calculate_fantasy_points
     n = len(rows)
     if not n:
@@ -509,45 +507,19 @@ def aggregate(rows: list[dict]) -> dict:
 # Season pages
 # ---------------------------------------------------------------------------
 
-def season_match_rows(season: dict) -> list[dict]:
-    """Every player-match row in the season's window."""
-    q = """
-        SELECT p.*, m.start_time, m.duration AS match_duration, m.radiant_win
-        FROM players p JOIN matches m ON m.match_id = p.match_id
-        WHERE m.guild_id = ? AND m.start_time >= ?
-    """
-    args: list = [season["guild_id"], season["start_ts"]]
-    if season["end_ts"]:
-        q += " AND m.start_time < ?"
-        args.append(season["end_ts"])
-    with _conn() as conn:
-        return [dict(r) for r in conn.execute(q, args)]
-
-
 def season_leaders(season: dict) -> list[dict]:
-    by_player: dict[int, list[dict]] = {}
-    for r in season_match_rows(season):
-        by_player.setdefault(r["account_id"], []).append(r)
-    idents = player_identities(list(by_player))
-    out = []
-    for aid, rows in by_player.items():
-        agg = aggregate(rows)
-        agg["account_id"] = aid
-        agg["name"] = idents.get(aid, {}).get("name") or rows[0]["name"]
-        out.append(agg)
-    out.sort(key=lambda a: -a["fantasy_points"])
-    return out
+    """Per-player stats for the season, best fantasy points first — the same
+    rows the bot's season-scoped stats come from."""
+    rows = db.ranked(db.get_all_time_stats(season["guild_id"], season["id"]))
+    return sorted(rows, key=lambda r: -r["fantasy_points"])
 
 
 def season_matches(season: dict) -> list[dict]:
     """Matches in the season, newest first, with each side's team (by captain)."""
-    q = "SELECT * FROM matches WHERE guild_id = ? AND start_time >= ?"
-    args: list = [season["guild_id"], season["start_ts"]]
-    if season["end_ts"]:
-        q += " AND start_time < ?"
-        args.append(season["end_ts"])
+    where, params = db.season_scope(season["id"]).where("m")
     with _conn() as conn:
-        matches = [dict(r) for r in conn.execute(q + " ORDER BY start_time DESC", args)]
+        matches = [dict(r) for r in conn.execute(
+            f"SELECT m.* FROM matches m WHERE {where} ORDER BY m.start_time DESC", params)]
     caps = db.get_match_team_captains(season["id"],
                                       [m["match_id"] for m in matches])
     for m in matches:
@@ -605,7 +577,7 @@ def match_detail(match_id: int) -> dict | None:
         p["fantasy_points"] = db._per_match_fp(p)
     m["radiant"] = [p for p in players if p["team_side"] == "radiant"]
     m["dire"] = [p for p in players if p["team_side"] == "dire"]
-    season = _season_for(all_seasons(), m["guild_id"], m["start_time"])
+    season = season_of_match(all_seasons(), m)
     m["season"] = season
     if season:
         caps = db.get_match_team_captains(season["id"], [match_id])

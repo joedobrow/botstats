@@ -114,7 +114,7 @@ async def player_card_handler(request: web.Request) -> web.Response:
     # Defer heavy imports so the web server boots cleanly even if some are slow.
     from db import (
         get_all_time_stats, get_rating_cache_row, compute_fantasy_adjusted_ratings,
-        get_active_draft_season,
+        get_active_draft_season, ranked,
     )
     from formatters import _compute_strengths_weaknesses
     from config import ROLE_LABELS
@@ -129,7 +129,7 @@ async def player_card_handler(request: web.Request) -> web.Response:
     if target is None:
         return web.Response(text=f"Account {account_id} has no league matches", status=404)
 
-    pool = [s for s in stats if (s.get("games_played") or 0) >= 5]
+    pool = [s for s in ranked(stats) if (s.get("games_played") or 0) >= 5]
     strengths, weaknesses = _compute_strengths_weaknesses(target, pool)
 
     # Rating + avatar from cache

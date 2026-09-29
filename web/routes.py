@@ -296,10 +296,11 @@ async def team_page(request: web.Request):
     member_ids = [p["account_id"] for p in team["roster"]]
     if team["captain_account_id"]:
         member_ids.append(team["captain_account_id"])
-    leaders = {p["account_id"]: p for p in store.season_leaders(season)}
+    # Every row, alt copies included: a roster can list a player's alt.
+    stats = {p["account_id"]: p for p in db.get_all_time_stats(season["guild_id"], season["id"])}
     return render(request, "team.html", title=team["name"], season=season, team=team,
                   matches=team_matches, idents=store.player_identities(member_ids),
-                  stats=leaders, team_names={c: t["name"] for c, t in teams.items()})
+                  stats=stats, team_names={c: t["name"] for c, t in teams.items()})
 
 
 @routes.get("/players")
@@ -320,10 +321,10 @@ async def player_page(request: web.Request):
     if not matches and not site_user and not ident["name"]:
         return not_found(request, "Player")
     seasons = store.all_seasons()
-    by_season: dict[tuple, list[dict]] = {}
+    by_season: dict[int, list[dict]] = {}
     for m in matches:
         m["hero"] = store.hero(m["hero_id"])
-        s = store._season_for(seasons, m["guild_id"], m["start_time"])
+        s = store.season_of_match(seasons, m)
         m["season"] = s
         if s:
             by_season.setdefault(s["id"], []).append(m)
@@ -334,7 +335,10 @@ async def player_page(request: web.Request):
             costs = db.get_player_costs(s["id"]).get(account_id) or {}
             cap = costs.get("captain")
             team = db.get_season_teams(s["id"]).get((cap or "").lower(), {})
-            season_rows.append({"season": s, "stats": store.aggregate(rows), "captain": cap,
+            # The bot's season stats for this player, so the two agree.
+            stats = next((r for r in db.get_all_time_stats(s["guild_id"], s["id"])
+                          if r["account_id"] == account_id), None) or store.aggregate(rows)
+            season_rows.append({"season": s, "stats": stats, "captain": cap,
                                 "team_name": team.get("team_name") or cap, "cost": costs.get("cost")})
     hero_counts: dict[int, dict] = {}
     for m in matches:

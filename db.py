@@ -14,6 +14,7 @@ update rows when weeks change.
 import sqlite3
 import os
 import logging
+from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 
 logger = logging.getLogger(__name__)
@@ -754,6 +755,43 @@ def get_random_quote(guild_id: int) -> dict | None:
 # Read
 # ---------------------------------------------------------------------------
 
+@dataclass(frozen=True)
+class MatchScope:
+    """Which matches a query covers: always one guild's; optionally only one
+    season's, by league id (every match records the league it was played
+    in, and a season's id is its league id); optionally only a time window,
+    e.g. a week. Every season- or week-scoped query builds its WHERE clause
+    from one of these, so they all agree on what "this season" means."""
+    guild_id: int
+    league_id: int | None = None
+    start: int | None = None   # unix seconds, inclusive
+    end: int | None = None     # unix seconds, inclusive
+
+    def where(self, alias: str = "m") -> tuple[str, list]:
+        """(SQL condition, params) over the matches table aliased `alias`."""
+        clauses, params = [f"{alias}.guild_id = ?"], [self.guild_id]
+        if self.league_id is not None:
+            clauses.append(f"{alias}.league_id = ?"); params.append(self.league_id)
+        if self.start is not None:
+            clauses.append(f"{alias}.start_time >= ?"); params.append(self.start)
+        if self.end is not None:
+            clauses.append(f"{alias}.start_time <= ?"); params.append(self.end)
+        return " AND ".join(clauses), params
+
+
+def season_scope(season_id: int) -> MatchScope:
+    """Every match of a season: its guild's matches in its league."""
+    season = get_season(season_id)
+    return MatchScope(season["guild_id"], league_id=season["id"])
+
+
+def season_week_scope(season_id: int, week_number: int) -> MatchScope:
+    """A season's matches within one of its weeks."""
+    season = get_season(season_id)
+    start, end = get_season_week_range(season_id, week_number)
+    return MatchScope(season["guild_id"], league_id=season["id"], start=start, end=end)
+
+
 def _week_start(week_offset: int = 0) -> tuple[int, int]:
     """Return (start_unix, end_unix) for a given week.
 
@@ -1014,25 +1052,6 @@ def generate_season_weeks(season_id: int, num_weeks: int, first_week: int = 1) -
         ])
 
 
-def _all_time_start_ts(season_id: int | None) -> int:
-    """Lower bound for a season's matches: the earliest explicitly-defined
-    week's start (if the season has explicit weeks), else the legacy
-    week-zero calendar calculation, else 0 (no season at all)."""
-    if not season_id:
-        return 0
-    if _season_weeks_defined(season_id):
-        with _conn() as conn:
-            row = conn.execute("SELECT MIN(start_ts) AS s FROM season_weeks WHERE season_id = ?",
-                               (season_id,)).fetchone()
-        if row and row["s"] is not None:
-            return row["s"]
-    season_start = datetime.strptime(get_season(season_id)["season_start"], "%Y-%m-%d")
-    season_start = season_start.replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=timezone.utc)
-    season_monday = season_start - timedelta(days=season_start.weekday())
-    week_zero_start = season_monday - timedelta(weeks=1)
-    return int(week_zero_start.timestamp())
-
-
 # ---------------------------------------------------------------------------
 # Season teams (team identity: real name + logo, per season)
 # ---------------------------------------------------------------------------
@@ -1114,12 +1133,13 @@ def get_display_names(account_ids: list[int]) -> dict[int, str]:
     return out
 
 
-def get_latest_week_stats(guild_id: int, week_offset: int = 0) -> list[dict]:
-    """Return aggregated per-player stats for the given week.
-
-    Each dict contains all raw totals plus computed kda and fantasy_points.
-    """
-    start, end = _week_start(week_offset)
+def _player_stats(scope: MatchScope) -> list[dict]:
+    """Aggregated per-player stats over the matches in scope: raw totals and
+    per-game averages, plus kda, fantasy_points, and fantasy diff vs
+    teammates (diff) and vs the lobby (diff_vs_lobby). Draft fields (cost,
+    value, attendance) and display names are added by the callers."""
+    from fantasy import calculate_fantasy_points
+    where, params = scope.where("m")
     with _conn() as conn:
         rows = conn.execute("""
             SELECT
@@ -1172,26 +1192,30 @@ def get_latest_week_stats(guild_id: int, week_offset: int = 0) -> list[dict]:
                 SELECT match_id, SUM(hero_damage) AS total_damage
                 FROM players GROUP BY match_id
             ) AS match_dmg ON p.match_id = match_dmg.match_id
-            WHERE m.guild_id = :guild_id
-              AND m.start_time BETWEEN :start AND :end
+            WHERE {where}
+              AND p.account_id > 0   -- 0 is every private-profile player at once
             GROUP BY p.account_id
             ORDER BY gpm DESC
-        """, {"guild_id": guild_id, "start": start, "end": end}).fetchall()
+        """.format(where=where), params).fetchall()
 
-    diffs = _compute_player_diffs(guild_id, start, end)
-    diffs_vs_lobby = _compute_player_diffs_vs_lobby(guild_id, start, end)
+    diffs = _compute_player_diffs(scope)
+    diffs_vs_lobby = _compute_player_diffs_vs_lobby(scope)
     results = []
     for r in rows:
         d = dict(r)
-        # KDA = (kills + assists) / max(deaths, 1)
         d["kda"] = round((d["total_kills"] + d["total_assists"]) / max(d["total_deaths"], 1), 2)
-        # Fantasy points (see fantasy.py for the formula)
-        from fantasy import calculate_fantasy_points
         d["fantasy_points"] = calculate_fantasy_points(d)
         d["diff"] = diffs.get(d["account_id"], 0.0)
         d["diff_vs_lobby"] = diffs_vs_lobby.get(d["account_id"], 0.0)
         results.append(d)
-    return _apply_override_nicknames(results)
+    return results
+
+
+def get_latest_week_stats(guild_id: int, week_offset: int = 0) -> list[dict]:
+    """Aggregated per-player stats for a calendar week (0 = this week,
+    1 = last week, ...), across every league the guild plays in."""
+    start, end = _week_start(week_offset)
+    return _apply_override_nicknames(_player_stats(MatchScope(guild_id, start=start, end=end)))
 
 
 def get_stats_for_season_week(season_id: int, week_number: int) -> list[dict]:
@@ -1202,81 +1226,12 @@ def get_stats_for_season_week(season_id: int, week_number: int) -> list[dict]:
     calendar formula — the formula assumes week 1 is the first week, so it
     puts week 0 a week BEFORE the season and finds nothing.
     """
-    guild_id = get_season(season_id)["guild_id"]
-    start, end = get_season_week_range(season_id, week_number)
-    with _conn() as conn:
-        rows = conn.execute("""
-            SELECT
-                p.account_id,
-                p.name,
-                p.role_position,
-                COUNT(*)                        AS games_played,
-                SUM(p.kills)                    AS total_kills,
-                SUM(p.deaths)                   AS total_deaths,
-                SUM(p.assists)                  AS total_assists,
-                AVG(p.gpm)                      AS gpm,
-                AVG(p.xpm)                      AS xpm,
-                AVG(p.last_hits)                AS last_hits,
-                AVG(p.denies)                   AS denies,
-                AVG(p.hero_damage)              AS hero_damage,
-                AVG(p.hero_healing)             AS hero_healing,
-                AVG(p.obs_placed)               AS obs_placed,
-                AVG(p.sen_placed)               AS sen_placed,
-                AVG(p.observer_kills)           AS observer_kills,
-                AVG(p.observer_kills * 60.0 / NULLIF(p.duration, 0))
-                                                AS observer_kills_per_min,
-                AVG(p.sentry_kills)             AS sentry_kills,
-                AVG(p.tower_kills)              AS tower_kills,
-                AVG(p.roshans_killed)           AS roshans_killed,
-                AVG(p.firstblood_claimed)       AS firstblood_claimed,
-                AVG(p.teamfight_participation)  AS teamfight_participation,
-                AVG(p.stuns)                    AS stuns,
-                AVG(p.stuns * 60.0 / NULLIF(p.duration, 0))
-                                                AS stuns_per_min,
-                AVG(p.camps_stacked)            AS camps_stacked,
-                AVG(p.rune_pickups)             AS rune_pickups,
-                AVG(p.tormentor_kills)          AS tormentor_kills,
-                AVG(p.watcher_captures)         AS watcher_captures,
-                AVG(p.defensive_item_uses)      AS defensive_item_uses,
-                AVG(p.building_damage)          AS building_damage,
-                AVG(CASE WHEN p.team_first_tormentor_time > 0
-                         THEN p.team_first_tormentor_time ELSE NULL END)
-                                                AS avg_first_tormentor_time,
-                AVG(p.duration)                 AS avg_duration,
-                AVG(CASE WHEN p.player_slot >= 0   AND p.player_slot < 128
-                         THEN p.duration ELSE NULL END) AS avg_duration_radiant,
-                AVG(CASE WHEN p.player_slot >= 128
-                         THEN p.duration ELSE NULL END) AS avg_duration_dire,
-                AVG(CAST(p.hero_damage AS REAL) / NULLIF(match_dmg.total_damage, 0))
-                                                AS avg_pct_damage,
-                SUM(p.won)                      AS wins
-            FROM players p
-            JOIN matches m ON p.match_id = m.match_id
-            JOIN (
-                SELECT match_id, SUM(hero_damage) AS total_damage
-                FROM players GROUP BY match_id
-            ) AS match_dmg ON p.match_id = match_dmg.match_id
-            WHERE m.guild_id = :guild_id
-              AND m.start_time BETWEEN :start AND :end
-            GROUP BY p.account_id
-            ORDER BY gpm DESC
-        """, {"guild_id": guild_id, "start": start, "end": end}).fetchall()
-
-    diffs = _compute_player_diffs(guild_id, start, end)
-    diffs_vs_lobby = _compute_player_diffs_vs_lobby(guild_id, start, end)
-    results = []
-    for r in rows:
-        d = dict(r)
-        d["kda"] = round((d["total_kills"] + d["total_assists"]) / max(d["total_deaths"], 1), 2)
-        from fantasy import calculate_fantasy_points
-        d["fantasy_points"] = calculate_fantasy_points(d)
-        d["diff"] = diffs.get(d["account_id"], 0.0)
-        d["diff_vs_lobby"] = diffs_vs_lobby.get(d["account_id"], 0.0)
-        results.append(d)
+    scope = season_week_scope(season_id, week_number)
+    results = _player_stats(scope)
     costs = get_player_costs(season_id)
     results = _attach_costs(results, costs)
     _compute_value(results)
-    attendance_map = _compute_attendance(guild_id, start, end, costs)
+    attendance_map = _compute_attendance(scope, costs)
     for s in results:
         s["attendance"] = attendance_map.get(s["account_id"])
     return _apply_override_nicknames(results)
@@ -1284,97 +1239,23 @@ def get_stats_for_season_week(season_id: int, week_number: int) -> list[dict]:
 
 def get_all_time_stats(guild_id: int, season_id: int | None = None,
                        cross_season: bool = False) -> list[dict]:
-    """Return aggregated per-player stats across all matches for a division.
+    """Return aggregated per-player stats for a division.
 
-    If season_id is given, only includes matches from that season's start
-    onwards. With cross_season=True the match window opens up to every match
-    the guild has ever recorded (all seasons), while cost-derived fields
-    (cost/captain/value/attendance) still come from season_id — those
-    describe a specific draft, so they stay season-scoped by definition.
+    With season_id: that season's matches (its league). Without, or with
+    cross_season=True: every match the guild has ever recorded, all
+    seasons — while cost-derived fields (cost/captain/value/attendance)
+    still come from season_id, since those describe a specific draft.
     """
-    from fantasy import calculate_fantasy_points
-
-    # cross_season widens the match window to the guild's entire history;
-    # cost/attendance below still key off season_id.
-    start_ts = 0 if cross_season else _all_time_start_ts(season_id)
-
-    with _conn() as conn:
-        rows = conn.execute("""
-            SELECT
-                p.account_id,
-                p.name,
-                p.role_position,
-                COUNT(*)                        AS games_played,
-                SUM(p.kills)                    AS total_kills,
-                SUM(p.deaths)                   AS total_deaths,
-                SUM(p.assists)                  AS total_assists,
-                AVG(p.gpm)                      AS gpm,
-                AVG(p.xpm)                      AS xpm,
-                AVG(p.last_hits)                AS last_hits,
-                AVG(p.denies)                   AS denies,
-                AVG(p.hero_damage)              AS hero_damage,
-                AVG(p.hero_healing)             AS hero_healing,
-                AVG(p.obs_placed)               AS obs_placed,
-                AVG(p.sen_placed)               AS sen_placed,
-                AVG(p.observer_kills)           AS observer_kills,
-                AVG(p.observer_kills * 60.0 / NULLIF(p.duration, 0))
-                                                AS observer_kills_per_min,
-                AVG(p.sentry_kills)             AS sentry_kills,
-                AVG(p.tower_kills)              AS tower_kills,
-                AVG(p.roshans_killed)           AS roshans_killed,
-                AVG(p.firstblood_claimed)       AS firstblood_claimed,
-                AVG(p.teamfight_participation)  AS teamfight_participation,
-                AVG(p.stuns)                    AS stuns,
-                AVG(p.stuns * 60.0 / NULLIF(p.duration, 0))
-                                                AS stuns_per_min,
-                AVG(p.camps_stacked)            AS camps_stacked,
-                AVG(p.rune_pickups)             AS rune_pickups,
-                AVG(p.tormentor_kills)          AS tormentor_kills,
-                AVG(p.watcher_captures)         AS watcher_captures,
-                AVG(p.defensive_item_uses)      AS defensive_item_uses,
-                AVG(p.building_damage)          AS building_damage,
-                AVG(CASE WHEN p.team_first_tormentor_time > 0
-                         THEN p.team_first_tormentor_time ELSE NULL END)
-                                                AS avg_first_tormentor_time,
-                AVG(p.duration)                 AS avg_duration,
-                AVG(CASE WHEN p.player_slot >= 0   AND p.player_slot < 128
-                         THEN p.duration ELSE NULL END) AS avg_duration_radiant,
-                AVG(CASE WHEN p.player_slot >= 128
-                         THEN p.duration ELSE NULL END) AS avg_duration_dire,
-                AVG(CAST(p.hero_damage AS REAL) / NULLIF(match_dmg.total_damage, 0))
-                                                AS avg_pct_damage,
-                SUM(p.won)                      AS wins
-            FROM players p
-            JOIN matches m ON p.match_id = m.match_id
-            JOIN (
-                SELECT match_id, SUM(hero_damage) AS total_damage
-                FROM players GROUP BY match_id
-            ) AS match_dmg ON p.match_id = match_dmg.match_id
-            WHERE m.guild_id = ?
-              AND m.start_time >= ?
-            GROUP BY p.account_id
-            ORDER BY gpm DESC
-        """, (guild_id, start_ts)).fetchall()
-
-    diffs = _compute_player_diffs(guild_id, start_ts)
-    diffs_vs_lobby = _compute_player_diffs_vs_lobby(guild_id, start_ts)
-    results = []
-    for r in rows:
-        d = dict(r)
-        d["kda"] = round((d["total_kills"] + d["total_assists"]) / max(d["total_deaths"], 1), 2)
-        d["fantasy_points"] = calculate_fantasy_points(d)
-        d["diff"] = diffs.get(d["account_id"], 0.0)
-        d["diff_vs_lobby"] = diffs_vs_lobby.get(d["account_id"], 0.0)
-        results.append(d)
+    results = _player_stats(season_scope(season_id) if season_id and not cross_season
+                            else MatchScope(guild_id))
     if season_id:
         costs = get_player_costs(season_id)
         results = _attach_costs(results, costs)
         _compute_value(results)
-        # Attendance is "what share of your team's season did you show up for",
-        # so it always uses the season window even when the stat rows above
-        # were widened to every season by cross_season.
-        season_ts = _all_time_start_ts(season_id)
-        attendance_map = _compute_attendance(guild_id, season_ts, None, costs)
+        # Attendance is "what share of your team's season did you show up
+        # for", so it always uses the season's matches even when the stat
+        # rows above were widened to every season by cross_season.
+        attendance_map = _compute_attendance(season_scope(season_id), costs)
         for s in results:
             s["attendance"] = attendance_map.get(s["account_id"])
     else:
@@ -1395,9 +1276,18 @@ def get_all_time_stats(guild_id: int, season_id: int | None = None,
         if alt_id not in by_aid and main_id in by_aid:
             mirrored = dict(by_aid[main_id])
             mirrored["account_id"] = alt_id
+            mirrored["alt_of"] = main_id   # a copy for lookups; ranked() leaves it out
             results.append(mirrored)
 
     return _apply_override_nicknames(results)
+
+
+def ranked(stats: list[dict]) -> list[dict]:
+    """Stat rows with one row per person, for anything that ranks or pools
+    players (leaderboards, percentile pools). Drops the copies
+    get_all_time_stats adds under alt accounts, which exist so that looking
+    a player up by their alt finds their stats."""
+    return [s for s in stats if not s.get("alt_of")]
 
 
 def _per_match_fp(row: dict) -> float:
@@ -1434,29 +1324,19 @@ def _per_match_fp(row: dict) -> float:
     })
 
 
-def _compute_player_diffs(guild_id: int, start: int, end: int | None = None) -> dict[int, float]:
-    """For every player with matches in the time range, return the average
+def _compute_player_diffs(scope: MatchScope) -> dict[int, float]:
+    """For every player with matches in scope, return the average
     per-match fantasy-points diff vs. the 4 same-side teammates.
 
     Returns {account_id: avg_diff}. Players with no qualifying matches are absent.
     """
-    if end is None:
-        sql = """
-            SELECT p.*, m.duration AS match_duration
-            FROM players p
-            JOIN matches m ON p.match_id = m.match_id
-            WHERE m.guild_id = ? AND m.start_time >= ?
-        """
-        params: tuple = (guild_id, start)
-    else:
-        sql = """
-            SELECT p.*, m.duration AS match_duration
-            FROM players p
-            JOIN matches m ON p.match_id = m.match_id
-            WHERE m.guild_id = ? AND m.start_time BETWEEN ? AND ?
-        """
-        params = (guild_id, start, end)
-
+    where, params = scope.where("m")
+    sql = f"""
+        SELECT p.*, m.duration AS match_duration
+        FROM players p
+        JOIN matches m ON p.match_id = m.match_id
+        WHERE {where}
+    """
     with _conn() as conn:
         rows = conn.execute(sql, params).fetchall()
 
@@ -1484,8 +1364,8 @@ def _compute_player_diffs(guild_id: int, start: int, end: int | None = None) -> 
     return {aid: sum(ds) / len(ds) for aid, ds in diffs_by_account.items() if ds}
 
 
-def _compute_player_diffs_vs_lobby(guild_id: int, start: int, end: int | None = None) -> dict[int, float]:
-    """For every player with matches in the time range, return the average
+def _compute_player_diffs_vs_lobby(scope: MatchScope) -> dict[int, float]:
+    """For every player with matches in scope, return the average
     per-match fantasy-points diff vs. the OTHER 9 players in the match —
     both teammates AND opponents. Opponent-strength-aware in a way the
     teammates-only diff isn't: a great performance against a weak enemy
@@ -1494,23 +1374,13 @@ def _compute_player_diffs_vs_lobby(guild_id: int, start: int, end: int | None = 
     Used only by /leaderboard Value (via _compute_value). The teammates-only
     diff powers the fantasy adjustment path — this doesn't replace it.
     """
-    if end is None:
-        sql = """
-            SELECT p.*, m.duration AS match_duration
-            FROM players p
-            JOIN matches m ON p.match_id = m.match_id
-            WHERE m.guild_id = ? AND m.start_time >= ?
-        """
-        params: tuple = (guild_id, start)
-    else:
-        sql = """
-            SELECT p.*, m.duration AS match_duration
-            FROM players p
-            JOIN matches m ON p.match_id = m.match_id
-            WHERE m.guild_id = ? AND m.start_time BETWEEN ? AND ?
-        """
-        params = (guild_id, start, end)
-
+    where, params = scope.where("m")
+    sql = f"""
+        SELECT p.*, m.duration AS match_duration
+        FROM players p
+        JOIN matches m ON p.match_id = m.match_id
+        WHERE {where}
+    """
     with _conn() as conn:
         rows = conn.execute(sql, params).fetchall()
 
@@ -2073,9 +1943,6 @@ def get_head_to_head_matches(
         match_id, start_time, duration, a_won (bool)
     Sorted by start_time ascending.
     """
-    guild_id = get_season(season_id)["guild_id"]
-    start_ts = _all_time_start_ts(season_id)
-
     costs = get_player_costs(season_id)
     cap_aids = get_captain_account_ids(season_id)
 
@@ -2090,13 +1957,14 @@ def get_head_to_head_matches(
     if not roster_a or not roster_b:
         return []
 
+    where, params = season_scope(season_id).where("m")
     with _conn() as conn:
-        rows = conn.execute("""
+        rows = conn.execute(f"""
             SELECT p.match_id, p.account_id, p.player_slot,
                    m.radiant_win, m.duration, m.start_time
             FROM players p JOIN matches m ON p.match_id = m.match_id
-            WHERE m.guild_id = ? AND m.start_time >= ?
-        """, (guild_id, start_ts)).fetchall()
+            WHERE {where}
+        """, params).fetchall()
 
     by_match: dict[int, dict] = {}
     for r in rows:
@@ -2207,7 +2075,6 @@ def get_team_match_aggregates(season_id: int) -> dict[str, dict]:
     a real team W-L.
     """
     guild_id = get_season(season_id)["guild_id"]
-    start_ts = _all_time_start_ts(season_id)
 
     # Rosters: captain → {account_ids}
     costs = get_player_costs(season_id)
@@ -2235,8 +2102,9 @@ def get_team_match_aggregates(season_id: int) -> dict[str, dict]:
         member_names[cap] = names
 
     # Pull all the player-rows for this season + their match metadata.
+    where, params = season_scope(season_id).where("m")
     with _conn() as conn:
-        rows = conn.execute("""
+        rows = conn.execute(f"""
             SELECT
                 p.match_id, p.account_id, p.name, p.player_slot,
                 p.kills, p.deaths, p.assists,
@@ -2253,8 +2121,8 @@ def get_team_match_aggregates(season_id: int) -> dict[str, dict]:
                 m.radiant_win, m.duration AS match_duration
             FROM players p
             JOIN matches m ON p.match_id = m.match_id
-            WHERE m.guild_id = ? AND m.start_time >= ?
-        """, (guild_id, start_ts)).fetchall()
+            WHERE {where}
+        """, params).fetchall()
 
     # Group player-rows by match → radiant/dire.
     matches: dict[int, dict] = {}
@@ -2490,12 +2358,7 @@ def upsert_player_costs(season_id: int, costs: list[dict]):
         } for c in costs])
 
 
-def _compute_attendance(
-    guild_id: int,
-    start: int,
-    end: int | None,
-    costs: dict[int, dict],
-) -> dict[int, float]:
+def _compute_attendance(scope: MatchScope, costs: dict[int, dict]) -> dict[int, float]:
     """Return {account_id: attendance_ratio} for drafted players only.
 
     Captain-agnostic: we never need to identify the captain's account_id.
@@ -2510,19 +2373,13 @@ def _compute_attendance(
     if not costs:
         return {}
 
-    if end is None:
-        sql_where = "WHERE m.guild_id = ? AND m.start_time >= ?"
-        params: tuple = (guild_id, start)
-    else:
-        sql_where = "WHERE m.guild_id = ? AND m.start_time BETWEEN ? AND ?"
-        params = (guild_id, start, end)
-
+    where, params = scope.where("m")
     with _conn() as conn:
         rows = conn.execute(f"""
             SELECT p.match_id, p.account_id, p.team_side
             FROM players p
             JOIN matches m ON p.match_id = m.match_id
-            {sql_where}
+            WHERE {where}
         """, params).fetchall()
 
     if not rows:
@@ -2804,28 +2661,21 @@ def get_player_team_diff(
     Per-match comparison of one player's fantasy points to the average of their
     4 same-side teammates. Aggregated across all matches in the requested range.
 
-    week_number=None or -1 → all-time (from the season's start onwards).
+    week_number=None or -1 → the whole season.
     Otherwise scoped to that season week.
 
     Returns None if the player has no matches in range.
     """
-    guild_id = get_season(season_id)["guild_id"]
-    if week_number is None or week_number == -1:
-        # All-time: mirror the season-start filter used by get_all_time_stats
-        start = _all_time_start_ts(season_id)
-        end = 2**31 - 1
-    else:
-        start, end = get_season_week_range(season_id, week_number)
-
+    scope = (season_scope(season_id) if week_number is None or week_number == -1
+             else season_week_scope(season_id, week_number))
+    where, params = scope.where("m")
     with _conn() as conn:
-        target_matches = conn.execute("""
+        target_matches = conn.execute(f"""
             SELECT p.match_id
             FROM players p
             JOIN matches m ON p.match_id = m.match_id
-            WHERE m.guild_id = ?
-              AND p.account_id = ?
-              AND m.start_time BETWEEN ? AND ?
-        """, (guild_id, account_id, start, end)).fetchall()
+            WHERE {where} AND p.account_id = ?
+        """, params + [account_id]).fetchall()
 
         if not target_matches:
             return None
@@ -2911,11 +2761,11 @@ def get_all_weeks(guild_id: int) -> list[dict]:
 def get_latest_season_week(season_id: int) -> int | None:
     """Return the latest season week number that has data, or None if no data."""
     season = get_season(season_id)
-    guild_id, season_start_date = season["guild_id"], season["season_start"]
+    season_start_date = season["season_start"]
+    where, params = season_scope(season_id).where("m")
     with _conn() as conn:
-        row = conn.execute("""
-            SELECT MAX(start_time) AS latest_time FROM matches WHERE guild_id = ?
-        """, (guild_id,)).fetchone()
+        row = conn.execute(f"SELECT MAX(m.start_time) AS latest_time FROM matches m WHERE {where}",
+                           params).fetchone()
 
     if not row or not row["latest_time"]:
         return None
@@ -2932,45 +2782,28 @@ def get_latest_season_week(season_id: int) -> int | None:
     return max(1, week_number)
 
 
-def get_matches_for_week(guild_id: int, week_offset: int = 0) -> list[dict]:
-    """Return all matches for a given week with basic info."""
-    start, end = _week_start(week_offset)
+def _list_matches(scope: MatchScope) -> list[dict]:
+    """Matches in scope, newest first, with basic info."""
+    where, params = scope.where("m")
     with _conn() as conn:
-        rows = conn.execute("""
-            SELECT
-                match_id,
-                start_time,
-                duration,
-                radiant_win,
-                radiant_score,
-                dire_score
-            FROM matches
-            WHERE guild_id = :guild_id
-              AND start_time BETWEEN :start AND :end
-            ORDER BY start_time DESC
-        """, {"guild_id": guild_id, "start": start, "end": end}).fetchall()
+        rows = conn.execute(f"""
+            SELECT m.match_id, m.start_time, m.duration, m.radiant_win, m.radiant_score, m.dire_score
+            FROM matches m
+            WHERE {where}
+            ORDER BY m.start_time DESC
+        """, params).fetchall()
     return [dict(r) for r in rows]
+
+
+def get_matches_for_week(guild_id: int, week_offset: int = 0) -> list[dict]:
+    """Return all matches for a given calendar week with basic info."""
+    start, end = _week_start(week_offset)
+    return _list_matches(MatchScope(guild_id, start=start, end=end))
 
 
 def get_matches_for_season_week(season_id: int, week_number: int) -> list[dict]:
-    """Return all matches for a specific season week (1-indexed)."""
-    guild_id = get_season(season_id)["guild_id"]
-    start, end = get_season_week_range(season_id, week_number)
-    with _conn() as conn:
-        rows = conn.execute("""
-            SELECT
-                match_id,
-                start_time,
-                duration,
-                radiant_win,
-                radiant_score,
-                dire_score
-            FROM matches
-            WHERE guild_id = :guild_id
-              AND start_time BETWEEN :start AND :end
-            ORDER BY start_time DESC
-        """, {"guild_id": guild_id, "start": start, "end": end}).fetchall()
-    return [dict(r) for r in rows]
+    """Return all of a season's matches in one of its weeks."""
+    return _list_matches(season_week_scope(season_id, week_number))
 
 
 def latest_match_fetch(guild_id: int) -> str | None:
@@ -2993,16 +2826,7 @@ def get_latest_matches(guild_id: int, season_id: int | None = None) -> list[dict
     Falls back to the plain "most recent calendar week with a match" when no
     season is available at all (e.g. division not configured)."""
     if season_id:
-        week_number = get_current_season_week(season_id)
-        start, end = get_season_week_range(season_id, week_number)
-        with _conn() as conn:
-            rows = conn.execute("""
-                SELECT match_id, start_time, duration, radiant_win, radiant_score, dire_score
-                FROM matches
-                WHERE guild_id = :guild_id AND start_time BETWEEN :start AND :end
-                ORDER BY start_time DESC
-            """, {"guild_id": guild_id, "start": start, "end": end}).fetchall()
-        return [dict(r) for r in rows]
+        return _list_matches(season_week_scope(season_id, get_current_season_week(season_id)))
 
     with _conn() as conn:
         latest = conn.execute(
@@ -3017,13 +2841,7 @@ def get_latest_matches(guild_id: int, season_id: int | None = None) -> list[dict
         monday = monday.replace(hour=0, minute=0, second=0, microsecond=0)
         sunday = monday + timedelta(days=7) - timedelta(seconds=1)
 
-        rows = conn.execute("""
-            SELECT match_id, start_time, duration, radiant_win, radiant_score, dire_score
-            FROM matches
-            WHERE guild_id = :guild_id AND start_time BETWEEN :start AND :end
-            ORDER BY start_time DESC
-        """, {"guild_id": guild_id, "start": int(monday.timestamp()), "end": int(sunday.timestamp())}).fetchall()
-    return [dict(r) for r in rows]
+    return _list_matches(MatchScope(guild_id, start=int(monday.timestamp()), end=int(sunday.timestamp())))
 
 
 def get_all_matches(guild_id: int) -> list[dict]:
