@@ -1,8 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
 <h1>Seasons</h1>
-{% for division, seasons in by_div.items() %}
-<h2>{{ division }}</h2>
 <table>
   <thead><tr><th>Season</th><th>Starts</th><th>Signups</th></tr></thead>
   <tbody>
@@ -12,10 +10,9 @@
       <td>{{ s.season_start }}</td>
       <td>{% if s.signups_open %}<span class="tag open">Open</span> {% endif %}{% if s.signup_count %}{{ s.signup_count }}{% endif %}</td>
     </tr>
+  {% else %}
+    <tr><td colspan="3" class="muted">No seasons yet.</td></tr>
   {% endfor %}
   </tbody>
 </table>
-{% else %}
-<p class="muted">No seasons yet.</p>
-{% endfor %}
 {% endblock %}
