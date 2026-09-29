@@ -8,7 +8,8 @@ from datetime import datetime, timezone, timedelta
 
 from config import DISCORD_TOKEN, ADMIN_USER_ID, REGION_CLUSTERS, GAME_MODE_FILTERS, LOOKUP_CHANNEL_IDS
 from fetcher import fetch_and_store_matches_for_division
-from db import init_db, get_division, upsert_division, get_all_divisions, get_scold_channel
+from db import (init_db, get_division, upsert_division, get_all_divisions, get_scold_channel,
+                get_season, upsert_season, season_label)
 from formatters import format_leaderboard, format_player_stats, format_team_stats
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -42,51 +43,56 @@ PUBLIC_BY_DEFAULT_PARAM_DESCRIPTION = "Post the result in the channel; set False
 # ---------------------------------------------------------------------------
 
 async def _season_autocomplete(interaction: discord.Interaction, current: str):
-    """Autocomplete for every `season:` param. Values are the season_start date
-    (the key everything else is stored under); names are the friendly label."""
+    """Autocomplete for every `season:` param. Values are season ids (the
+    season's Dota league id); names are the friendly label."""
     from db import get_seasons, season_label, get_division
     try:
         seasons = get_seasons(interaction.guild_id)
         div = get_division(interaction.guild_id)
-        active = div["season_start"] if div else None
+        active = div["current_season_id"] if div else None
         out = []
         for s in seasons:
             name = season_label(s)
-            if s["season_start"] == active:
+            if s["id"] == active:
                 name += "  (current)"
-            if current.lower() in name.lower() or current in s["season_start"]:
-                out.append(app_commands.Choice(name=name[:100], value=s["season_start"]))
+            if (current.lower() in name.lower() or current in s["season_start"]
+                    or current in str(s["id"])):
+                out.append(app_commands.Choice(name=name[:100], value=str(s["id"])))
         return out[:25]
     except Exception:
         logger.exception("season autocomplete failed")
         return []
 
 
-def _resolve_season(interaction: discord.Interaction, season: str | None) -> tuple[str | None, str | None]:
-    """Turn a `season:` param into a season_start string.
+def _resolve_season(interaction: discord.Interaction, season: str | None) -> tuple[int | None, str | None]:
+    """Turn a `season:` param into a season id.
 
-    Returns (season_start, error). season=None means "the division's current
-    season", which is the pre-existing behaviour of every command.
+    Accepts what autocomplete sends (the id, i.e. the Dota league id), a
+    start date, or a season's name. Returns (season_id, error). season=None
+    means "the division's current season", which is the pre-existing
+    behaviour of every command.
     """
     division = _require_division(interaction)
     if not division:
         return None, "\u26a0\ufe0f No division configured. Ask an admin to run `/config` first."
     if not season:
-        return division["season_start"], None
-    from db import get_seasons
-    known = {s["season_start"] for s in get_seasons(interaction.guild_id)}
-    if season not in known:
-        opts = ", ".join(f"`{k}`" for k in sorted(known, reverse=True)[:8]) or "none on file"
-        return None, f"\u26a0\ufe0f Unknown season `{season}`. Known seasons: {opts}"
-    return season, None
+        return division["current_season_id"], None
+    from db import get_seasons, season_label
+    seasons = get_seasons(interaction.guild_id)
+    wanted = season.strip().lower()
+    for s in seasons:
+        if wanted in (str(s["id"]), s["season_start"], season_label(s).lower()):
+            return s["id"], None
+    opts = ", ".join(f"`{season_label(s)}`" for s in seasons[:8]) or "none on file"
+    return None, f"\u26a0\ufe0f Unknown season `{season}`. Known seasons: {opts}"
 
 
 @tree.command(name="config", description="[Admin] Configure this server's division settings")
 @app_commands.describe(
-    league="OpenDota league ID (find it in the league URL)",
+    league="Dota league ID of the current season (e.g. 20056 = RD2L Season 39)",
     region="Server region for filtering matches",
     mode="Game mode filter",
-    season_start="Season start date (YYYY-MM-DD format)",
+    season_start="That season's start date (YYYY-MM-DD format)",
     scold_channel="Channel where all messages get deleted with a scolding reply"
 )
 @app_commands.choices(
@@ -124,12 +130,14 @@ async def config(
             region_display = {"us_west": "US West", "us_east": "US East", "any": "Any Region"}.get(current["region"], current["region"])
             mode_display = "Captain's Mode" if current["game_mode"] == "cm" else "Ability Draft"
             scold_display = f"<#{current['scold_channel_id']}>" if current.get("scold_channel_id") else "None"
+            season = get_season(current["current_season_id"]) or {}
             await interaction.response.send_message(
                 f"**Current Division Config**\n"
-                f"League ID: `{current['league_id']}`\n"
+                f"League ID: `{current['current_season_id']}`"
+                + (f" ({season_label(season)})" if season else "") + "\n"
                 f"Region: `{region_display}`\n"
                 f"Mode: `{mode_display}`\n"
-                f"Season Start: `{current['season_start']}`\n"
+                f"Season Start: `{season.get('season_start', '?')}`\n"
                 f"Scold Channel: {scold_display}",
                 ephemeral=True
             )
@@ -153,10 +161,22 @@ async def config(
             return
     else:
         # Updating - use existing values for missing fields
-        league = league or current["league_id"]
+        league = league or current["current_season_id"]
         region = region or current["region"]
         mode = mode or current["game_mode"]
-        season_start = season_start or current["season_start"]
+
+    # A season is identified by its league id: `league` picks (or creates)
+    # the season, `season_start` sets that season's start date.
+    season = get_season(league)
+    if season and season["guild_id"] != guild_id:
+        await interaction.response.send_message(
+            f"⚠️ League `{league}` is already another server's season.", ephemeral=True)
+        return
+    season_start = season_start or (season["season_start"] if season else None)
+    if not season_start:
+        await interaction.response.send_message(
+            f"⚠️ League `{league}` is a new season here, so `season_start` is required.", ephemeral=True)
+        return
 
     # Resolve scold channel ID (use provided, or keep existing)
     scold_channel_id = scold_channel.id if scold_channel else (current.get("scold_channel_id") if current else None)
@@ -172,7 +192,12 @@ async def config(
         return
 
     # Save config
-    upsert_division(guild_id, league, region, mode, season_start, scold_channel_id)
+    try:
+        upsert_season(league, guild_id, season_start)
+    except ValueError as e:
+        await interaction.response.send_message(f"⚠️ {e}", ephemeral=True)
+        return
+    upsert_division(guild_id, region, mode, league, scold_channel_id)
 
     region_display = {"us_west": "US West", "us_east": "US East", "any": "Any Region"}.get(region, region)
     mode_display = "Captain's Mode" if mode == "cm" else "Ability Draft"
@@ -212,9 +237,10 @@ async def generate_weeks(interaction: discord.Interaction, weeks: int):
         return
 
     from db import generate_season_weeks
-    generate_season_weeks(interaction.guild_id, division["season_start"], weeks)
+    generate_season_weeks(division["current_season_id"], weeks)
     await interaction.response.send_message(
-        f"✅ Generated weeks 1–{weeks} as standard 7-day blocks from season start `{division['season_start']}`.\n"
+        f"✅ Generated weeks 1–{weeks} as standard 7-day blocks from season start "
+        f"`{get_season(division['current_season_id'])['season_start']}`.\n"
         f"Use `/set_week` to adjust any individual week (e.g. a bye), and `/list_weeks` to review.",
         ephemeral=True,
     )
@@ -247,8 +273,7 @@ async def set_week(interaction: discord.Interaction, week: int, start: str, end:
         return
 
     from db import upsert_season_week
-    upsert_season_week(
-        interaction.guild_id, division["season_start"], week,
+    upsert_season_week(division["current_season_id"], week,
         int(start_dt.timestamp()), int(end_dt.timestamp()),
     )
     await interaction.response.send_message(f"✅ Week {week} set to `{start}` → `{end}`.", ephemeral=True)
@@ -267,7 +292,7 @@ async def delete_week(interaction: discord.Interaction, week: int):
         return
 
     from db import delete_season_week
-    removed = delete_season_week(interaction.guild_id, division["season_start"], week)
+    removed = delete_season_week(division["current_season_id"], week)
     if removed:
         await interaction.response.send_message(f"✅ Removed week {week}'s explicit definition.", ephemeral=True)
     else:
@@ -282,7 +307,7 @@ async def list_weeks(interaction: discord.Interaction):
         return
 
     from db import get_season_weeks, get_current_season_week
-    weeks = get_season_weeks(interaction.guild_id, division["season_start"])
+    weeks = get_season_weeks(division["current_season_id"])
     if not weeks:
         await interaction.response.send_message(
             "No explicit weeks defined yet — week boundaries are calculated automatically from season_start.\n"
@@ -291,7 +316,7 @@ async def list_weeks(interaction: discord.Interaction):
         )
         return
 
-    current = get_current_season_week(interaction.guild_id, division["season_start"])
+    current = get_current_season_week(division["current_season_id"])
     lines = []
     for w in weeks:
         # Week boundaries are stored as UTC midnight Monday -> UTC Sunday
@@ -361,7 +386,7 @@ async def leaderboard(interaction: discord.Interaction, stat: app_commands.Choic
         return
 
     guild_id = interaction.guild_id
-    season_start, season_err = _resolve_season(interaction, season)
+    season_id, season_err = _resolve_season(interaction, season)
     if season_err:
         await interaction.followup.send(season_err, ephemeral=True)
         return
@@ -374,14 +399,14 @@ async def leaderboard(interaction: discord.Interaction, stat: app_commands.Choic
             # draft-relative stats stay season-scoped: a "deserved cost" or an
             # attendance rate only means anything measured against one draft.
             draft_relative = stat.value in ("value", "attendance")
-            stats = get_all_time_stats(guild_id, season_start,
+            stats = get_all_time_stats(guild_id, season_id,
                                        cross_season=not draft_relative)
             week_label = "All-Time (this season)" if draft_relative else "All-Time (all seasons)"
         else:
             # Blank week defaults to the current season week (not all-time —
             # pass week:-1 explicitly for that).
-            resolved_week = week if week is not None else get_current_season_week(guild_id, season_start)
-            stats = get_stats_for_season_week(guild_id, resolved_week, season_start)
+            resolved_week = week if week is not None else get_current_season_week(season_id)
+            stats = get_stats_for_season_week(season_id, resolved_week)
             week_label = f"Week {resolved_week}"
 
         # value/attendance lean on draft data: filter to drafted-only players
@@ -445,7 +470,7 @@ async def player(interaction: discord.Interaction, name: str, week: int = None, 
         return
 
     guild_id = interaction.guild_id
-    season_start, season_err = _resolve_season(interaction, season)
+    season_id, season_err = _resolve_season(interaction, season)
     if season_err:
         await interaction.followup.send(season_err, ephemeral=True)
         return
@@ -456,13 +481,13 @@ async def player(interaction: discord.Interaction, name: str, week: int = None, 
         if week == -1:
             # Matches /leaderboard: a player's all-time line spans every
             # season. Cost/value in the Draft block stay season-scoped.
-            stats = get_all_time_stats(guild_id, season_start, cross_season=True)
+            stats = get_all_time_stats(guild_id, season_id, cross_season=True)
             week_label = "All-Time (all seasons)"
         else:
             # Blank week defaults to the current season week (not all-time —
             # pass week:-1 explicitly for that).
-            week = week if week is not None else get_current_season_week(guild_id, season_start)
-            stats = get_stats_for_season_week(guild_id, week, season_start)
+            week = week if week is not None else get_current_season_week(season_id)
+            stats = get_stats_for_season_week(season_id, week)
             week_label = f"Week {week}"
 
         match_row = next((p for p in stats if p.get("account_id") == account_id), None)
@@ -476,9 +501,7 @@ async def player(interaction: discord.Interaction, name: str, week: int = None, 
         cache_row = get_rating_cache_row(account_id)
         if cache_row and cache_row.get("internal_rating") is not None:
             rating = cache_row["internal_rating"]
-            adjustments = compute_fantasy_adjusted_ratings(
-                interaction.guild_id, division["season_start"],
-            )
+            adjustments = compute_fantasy_adjusted_ratings(division["current_season_id"])
             effective_id = cache_row.get("alt_account_for") or account_id
             adj = adjustments.get(effective_id)
             if adj:
@@ -571,7 +594,7 @@ async def team_stats(interaction: discord.Interaction, name: str, season: str = 
         await interaction.followup.send("⚠️ No division configured.", ephemeral=True)
         return
 
-    season_start, season_err = _resolve_season(interaction, season)
+    season_id, season_err = _resolve_season(interaction, season)
     if season_err:
         await interaction.followup.send(season_err, ephemeral=True)
         return
@@ -582,16 +605,14 @@ async def team_stats(interaction: discord.Interaction, name: str, season: str = 
         return
 
     from db import get_player_costs, get_team_match_aggregates, get_captain_account_ids
-    costs = get_player_costs(interaction.guild_id, season_start)
+    costs = get_player_costs(season_id)
     target_cost = costs.get(account_id)
     captain: str | None = None
     if target_cost and target_cost.get("captain"):
         captain = target_cost["captain"]
     else:
         # Maybe they ARE a captain — look up reverse mapping.
-        captain_aids = get_captain_account_ids(
-            interaction.guild_id, season_start,
-        )
+        captain_aids = get_captain_account_ids(season_id)
         for cap_name, cap_aid in captain_aids.items():
             if cap_aid == account_id:
                 captain = cap_name
@@ -603,7 +624,7 @@ async def team_stats(interaction: discord.Interaction, name: str, season: str = 
             ephemeral=True,
         )
         return
-    team_aggs = get_team_match_aggregates(interaction.guild_id, season_start)
+    team_aggs = get_team_match_aggregates(season_id)
     target_agg = team_aggs.get(captain)
     if not target_agg:
         await interaction.followup.send(
@@ -613,7 +634,7 @@ async def team_stats(interaction: discord.Interaction, name: str, season: str = 
         return
 
     from team_metadata import get_team_info
-    team_label = get_team_info(captain, interaction.guild_id, season_start).get("team_name") or captain
+    team_label = get_team_info(captain, season_id).get("team_name") or captain
     embed = format_team_stats(
         team_label=team_label,
         target_agg=target_agg,
@@ -683,7 +704,7 @@ async def player_card(interaction: discord.Interaction, name: str):
     from formatters import _compute_strengths_weaknesses
     from streamcards import render_player_card, fetch_avatar
 
-    stats = get_all_time_stats(interaction.guild_id, division["season_start"])
+    stats = get_all_time_stats(interaction.guild_id, division["current_season_id"])
     target = next((s for s in stats if s.get("account_id") == account_id), None)
     if target is None:
         await interaction.followup.send(
@@ -698,9 +719,7 @@ async def player_card(interaction: discord.Interaction, name: str):
     cache_row = get_rating_cache_row(account_id)
     if cache_row and cache_row.get("internal_rating") is not None:
         rating = cache_row["internal_rating"]
-        adjustments = compute_fantasy_adjusted_ratings(
-            interaction.guild_id, division["season_start"],
-        )
+        adjustments = compute_fantasy_adjusted_ratings(division["current_season_id"])
         effective_id = cache_row.get("alt_account_for") or account_id
         adj = adjustments.get(effective_id)
         if adj:
@@ -763,13 +782,13 @@ async def team_card(interaction: discord.Interaction, name: str):
     from streamcards import render_team_card, fetch_avatar
     import asyncio
 
-    costs = get_player_costs(interaction.guild_id, division["season_start"])
+    costs = get_player_costs(division["current_season_id"])
     target_cost = costs.get(account_id)
     captain: str | None = None
     if target_cost and target_cost.get("captain"):
         captain = target_cost["captain"]
     else:
-        cap_aids = get_captain_account_ids(interaction.guild_id, division["season_start"])
+        cap_aids = get_captain_account_ids(division["current_season_id"])
         for cap_name, cap_aid in cap_aids.items():
             if cap_aid == account_id:
                 captain = cap_name
@@ -781,14 +800,14 @@ async def team_card(interaction: discord.Interaction, name: str):
         )
         return
 
-    team_aggs = get_team_match_aggregates(interaction.guild_id, division["season_start"])
+    team_aggs = get_team_match_aggregates(division["current_season_id"])
     target_agg = team_aggs.get(captain)
     if not target_agg:
         await interaction.followup.send(f"⚠️ Team `{captain}` has no game data yet.", ephemeral=True)
         return
 
     # Build member list (in roster order: drafted players then captain).
-    cap_aids = get_captain_account_ids(interaction.guild_id, division["season_start"])
+    cap_aids = get_captain_account_ids(division["current_season_id"])
     captain_aid = cap_aids.get(captain)
     drafted_aids = [aid for aid, c in costs.items() if c.get("captain") == captain]
     roster_aids = drafted_aids + ([captain_aid] if captain_aid else [])
@@ -796,7 +815,7 @@ async def team_card(interaction: discord.Interaction, name: str):
     # Per-player role_position comes from the stats query.
     stats_by_aid = {
         s["account_id"]: s
-        for s in get_all_time_stats(interaction.guild_id, division["season_start"])
+        for s in get_all_time_stats(interaction.guild_id, division["current_season_id"])
     }
 
     # Pull cache rows for names + avatars in one go.
@@ -831,7 +850,7 @@ async def team_card(interaction: discord.Interaction, name: str):
     losses = games - wins
 
     from team_metadata import get_team_info
-    info = get_team_info(captain, interaction.guild_id, division["season_start"])
+    info = get_team_info(captain, division["current_season_id"])
     team_label = info.get("team_name") or captain
     # Logo URL: RD2L first, captain avatar as fallback.
     logo_url = info.get("logo_url")
@@ -878,7 +897,7 @@ async def h2h_card(interaction: discord.Interaction, team1: str, team2: str, sea
     import asyncio
 
     guild_id = interaction.guild_id
-    season_start, season_err = _resolve_season(interaction, season)
+    season_id, season_err = _resolve_season(interaction, season)
     if season_err:
         await interaction.followup.send(season_err, ephemeral=True)
         return
@@ -888,10 +907,10 @@ async def h2h_card(interaction: discord.Interaction, team1: str, team2: str, sea
         aid, resolved_name, err = await _resolve_player_query(interaction, player_input)
         if err:
             return None, err
-        costs = get_player_costs(guild_id, season_start)
+        costs = get_player_costs(season_id)
         if costs.get(aid) and costs[aid].get("captain"):
             return costs[aid]["captain"], ""
-        cap_aids = get_captain_account_ids(guild_id, season_start)
+        cap_aids = get_captain_account_ids(season_id)
         for cap_name, cap_aid in cap_aids.items():
             if cap_aid == aid:
                 return cap_name, ""
@@ -906,16 +925,16 @@ async def h2h_card(interaction: discord.Interaction, team1: str, team2: str, sea
     if cap_a == cap_b:
         await interaction.followup.send("⚠️ Same team on both sides.", ephemeral=True); return
 
-    team_aggs = get_team_match_aggregates(guild_id, season_start)
+    team_aggs = get_team_match_aggregates(season_id)
     agg_a = team_aggs.get(cap_a)
     agg_b = team_aggs.get(cap_b)
     if not agg_a or not agg_b:
         await interaction.followup.send("⚠️ One of the teams has no match data yet.", ephemeral=True)
         return
 
-    costs = get_player_costs(guild_id, season_start)
-    cap_aids = get_captain_account_ids(guild_id, season_start)
-    stats_by_aid = {s["account_id"]: s for s in get_all_time_stats(guild_id, season_start)}
+    costs = get_player_costs(season_id)
+    cap_aids = get_captain_account_ids(season_id)
+    stats_by_aid = {s["account_id"]: s for s in get_all_time_stats(guild_id, season_id)}
 
     async def _build_members(captain: str) -> list[dict]:
         cap_aid = cap_aids.get(captain)
@@ -946,13 +965,13 @@ async def h2h_card(interaction: discord.Interaction, team1: str, team2: str, sea
     record_a = (int(agg_a.get("wins", 0) or 0), int((agg_a.get("games_played", 0) or 0) - (agg_a.get("wins", 0) or 0)))
     record_b = (int(agg_b.get("wins", 0) or 0), int((agg_b.get("games_played", 0) or 0) - (agg_b.get("wins", 0) or 0)))
 
-    history = get_head_to_head_matches(guild_id, season_start, cap_a, cap_b)
+    history = get_head_to_head_matches(season_id, cap_a, cap_b)
 
     # Map captain → real team name + logo URL (from RD2L). When a team has no
     # registered logo, fall back to the captain's Steam avatar.
     from team_metadata import get_team_info
-    info_a = get_team_info(cap_a, guild_id, season_start)
-    info_b = get_team_info(cap_b, guild_id, season_start)
+    info_a = get_team_info(cap_a, season_id)
+    info_b = get_team_info(cap_b, season_id)
 
     def _logo_url_for(info: dict, members: list[dict]) -> str | None:
         if info.get("logo_url"):
@@ -1009,7 +1028,7 @@ async def h2h_player(interaction: discord.Interaction, player1: str, player2: st
     if aid_a == aid_b:
         await interaction.followup.send("⚠️ Same player on both sides.", ephemeral=True); return
 
-    stats = get_all_time_stats(interaction.guild_id, division["season_start"])
+    stats = get_all_time_stats(interaction.guild_id, division["current_season_id"])
     row_a = next((s for s in stats if s.get("account_id") == aid_a), None)
     row_b = next((s for s in stats if s.get("account_id") == aid_b), None)
     if row_a is None or row_b is None:
@@ -1030,9 +1049,7 @@ async def h2h_player(interaction: discord.Interaction, player1: str, player2: st
     stat_rows = compute_h2h_stat_rows(row_a, row_b, pool, top_n=8)
 
     # Ratings: prefer fantasy-adjusted, fall back to raw internal_rating.
-    adjustments = compute_fantasy_adjusted_ratings(
-        interaction.guild_id, division["season_start"],
-    )
+    adjustments = compute_fantasy_adjusted_ratings(division["current_season_id"])
 
     def _rating_for(aid: int) -> int | None:
         cr = get_rating_cache_row(aid) or {}
@@ -1137,9 +1154,7 @@ async def lookup(interaction: discord.Interaction, query: str, force_refresh: bo
     adjustment_pct: float | None = None
     division = _require_division(interaction)
     if division:
-        adjustments = compute_fantasy_adjusted_ratings(
-            interaction.guild_id, division["season_start"],
-        )
+        adjustments = compute_fantasy_adjusted_ratings(division["current_season_id"])
         effective_id = (override or {}).get("alt_account_for") or account_id
         adj = adjustments.get(effective_id)
         if adj:
@@ -1696,9 +1711,7 @@ async def players(interaction: discord.Interaction, show_all: bool = False, debu
     division = _require_division(interaction)
     if division:
         from db import compute_fantasy_adjusted_ratings
-        adjustments = compute_fantasy_adjusted_ratings(
-            interaction.guild_id, division["season_start"],
-        )
+        adjustments = compute_fantasy_adjusted_ratings(division["current_season_id"])
         for r in rows:
             # Alt accounts route the fantasy adjustment through the main so
             # /players displays them at the same rating.
@@ -1738,7 +1751,7 @@ async def matches(interaction: discord.Interaction, week: int = None, player: st
         return
 
     guild_id = interaction.guild_id
-    season_start, season_err = _resolve_season(interaction, season)
+    season_id, season_err = _resolve_season(interaction, season)
     if season_err:
         await interaction.followup.send(season_err, ephemeral=True)
         return
@@ -1746,13 +1759,13 @@ async def matches(interaction: discord.Interaction, week: int = None, player: st
     from db import get_matches_for_season_week, get_latest_matches, get_all_matches, get_match_ids_for_player, get_current_season_week
 
     if week is None:
-        match_list = get_latest_matches(guild_id, season_start)
-        week_label = f"Week {get_current_season_week(guild_id, season_start)}"
+        match_list = get_latest_matches(guild_id, season_id)
+        week_label = f"Week {get_current_season_week(season_id)}"
     elif week == -1:
         match_list = get_all_matches(guild_id)
         week_label = "All Matches"
     else:
-        match_list = get_matches_for_season_week(guild_id, week, season_start)
+        match_list = get_matches_for_season_week(season_id, week)
         week_label = f"Week {week}"
 
     # Apply player filter if specified
@@ -1772,14 +1785,14 @@ async def matches(interaction: discord.Interaction, week: int = None, player: st
     # team fall back to Radiant/Dire in the formatter.
     from db import get_match_team_captains
     from team_metadata import get_team_info
-    side_captains = get_match_team_captains(guild_id, season_start, [m["match_id"] for m in match_list])
+    side_captains = get_match_team_captains(season_id, [m["match_id"] for m in match_list])
     team_names: dict[str, str] = {}
     for m in match_list:
         sides = side_captains.get(m["match_id"], {})
         for side in ("radiant", "dire"):
             cap = sides.get(side)
             if cap and cap not in team_names:
-                team_names[cap] = get_team_info(cap, guild_id, season_start).get("team_name") or cap
+                team_names[cap] = get_team_info(cap, season_id).get("team_name") or cap
             m[f"{side}_team"] = team_names.get(cap)
 
     from formatters import format_matches_list
@@ -1802,7 +1815,7 @@ async def summary(interaction: discord.Interaction, season: str = None, public: 
         return
 
     guild_id = interaction.guild_id
-    season_start, season_err = _resolve_season(interaction, season)
+    season_id, season_err = _resolve_season(interaction, season)
     if season_err:
         await interaction.followup.send(season_err, ephemeral=True)
         return
@@ -1812,10 +1825,10 @@ async def summary(interaction: discord.Interaction, season: str = None, public: 
     try:
         # Same current-week resolver /leaderboard, /player, and /matches use
         # for a blank week — one source of truth instead of a bespoke one.
-        current_week = get_current_season_week(guild_id, season_start)
-        week_stats_full = get_stats_for_season_week(guild_id, current_week, season_start)
+        current_week = get_current_season_week(season_id)
+        week_stats_full = get_stats_for_season_week(season_id, current_week)
         week_label_base = f"Week {current_week}"
-        alltime_stats_full = get_all_time_stats(guild_id, season_start)
+        alltime_stats_full = get_all_time_stats(guild_id, season_id)
 
         # Min-games qualification (50% of most-active player's count) applied per scope.
         week_max = max((s.get("games_played", 0) or 0) for s in week_stats_full) if week_stats_full else 0
@@ -1934,7 +1947,7 @@ async def hi_vs_low(interaction: discord.Interaction, players: str, public: bool
     division = _require_division(interaction)
     from db import get_rating_cache_row, compute_fantasy_adjusted_ratings
     adjustments = (
-        compute_fantasy_adjusted_ratings(interaction.guild_id, division["season_start"])
+        compute_fantasy_adjusted_ratings(division["current_season_id"])
         if division else {}
     )
 
@@ -2008,20 +2021,10 @@ async def tipjar(interaction: discord.Interaction):
     )
 
 
-def _season_week_start_preview(week_number: int, season_start_date: str) -> tuple[int, int]:
-    """Week boundaries without touching the DB — used by /start_new_season's
-    dry run so a preview never writes. Mirrors db._season_week_start."""
-    ss = datetime.strptime(season_start_date, "%Y-%m-%d").replace(
-        hour=0, minute=0, second=0, microsecond=0, tzinfo=timezone.utc)
-    monday = ss - timedelta(days=ss.weekday())
-    target = monday + timedelta(weeks=week_number - 1)
-    return int(target.timestamp()), int((target + timedelta(days=7) - timedelta(seconds=1)).timestamp())
-
-
 @tree.command(name="start_new_season",
               description="[Owner] Roll this division over to a new season: league, dates, weeks, rosters, teams")
 @app_commands.describe(
-    league="OpenDota league ID for the new season (e.g. 20056 = RD2L Season 39)",
+    league="Dota league ID for the new season — also its id (e.g. 20056 = RD2L Season 39)",
     season_start="First match day of the new season, YYYY-MM-DD",
     weeks="How many weeks to generate",
     first_week="Number the first week 0 (scrim week) or 1. Default 0.",
@@ -2066,23 +2069,30 @@ async def start_new_season(
         await interaction.followup.send(
             "\u26a0\ufe0f No division configured here yet \u2014 run `/config` first.", ephemeral=True)
         return
-    # Re-running against the season that's already active is a legitimate
-    # repair: every write below is an upsert, so it tops up whatever didn't
-    # land the first time (a costs CSV that failed to parse, say). Only refuse
-    # when there's genuinely nothing to do — same season AND no data sources.
-    same_season = current["season_start"] == season_start
+    # A season's id is its league id. Re-running against the season that's
+    # already active is a legitimate repair: every write below is an upsert,
+    # so it tops up whatever didn't land the first time (a costs CSV that
+    # failed to parse, say). Only refuse when there's genuinely nothing to
+    # do — same season AND no data sources.
+    season_id = league
+    previous = get_season(current["current_season_id"]) or {}
+    existing = get_season(season_id)
+    if existing and existing["guild_id"] != guild_id:
+        await interaction.followup.send(
+            f"\u26a0\ufe0f League `{league}` is already another server's season.", ephemeral=True)
+        return
+    same_season = current["current_season_id"] == season_id
     has_sources = bool(costs_url or costs_file or teams_url)
     if same_season and not has_sources and not dry_run:
         await interaction.followup.send(
-            f"\u26a0\ufe0f `{season_start}` is already the active season and you "
+            f"\u26a0\ufe0f League `{league}` is already the active season and you "
             "didn't pass `costs_file`/`costs_url`/`teams_url`, so there's nothing "
             "to do. Attach a roster CSV to top up an incomplete rollover.",
             ephemeral=True)
         return
 
-    from db import (upsert_division, generate_season_weeks, get_season_weeks,
-                    upsert_player_costs, upsert_season_teams, get_player_costs,
-                    upsert_season)
+    from db import (upsert_division, generate_season_weeks, _season_week_start,
+                    upsert_player_costs, upsert_season_teams, get_player_costs)
     from rd2l import (fetch_drafted_players_csv, parse_drafted_players_csv,
                       fetch_team_identities)
 
@@ -2130,7 +2140,7 @@ async def start_new_season(
 
     weeks_preview = []
     for n in range(first_week, first_week + weeks):
-        st, en = _season_week_start_preview(n - first_week + 1, season_start)
+        st, en = _season_week_start(n - first_week + 1, season_start)  # pure date math, no writes
         weeks_preview.append((n, st, en))
 
     def _d(ts):
@@ -2139,9 +2149,9 @@ async def start_new_season(
 
     teams_in_costs = len({d["captain"].strip().lower() for d in drafted})
     lines = [
-        f"**League** `{current['league_id']}` \u2192 `{league}`"
+        f"**League** `{current['current_season_id']}` \u2192 `{league}`"
         + (f"  ({season_label_val})" if season_label_val else ""),
-        f"**Season start** `{current['season_start']}` \u2192 `{season_start}`",
+        f"**Season start** `{previous.get('season_start', '?')}` \u2192 `{season_start}`",
         f"**Weeks** {first_week}\u2013{first_week + weeks - 1} "
         f"({_d(weeks_preview[0][1])} \u2192 {_d(weeks_preview[-1][2])})",
         f"**Rosters** {len(drafted)} drafted players across {teams_in_costs} teams"
@@ -2164,27 +2174,31 @@ async def start_new_season(
             ephemeral=True)
         return
 
-    # ---- writes
-    upsert_division(guild_id, league, current["region"], current["game_mode"],
-                    season_start, current.get("scold_channel_id"))
-    generate_season_weeks(guild_id, season_start, weeks, first_week=first_week)
+    # ---- writes (the season row first: everything else points at it)
+    try:
+        upsert_season(season_id, guild_id, season_start, label=season_label_val)
+    except ValueError as e:
+        await interaction.followup.send(f"\u26a0\ufe0f {e} Nothing was written.", ephemeral=True)
+        return
+    upsert_division(guild_id, current["region"], current["game_mode"],
+                    season_id, current.get("scold_channel_id"))
+    generate_season_weeks(season_id, weeks, first_week=first_week)
     if drafted:
-        upsert_player_costs(guild_id, season_start, [
+        upsert_player_costs(season_id, [
             {"account_id": d["account_id"], "cost": d["cost"], "captain": d["captain"]}
             for d in drafted
         ])
     if identities:
-        upsert_season_teams(guild_id, season_start, identities)
-    upsert_season(guild_id, season_start, league_id=league, label=season_label_val)
+        upsert_season_teams(season_id, identities)
 
     if same_season:
         # Repair run: report what the season now holds, not what a previous one kept.
-        now_costs = len(get_player_costs(guild_id, season_start))
-        tail = (f"\n\nSeason `{season_start}` now has **{now_costs}** roster rows. "
+        now_costs = len(get_player_costs(season_id))
+        tail = (f"\n\nLeague `{league}` now has **{now_costs}** roster rows. "
                 "Existing matches and weeks were left alone.")
     else:
-        prev_costs = len(get_player_costs(guild_id, current["season_start"]))
-        tail = (f"\n\nPrevious season `{current['season_start']}` kept its {prev_costs} "
+        prev_costs = len(get_player_costs(current["current_season_id"]))
+        tail = (f"\n\nPrevious season `{season_label(previous) if previous else current['current_season_id']}` kept its {prev_costs} "
                 "roster rows and all its matches \u2014 nothing was deleted.")
     await interaction.followup.send(
         ("\u2705 **Season topped up.**\n\n" if same_season

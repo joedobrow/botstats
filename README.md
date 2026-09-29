@@ -8,7 +8,7 @@ A multi-guild Discord bot that pulls match data from the [OpenDota API](https://
 
 | Feature | Details |
 |---|---|
-| **Per-server config** | Each Discord server (guild) configures its own league, region, mode, and season start via `/config`. |
+| **Per-server config** | Each Discord server (guild) configures its current season (by Dota league id), region, mode, and season start via `/config`. |
 | **Game modes** | Captain's Mode (`cm`) or Ability Draft (`ad`, game_mode 18). |
 | **Weekly auto-fetch** | Runs every Thursday at 09:00 UTC (early morning ET, after Wednesday league night). Pulls new matches and parses any new AD drafts. |
 | **SQLite caching** | Match data is stored locally on a persistent fly.io volume. |
@@ -80,6 +80,21 @@ League/region/mode are configured per Discord server at runtime via `/config`:
 /config league:<id> region:<us_west|us_east|any> mode:<cm|ad> season_start:<YYYY-MM-DD>
 ```
 
+### Seasons
+
+A season is identified by its **Dota league id** — RD2L Season 39 is `20056`,
+the same number OpenDota and Dotabuff use. `seasons.id` is that league id, and
+everything filed under a season (draft costs, weeks, team names, the
+division's current season, website signups and status) refers to it. The
+start date is an ordinary field, so it can change without moving anything.
+A division's current season is also the league the fetcher pulls.
+
+`/config league:<id>` makes that league the current season (`season_start`
+is required the first time a league is seen), and `/start_new_season` rolls a
+division over to a new league. Every `season:` option in Discord accepts the
+league id, the start date, or the season's name. The stats API endpoints take
+`?season_id=<league_id>`, or the older `?guild_id=...&season_start=YYYY-MM-DD`.
+
 You can also bind a `scold_channel` to silently delete posts there. Re-run `/config` to update.
 
 ### 5. Run locally
@@ -104,7 +119,7 @@ The bot ships with a `Dockerfile` and `fly.toml` configured for fly.io.
 
 The bot's web server (port 8080) also serves a small league site modeled on rd2l.gg, from the `web/` package:
 
-- `/seasons`, `/season/<guild_id>/<season_start>`: every season of every division, with Teams, Matches, Leaders and Signups tabs
+- `/seasons`, `/season/<league_id>`: every season of every division, with Teams, Matches, Leaders and Signups tabs
 - `/players`, `/player/<account_id>`: player search and profiles (league stats per season, heroes, recent matches)
 - `/match/<match_id>`: scoreboard with fantasy points
 - `/`: tiles for Sign-Up (active only while a season has signups open), Seasons, Players and Info (`/info` → Rules, About)

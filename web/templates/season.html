@@ -3,7 +3,7 @@
 {% block content %}
 <div class="page-head">
   <div>
-    <div class="muted small">{{ season.division }}{% if season.league_id %} · League {{ season.league_id }}{% endif %}</div>
+    <div class="muted small">{{ season.division }} · League {{ season.id }}</div>
     <h1>{{ season_name(season, csrf, is_admin, path) }}</h1>
     <div class="muted small">Starts {{ season_start(season, csrf, is_uberadmin, path) }} · {{ season_status(season) }}</div>
   </div>
@@ -119,8 +119,7 @@
         <td>
           <form method="post" action="/admin/signup/delete" class="inline" onsubmit="return confirm('Remove {{ s.name|e }} from signups?')">
             <input type="hidden" name="csrf" value="{{ csrf }}">
-            <input type="hidden" name="guild_id" value="{{ season.guild_id }}">
-            <input type="hidden" name="season_start" value="{{ season.season_start }}">
+            <input type="hidden" name="season_id" value="{{ season.id }}">
             <input type="hidden" name="account_id" value="{{ s.account_id }}">
             <button class="linklike danger">Remove</button>
           </form>

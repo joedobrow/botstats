@@ -31,8 +31,7 @@
   <span class="edit-view" tabindex="0" role="button" title="Click to rename">{{ season.label }}</span>
   <form class="edit-form" method="post" action="/admin/season/rename" hidden>
     <input type="hidden" name="csrf" value="{{ csrf }}">
-    <input type="hidden" name="guild_id" value="{{ season.guild_id }}">
-    <input type="hidden" name="season_start" value="{{ season.season_start }}">
+    <input type="hidden" name="season_id" value="{{ season.id }}">
     <input type="hidden" name="next" value="{{ next }}">
     <input type="text" name="label" value="{{ season.label }}" maxlength="80" required aria-label="Season name">
     <button class="primary">Save</button>
@@ -53,11 +52,9 @@
 {% if is_uberadmin %}
 <span class="editable">
   <span class="edit-view" tabindex="0" role="button" title="Click to change the start date">{{ season.season_start }}</span>
-  <form class="edit-form" method="post" action="/admin/season/start" hidden
-        onsubmit="return confirm('Move this season to the new start date? Its teams, costs, weeks and signups move with it.')">
+  <form class="edit-form" method="post" action="/admin/season/start" hidden>
     <input type="hidden" name="csrf" value="{{ csrf }}">
-    <input type="hidden" name="guild_id" value="{{ season.guild_id }}">
-    <input type="hidden" name="season_start" value="{{ season.season_start }}">
+    <input type="hidden" name="season_id" value="{{ season.id }}">
     <input type="hidden" name="next" value="{{ next }}">
     <input type="date" name="new_start" value="{{ season.season_start }}" required aria-label="Start date">
     <button class="primary">Save</button>

@@ -5,8 +5,9 @@
     python scripts/delete_divisions.py --guild 123 --yes    # one division by guild id
 
 Removes the division's config (so the weekly fetch stops pulling its
-matches), its seasons, weeks, teams, costs, rosters, website settings and
-signups, and its matches with their player rows, chat and draft picks.
+matches), its seasons and everything filed under them (weeks, teams, costs,
+website status and signups), its rosters, and its matches with their player
+rows, chat and draft picks.
 Player rating-cache rows and /set_player overrides are global, so they stay.
 
 Run from the repo root. On fly: back up first (scripts/pull_db.sh), then
@@ -23,13 +24,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from db import DB_PATH, _conn  # noqa: E402
 
-# Tables keyed by guild_id that belong to a division. Missing tables (e.g.
-# the site's, before the website first runs) are skipped.
-GUILD_TABLES = (
-    "seasons", "season_weeks", "season_teams", "player_costs", "guild_roster",
-    "guild_exclusions", "site_divisions", "site_season_settings", "site_signups",
-    "divisions",
-)
+# Tables keyed by season_id, by guild_id, or by match_id. Missing tables
+# (e.g. the site's, before the website first runs) are skipped.
+SEASON_TABLES = ("season_weeks", "season_teams", "player_costs", "site_season_settings", "site_signups")
+GUILD_TABLES = ("guild_roster", "guild_exclusions", "site_divisions", "divisions", "seasons")
 MATCH_TABLES = ("players", "chat_messages", "draft_picks")
 
 
@@ -52,9 +50,10 @@ def main() -> None:
         print(f"Database: {DB_PATH}")
         for g in sorted(guilds):
             n = conn.execute("SELECT COUNT(*) FROM matches WHERE guild_id = ?", (g,)).fetchone()[0]
-            div = conn.execute("SELECT league_id, game_mode FROM divisions WHERE guild_id = ?", (g,)).fetchone()
-            print(f"  guild {g}: {n} matches"
-                  + (f", league {div[0]}, mode {div[1]}" if div else ", no division row"))
+            div = conn.execute("SELECT current_season_id, game_mode FROM divisions WHERE guild_id = ?", (g,)).fetchone()
+            seasons = [r[0] for r in conn.execute("SELECT id FROM seasons WHERE guild_id = ?", (g,))]
+            print(f"  guild {g}: {n} matches, seasons (league ids) {seasons}"
+                  + (f", mode {div[1]}" if div else ", no division row"))
 
         if not args.yes:
             print("Dry run. Re-run with --yes to delete.")
@@ -66,6 +65,11 @@ def main() -> None:
         for t in MATCH_TABLES:
             if t in tables:
                 cur = conn.execute(f"DELETE FROM {t} WHERE {match_filter}", ids)
+                print(f"  {t}: {cur.rowcount} rows")
+        season_filter = f"season_id IN (SELECT id FROM seasons WHERE guild_id IN ({marks}))"
+        for t in SEASON_TABLES:
+            if t in tables:
+                cur = conn.execute(f"DELETE FROM {t} WHERE {season_filter}", ids)
                 print(f"  {t}: {cur.rowcount} rows")
         cur = conn.execute(f"DELETE FROM matches WHERE guild_id IN ({marks})", ids)
         print(f"  matches: {cur.rowcount} rows")

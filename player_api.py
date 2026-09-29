@@ -53,7 +53,7 @@ def build(account_id: int, guild_id: int | None) -> dict | None:
     if manual is None and base is not None and division:
         # Alts are judged on their main's history, as /player does.
         effective = cache.get("alt_account_for") or account_id
-        adj = compute_fantasy_adjusted_ratings(guild_id, division["season_start"]).get(effective)
+        adj = compute_fantasy_adjusted_ratings(division["current_season_id"]).get(effective)
         if adj:
             rating = adj["adjusted_rating"]
 
