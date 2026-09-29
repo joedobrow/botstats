@@ -41,3 +41,9 @@
 </span>
 {% else %}{{ season.label }}{% endif %}
 {%- endmacro %}
+
+{# Season status tag; "Signups open" links to the signup form. #}
+{% macro season_status(season) -%}
+{% if season.signups_open %}<a class="tag status-signups" href="{{ season_url(season) }}/signup">{{ season.status_label }}</a>
+{%- else %}<span class="tag status-{{ season.status }}">{{ season.status_label }}</span>{% endif %}
+{%- endmacro %}
