@@ -630,6 +630,9 @@ def create_app() -> web.Application:
     app.router.add_get("/api/costs",                  costs_api_handler)
     app.router.add_get("/api/season_stats",            season_stats_api_handler)
     app.router.add_get("/api/player/{account_id}",      player_api_handler)
+    # The league website (/, /seasons, /players, Steam login, signups, /admin).
+    from web.routes import setup as setup_site
+    setup_site(app)
     # Serve the rd2l logo + any other static assets from the assets/ dir.
     if ASSETS_DIR.exists():
         app.router.add_static("/assets/", path=str(ASSETS_DIR), show_index=False)

@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+{% from "macros.html" import player_link, team_cell, signup_button %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <div class="muted small">{{ season.division }}{% if season.league_id %} · League {{ season.league_id }}{% endif %}</div>
+    <h1>{{ season.label }}</h1>
+    <div class="muted small">Starts {{ season.season_start }}{% if season.signups_open %} · <span class="tag open">Signups open</span>{% endif %}</div>
+  </div>
+  <div>{{ signup_button(season, my_signup) }}</div>
+</div>
+
+<nav class="tabs">
+  {% for key, label in [("teams", "Teams"), ("matches", "Matches"), ("leaders", "Leaders"), ("signups", "Signups (" ~ season.signup_count ~ ")")] %}
+  <a href="?tab={{ key }}" {% if tab == key %}class="active"{% endif %}>{{ label }}</a>
+  {% endfor %}
+</nav>
+
+{% if tab == "teams" %}
+  {% if teams %}
+  <div class="cards">
+  {% for t in teams %}
+    <div class="card team">
+      <div class="team-head">
+        {% if t.logo_url %}<img class="logo" src="{{ t.logo_url }}" alt="">{% endif %}
+        <div>
+          <h3><a href="{{ team_url(season, t.captain) }}">{{ t.name }}</a></h3>
+          <div class="muted small">{{ t.wins }}–{{ t.losses }}</div>
+        </div>
+      </div>
+      <ul class="roster">
+        <li><span>{% if t.captain_account_id %}{{ player_link(t.captain_account_id, idents[t.captain_account_id].name or t.captain) }}{% else %}{{ t.captain }}{% endif %} <span class="tag">C</span></span></li>
+        {% for p in t.roster|sort(attribute="cost", reverse=True) if p.account_id != t.captain_account_id %}
+        <li><span>{{ player_link(p.account_id, idents[p.account_id].name) }}</span>{% if p.cost %}<span class="muted">${{ p.cost }}</span>{% endif %}</li>
+        {% endfor %}
+      </ul>
+    </div>
+  {% endfor %}
+  </div>
+  {% else %}
+  <p class="muted">Teams appear here once the draft is done.</p>
+  {% endif %}
+
+{% elif tab == "matches" %}
+  {% macro match_table(rows, with_teams) %}
+  <div class="scroll">
+  <table>
+    <thead><tr><th>Date</th>{% if with_teams %}<th>Radiant</th><th class="num">Score</th><th>Dire</th>{% else %}<th class="num">Score</th><th>Winner</th>{% endif %}<th class="num">Length</th><th></th></tr></thead>
+    <tbody>
+    {% for m in rows %}
+      <tr>
+        <td class="nowrap">{{ m.start_time|date("%b %-d") }}</td>
+        {% if with_teams %}
+        <td {% if m.radiant_win %}class="win"{% endif %}>{{ team_cell(season, m.radiant_team, team_names) }}</td>
+        <td class="num">{{ m.radiant_score }}–{{ m.dire_score }}</td>
+        <td {% if not m.radiant_win %}class="win"{% endif %}>{{ team_cell(season, m.dire_team, team_names) }}</td>
+        {% else %}
+        <td class="num">{{ m.radiant_score }}–{{ m.dire_score }}</td>
+        <td>{{ "Radiant" if m.radiant_win else "Dire" }}</td>
+        {% endif %}
+        <td class="num">{{ m.duration|duration }}</td>
+        <td><a href="/match/{{ m.match_id }}">Details</a></td>
+      </tr>
+    {% else %}
+      <tr><td colspan="6" class="muted">No matches yet.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% endmacro %}
+  {{ match_table(matches, True) }}
+  {% if other_matches %}
+  <h2>Other games</h2>
+  <p class="muted small">Games in this league where neither side was a drafted roster, such as inhouses and pickup games.</p>
+  {{ match_table(other_matches, False) }}
+  {% endif %}
+
+{% elif tab == "leaders" %}
+  <div class="scroll">
+  <table>
+    <thead><tr><th>#</th><th>Player</th><th class="num">Games</th><th class="num">W–L</th><th class="num">Fantasy</th><th class="num">KDA</th><th class="num">GPM</th><th class="num">XPM</th><th class="num">Hero dmg</th></tr></thead>
+    <tbody>
+    {% for p in leaders %}
+      <tr>
+        <td class="muted">{{ loop.index }}</td>
+        <td>{{ player_link(p.account_id, p.name) }}</td>
+        <td class="num">{{ p.games_played }}</td>
+        <td class="num">{{ p.wins }}–{{ p.games_played - p.wins }}</td>
+        <td class="num">{{ "%.1f"|format(p.fantasy_points) }}</td>
+        <td class="num">{{ "%.2f"|format(p.kda) }}</td>
+        <td class="num">{{ p.gpm|round|int }}</td>
+        <td class="num">{{ p.xpm|round|int }}</td>
+        <td class="num">{{ "{:,}".format(p.hero_damage|round|int) }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="9" class="muted">No matches yet.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+
+{% elif tab == "signups" %}
+  {% if is_admin %}<p class="small"><a href="{{ season_url(season) }}/signups.csv">Download signups as CSV</a></p>{% endif %}
+  <div class="scroll">
+  <table>
+    <thead><tr><th>#</th><th>Player</th><th>Badge</th><th class="num">MMR</th><th>Positions</th><th>Captain?</th><th>About</th>{% if is_admin %}<th>Discord</th><th></th>{% endif %}</tr></thead>
+    <tbody>
+    {% for s in signups %}
+      <tr>
+        <td class="muted">{{ loop.index }}</td>
+        <td>{{ player_link(s.account_id, s.name) }}</td>
+        <td>{{ s.badge or "" }}</td>
+        <td class="num">{{ s.mmr or "" }}</td>
+        <td>{{ s.positions|join(", ") }}</td>
+        <td>{{ s.captain|capitalize }}</td>
+        <td class="statement">{{ s.statement or "" }}</td>
+        {% if is_admin %}
+        <td>{{ s.discord or "" }}</td>
+        <td>
+          <form method="post" action="/admin/signup/delete" class="inline" onsubmit="return confirm('Remove {{ s.name|e }} from signups?')">
+            <input type="hidden" name="csrf" value="{{ csrf }}">
+            <input type="hidden" name="guild_id" value="{{ season.guild_id }}">
+            <input type="hidden" name="season_start" value="{{ season.season_start }}">
+            <input type="hidden" name="account_id" value="{{ s.account_id }}">
+            <button class="linklike danger">Remove</button>
+          </form>
+        </td>
+        {% endif %}
+      </tr>
+    {% else %}
+      <tr><td colspan="9" class="muted">No signups yet.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+{% endif %}
+{% endblock %}

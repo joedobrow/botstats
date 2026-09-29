@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Admin</h1>
+
+<h2>Seasons</h2>
+<div class="scroll">
+<table>
+  <thead><tr><th>Season</th><th>Division</th><th>Starts</th><th class="num">Signups</th><th>Signups open?</th></tr></thead>
+  <tbody>
+  {% for s in seasons %}
+    <tr>
+      <td><a href="{{ season_url(s) }}">{{ s.label }}</a></td>
+      <td>{{ s.division }}</td>
+      <td>{{ s.season_start }}</td>
+      <td class="num"><a href="{{ season_url(s) }}?tab=signups">{{ s.signup_count }}</a></td>
+      <td>
+        <form method="post" action="/admin/signups" class="inline">
+          <input type="hidden" name="csrf" value="{{ csrf }}">
+          <input type="hidden" name="guild_id" value="{{ s.guild_id }}">
+          <input type="hidden" name="season_start" value="{{ s.season_start }}">
+          <input type="hidden" name="open" value="{{ 0 if s.signups_open else 1 }}">
+          {% if s.signups_open %}<span class="tag open">Open</span> <button class="linklike">Close</button>{% else %}<button class="linklike">Open signups</button>{% endif %}
+        </form>
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+
+<h3>New season</h3>
+<p class="muted small">This also registers the season with the bot, the same as <code>/start_new_season</code> does. Team drafts, costs and match data still come from the bot.</p>
+<form method="post" action="/admin/season" class="form grid">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <label>Division
+    <select name="guild_id" required>
+      {% for gid, name in divisions.items() %}<option value="{{ gid }}">{{ name }}</option>{% endfor %}
+    </select>
+  </label>
+  <label>Start date <input type="date" name="season_start" required></label>
+  <label>Name <input type="text" name="label" placeholder="RD2L Season 40" required></label>
+  <label>League ID <span class="muted small">(optional)</span> <input type="number" name="league_id"></label>
+  <div class="actions"><button class="primary">Create season</button></div>
+</form>
+
+<h2>Division names</h2>
+<div class="scroll">
+<table>
+  <thead><tr><th>Name</th><th>League</th><th>Region</th><th>Mode</th><th>Discord server</th></tr></thead>
+  <tbody>
+  {% for d in div_rows %}
+    <tr>
+      <td>
+        <form method="post" action="/admin/division" class="inline">
+          <input type="hidden" name="csrf" value="{{ csrf }}">
+          <input type="hidden" name="guild_id" value="{{ d.guild_id }}">
+          <input type="text" name="name" value="{{ divisions[d.guild_id] }}" maxlength="80" aria-label="Division name">
+          <button>Rename</button>
+        </form>
+      </td>
+      <td>{{ d.league_id }}</td><td>{{ d.region }}</td><td>{{ d.game_mode|upper }}</td><td class="muted small">{{ d.guild_id }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+
+<h2>Site text</h2>
+<p class="muted small">Plain text. Leave a blank line between paragraphs.</p>
+{% for key, label, value in [("home_intro", "Home page intro", home_intro), ("rules", "Rules page", rules)] %}
+<form method="post" action="/admin/text" class="form">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <input type="hidden" name="key" value="{{ key }}">
+  <label>{{ label }}<textarea name="value" rows="{{ 12 if key == 'rules' else 5 }}">{{ value }}</textarea></label>
+  <div class="actions"><button>Save {{ label|lower }}</button></div>
+</form>
+{% endfor %}
+{% endblock %}

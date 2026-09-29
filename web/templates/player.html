@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% from "macros.html" import hero_icon, team_cell %}
+{% block content %}
+<div class="profile-head">
+  {% if ident.avatar_url %}<img class="avatar big" src="{{ ident.avatar_url }}" alt="">{% endif %}
+  <div>
+    <h1>{{ ident.name or account_id }}</h1>
+    <div class="muted">
+      {% if ident.badge %}{{ ident.badge }} · {% endif %}
+      <a href="https://www.dotabuff.com/players/{{ account_id }}" rel="noopener">Dotabuff</a> ·
+      <a href="https://www.opendota.com/players/{{ account_id }}" rel="noopener">OpenDota</a> ·
+      <a href="https://windrun.io/players/{{ account_id }}" rel="noopener">Windrun</a>
+    </div>
+  </div>
+</div>
+
+{% if overall.games_played %}
+<div class="stat-row">
+  <div><span class="stat">{{ overall.games_played }}</span><span class="label">League games</span></div>
+  <div><span class="stat">{{ (100 * overall.wins / overall.games_played)|round|int }}%</span><span class="label">Win rate</span></div>
+  <div><span class="stat">{{ "%.2f"|format(overall.kda) }}</span><span class="label">KDA</span></div>
+  <div><span class="stat">{{ overall.gpm|round|int }}</span><span class="label">GPM</span></div>
+  <div><span class="stat">{{ "%.1f"|format(overall.fantasy_points) }}</span><span class="label">Fantasy pts</span></div>
+</div>
+
+<h2>Seasons</h2>
+<div class="scroll">
+<table>
+  <thead><tr><th>Season</th><th>Team</th><th class="num">Cost</th><th class="num">Games</th><th class="num">W–L</th><th class="num">Fantasy</th><th class="num">KDA</th><th class="num">GPM</th></tr></thead>
+  <tbody>
+  {% for r in season_rows %}
+    <tr>
+      <td><a href="{{ season_url(r.season) }}">{{ r.season.label }}</a><div class="muted small">{{ r.season.division }}</div></td>
+      <td>{% if r.captain %}<a href="{{ team_url(r.season, r.captain) }}">{{ r.team_name }}</a>{% else %}<span class="muted">—</span>{% endif %}</td>
+      <td class="num">{% if r.cost %}${{ r.cost }}{% endif %}</td>
+      <td class="num">{{ r.stats.games_played }}</td>
+      <td class="num">{{ r.stats.wins }}–{{ r.stats.games_played - r.stats.wins }}</td>
+      <td class="num">{{ "%.1f"|format(r.stats.fantasy_points) }}</td>
+      <td class="num">{{ "%.2f"|format(r.stats.kda) }}</td>
+      <td class="num">{{ r.stats.gpm|round|int }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+
+<h2>Most played heroes</h2>
+<div class="hero-list">
+{% for h in heroes %}
+  <div class="hero-chip">{{ hero_icon(h.hero) }}<span>{{ h.hero.name }}</span><span class="muted small">{{ h.games }} · {{ h.wins }}W</span></div>
+{% endfor %}
+</div>
+
+<h2>Recent matches</h2>
+<div class="scroll">
+<table>
+  <thead><tr><th>Date</th><th>Hero</th><th>Result</th><th class="num">K/D/A</th><th class="num">GPM</th><th class="num">Length</th><th>Season</th></tr></thead>
+  <tbody>
+  {% for m in matches %}
+    <tr>
+      <td><a href="/match/{{ m.match_id }}">{{ m.start_time|date("%b %-d, %Y") }}</a></td>
+      <td class="with-avatar">{{ hero_icon(m.hero) }}{{ m.hero.name }}</td>
+      <td class="{{ 'win' if m.won else 'loss' }}">{{ "Win" if m.won else "Loss" }}</td>
+      <td class="num">{{ m.kills }}/{{ m.deaths }}/{{ m.assists }}</td>
+      <td class="num">{{ m.gpm|round|int }}</td>
+      <td class="num">{{ m.match_duration|duration }}</td>
+      <td class="small">{% if m.season %}<a href="{{ season_url(m.season) }}">{{ m.season.label }}</a>{% endif %}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+<p class="muted">No league matches recorded for this player yet.</p>
+{% endif %}
+{% endblock %}

@@ -35,6 +35,7 @@ A multi-guild Discord bot that pulls match data from the [OpenDota API](https://
 ├── opendota_lookup.py# Resolve picks → ability/hero names via OpenDota
 ├── parser/           # Go (manta) replay parser binary source
 ├── botstats/         # Lightweight web server for AD helper overlay
+├── web/              # League website (Steam login, signups, season/player pages)
 ├── scripts/          # One-off analysis/maintenance scripts (run from repo root)
 ├── data/             # Local CSV exports and analysis data (not shipped in image)
 ├── Dockerfile        # Two-stage build: Go parser + Python bot
@@ -96,6 +97,32 @@ The bot ships with a `Dockerfile` and `fly.toml` configured for fly.io.
 1. `fly launch` (or `fly deploy` if the app already exists).
 2. Set secrets: `fly secrets set DISCORD_TOKEN=... OPENDOTA_API_KEY=... STEAM_API_KEY=... ADMIN_USER_ID=...`
 3. The `[mounts]` block in `fly.toml` provisions a persistent volume at `/data`, where SQLite lives. Don't delete it.
+
+---
+
+## League Website
+
+The bot's web server (port 8080) also serves a small league site modeled on rd2l.gg, from the `web/` package:
+
+- `/seasons`, `/season/<guild_id>/<season_start>`: every season of every division, with Teams, Matches, Leaders and Signups tabs
+- `/players`, `/player/<account_id>`: player search and profiles (league stats per season, heroes, recent matches)
+- `/match/<match_id>`: scoreboard with fantasy points
+- `/login`: Steam sign-in; logged-in players can sign up for seasons with open signups, and manage their signups at `/me`
+- `/admin`: create seasons, open or close signups, rename divisions, edit the home and rules text, download signups as CSV
+
+It reads the bot's own tables (a team is the captain's drafted roster in `player_costs`, and a match side belongs to a team when three or more of its roster played) and keeps its own data in `site_*` tables. Public pages show stats and ranked badges only, never internal or windrun ratings.
+
+| Variable | Description |
+|---|---|
+| `SITE_ADMIN_STEAM_IDS` | Comma-separated Steam64 or Dota account IDs allowed into `/admin` |
+| `SITE_BASE_URL` | Public URL, e.g. `https://dota-bot.fly.dev`. Used for the Steam return URL; defaults to the request's host |
+| `STEAM_API_KEY` | Already used by the bot; also fills in Steam names and avatars at login |
+
+Run just the site locally, on a copy of the database:
+
+```bash
+DISCORD_TOKEN=dev DB_PATH=/path/to/copy.db SITE_ADMIN_STEAM_IDS=<your id> python -m web 8765
+```
 
 ---
 
