@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% from "macros.html" import tile %}
 {% block content %}
-<div class="tiles">
+<div class="tiles big">
   {{ tile("/signup", "Sign-Up", "Open now" if signups_open else "Signups are closed", disabled=not signups_open) }}
   {{ tile("/seasons", "Seasons") }}
   {{ tile("/players", "Players") }}

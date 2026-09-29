@@ -73,7 +73,9 @@ env.globals.update(season_url=season_url, team_url=team_url, hero=store.hero,
 
 def render(request: web.Request, template: str, status: int = 200, **ctx) -> web.Response:
     ctx.update(user=request.get("user"), is_admin=request.get("is_admin", False),
-               csrf=request.get("csrf", ""), path=request.path)
+               csrf=request.get("csrf", ""), path=request.path,
+               # Changes whenever the stylesheet does, so browsers never keep a stale copy.
+               css_version=int((STATIC_DIR / "style.css").stat().st_mtime))
     html = env.get_template(template).render(**ctx)
     return web.Response(text=html, content_type="text/html", status=status)
 
@@ -410,7 +412,9 @@ async def signup_submit(request: web.Request):
 
 @routes.get("/admin")
 async def admin_page(request: web.Request):
-    _require_admin(request)
+    # The top bar links here for everyone, so explain instead of refusing.
+    if not request.get("is_admin"):
+        return render(request, "admin_denied.html", title="Admin")
     divisions = store.division_names()
     with db._conn() as conn:
         div_rows = [dict(r) for r in conn.execute("SELECT * FROM divisions")]

@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Admin</h1>
+{% if not user %}
+<p class="muted">Log in with an admin's Steam account to manage the league.</p>
+<p><a class="button primary" href="/login?next=/admin">Log in with Steam</a></p>
+{% else %}
+<p>Your account isn't a league admin. If you should be, send an admin your account ID: <strong>{{ user.account_id }}</strong></p>
+{% endif %}
+{% endblock %}
