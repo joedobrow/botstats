@@ -87,7 +87,10 @@ the same number OpenDota and Dotabuff use. `seasons.id` is that league id, and
 everything filed under a season (draft costs, weeks, team names, the
 division's current season, website signups and status) refers to it. The
 start date is an ordinary field, so it can change without moving anything.
-A division's current season is also the league the fetcher pulls.
+A division's current season is also the league the fetcher pulls, and a
+season's matches are exactly the matches played in its league — every match
+records its league id — rather than a date range. Weeks are date ranges
+within that.
 
 `/config league:<id>` makes that league the current season (`season_start`
 is required the first time a league is seen), and `/start_new_season` rolls a

@@ -9,7 +9,7 @@ from datetime import datetime, timezone, timedelta
 from config import DISCORD_TOKEN, ADMIN_USER_ID, REGION_CLUSTERS, GAME_MODE_FILTERS, LOOKUP_CHANNEL_IDS
 from fetcher import fetch_and_store_matches_for_division
 from db import (init_db, get_division, upsert_division, get_all_divisions, get_scold_channel,
-                get_season, upsert_season, season_label)
+                get_season, upsert_season, season_label, ranked)
 from formatters import format_leaderboard, format_player_stats, format_team_stats
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -399,8 +399,8 @@ async def leaderboard(interaction: discord.Interaction, stat: app_commands.Choic
             # draft-relative stats stay season-scoped: a "deserved cost" or an
             # attendance rate only means anything measured against one draft.
             draft_relative = stat.value in ("value", "attendance")
-            stats = get_all_time_stats(guild_id, season_id,
-                                       cross_season=not draft_relative)
+            stats = ranked(get_all_time_stats(guild_id, season_id,
+                                              cross_season=not draft_relative))
             week_label = "All-Time (this season)" if draft_relative else "All-Time (all seasons)"
         else:
             # Blank week defaults to the current season week (not all-time —
@@ -562,7 +562,7 @@ async def player(interaction: discord.Interaction, name: str, week: int = None, 
             return
 
         # Pool of league players with enough games to give meaningful percentiles.
-        qualified_pool = [s for s in stats if (s.get("games_played") or 0) >= 5]
+        qualified_pool = [s for s in ranked(stats) if (s.get("games_played") or 0) >= 5]
         embed = format_player_stats(
             match_row, week_label=week_label, debug=debug, rating=rating,
             qualified_pool=qualified_pool,
@@ -726,7 +726,7 @@ async def player_card(interaction: discord.Interaction, name: str):
             rating = adj["adjusted_rating"]
 
     # Strengths/weaknesses (max 3 each)
-    pool = [s for s in stats if (s.get("games_played") or 0) >= 5]
+    pool = [s for s in ranked(stats) if (s.get("games_played") or 0) >= 5]
     strengths, weaknesses = _compute_strengths_weaknesses(target, pool)
     strengths = [_clean_card_line(s) for s in strengths[:3]]
     weaknesses = [_clean_card_line(s) for s in weaknesses[:3]]
@@ -1041,7 +1041,7 @@ async def h2h_player(interaction: discord.Interaction, player1: str, player2: st
     # Rank stats by |z-diff| across a 5-game-minimum pool. Both target players
     # are included in the pool regardless of games played so we never miss
     # a stat because they're new.
-    pool = [s for s in stats if (s.get("games_played") or 0) >= 5]
+    pool = [s for s in ranked(stats) if (s.get("games_played") or 0) >= 5]
     pool_ids = {s["account_id"] for s in pool}
     for r in (row_a, row_b):
         if r["account_id"] not in pool_ids:
@@ -1828,7 +1828,7 @@ async def summary(interaction: discord.Interaction, season: str = None, public: 
         current_week = get_current_season_week(season_id)
         week_stats_full = get_stats_for_season_week(season_id, current_week)
         week_label_base = f"Week {current_week}"
-        alltime_stats_full = get_all_time_stats(guild_id, season_id)
+        alltime_stats_full = ranked(get_all_time_stats(guild_id, season_id))
 
         # Min-games qualification (50% of most-active player's count) applied per scope.
         week_max = max((s.get("games_played", 0) or 0) for s in week_stats_full) if week_stats_full else 0
