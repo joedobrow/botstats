@@ -117,7 +117,7 @@ It reads the bot's own tables (a team is the captain's drafted roster in `player
 |---|---|
 | `SITE_ADMIN_STEAM_IDS` | Comma-separated Steam64 or Dota account IDs allowed into `/admin` |
 | `SITE_BASE_URL` | Public URL, e.g. `https://dota-bot.fly.dev`. Used for the Steam return URL; defaults to the request's host |
-| `STEAM_API_KEY` | Already used by the bot; also fills in Steam names and avatars at login |
+| `STEAM_API_KEY` | Already used by the bot; the site also uses it for Steam names and avatars at login, and to refresh every player's current Steam name once a week (about 3 requests) |
 
 Run just the site locally, on a copy of the database:
 
