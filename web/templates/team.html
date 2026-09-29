@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% from "macros.html" import player_link, team_cell %}
+{% block content %}
+<p class="small"><a href="{{ season_url(season) }}">← {{ season.label }}</a></p>
+<div class="team-head big">
+  {% if team.logo_url %}<img class="logo" src="{{ team.logo_url }}" alt="">{% endif %}
+  <div>
+    <h1>{{ team.name }}</h1>
+    <div class="muted">Captain {{ team.captain }} · {{ team.wins }}–{{ team.losses }}</div>
+  </div>
+</div>
+
+<h2>Roster</h2>
+<div class="scroll">
+<table>
+  <thead><tr><th>Player</th><th class="num">Cost</th><th class="num">Games</th><th class="num">W–L</th><th class="num">Fantasy</th><th class="num">KDA</th><th class="num">GPM</th></tr></thead>
+  <tbody>
+  {% set members = ([{"account_id": team.captain_account_id, "cost": None, "is_captain": True}] if team.captain_account_id else []) + team.roster|sort(attribute="cost", reverse=True)|list %}
+  {% for p in members if p.is_captain or p.account_id != team.captain_account_id %}
+    {% set s = stats.get(p.account_id) %}
+    <tr>
+      <td>{{ player_link(p.account_id, idents[p.account_id].name) }}{% if p.is_captain %} <span class="tag">C</span>{% endif %}</td>
+      <td class="num">{% if p.cost %}${{ p.cost }}{% endif %}</td>
+      {% if s %}
+      <td class="num">{{ s.games_played }}</td>
+      <td class="num">{{ s.wins }}–{{ s.games_played - s.wins }}</td>
+      <td class="num">{{ "%.1f"|format(s.fantasy_points) }}</td>
+      <td class="num">{{ "%.2f"|format(s.kda) }}</td>
+      <td class="num">{{ s.gpm|round|int }}</td>
+      {% else %}
+      <td class="num muted" colspan="5">No games</td>
+      {% endif %}
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+
+<h2>Matches</h2>
+<table>
+  <thead><tr><th>Date</th><th>Opponent</th><th>Result</th><th class="num">Length</th><th></th></tr></thead>
+  <tbody>
+  {% for m in matches %}
+    {% set on_radiant = m.radiant_team == team.captain %}
+    {% set won = (m.radiant_win and on_radiant) or (not m.radiant_win and not on_radiant) %}
+    <tr>
+      <td>{{ m.start_time|date("%b %-d") }}</td>
+      <td>{{ team_cell(season, m.dire_team if on_radiant else m.radiant_team, team_names) }}</td>
+      <td class="{{ 'win' if won else 'loss' }}">{{ "Win" if won else "Loss" }}</td>
+      <td class="num">{{ m.duration|duration }}</td>
+      <td><a href="/match/{{ m.match_id }}">Details</a></td>
+    </tr>
+  {% else %}
+    <tr><td colspan="5" class="muted">No matches yet.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

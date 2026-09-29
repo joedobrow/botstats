@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="hero-banner">
+  <h1>Welcome to RD2L</h1>
+  {% for p in intro|paragraphs %}<p>{{ p }}</p>{% endfor %}
+</section>
+
+{% if open_seasons %}
+<h2>Signups open</h2>
+<div class="cards">
+{% for s in open_seasons %}
+  <div class="card">
+    <div class="muted small">{{ s.division }}</div>
+    <h3><a href="{{ season_url(s) }}">{{ s.label }}</a></h3>
+    <p class="small">{{ s.signup_count }} signed up so far</p>
+    <a class="button primary" href="{{ season_url(s) }}/signup">Sign up</a>
+  </div>
+{% endfor %}
+</div>
+{% endif %}
+
+<h2>Recent seasons</h2>
+<table>
+  <thead><tr><th>Season</th><th>Division</th><th>Starts</th></tr></thead>
+  <tbody>
+  {% for s in recent %}
+    <tr><td><a href="{{ season_url(s) }}">{{ s.label }}</a></td><td>{{ s.division }}</td><td>{{ s.season_start }}</td></tr>
+  {% else %}
+    <tr><td colspan="3" class="muted">No seasons yet.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

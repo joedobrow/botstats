@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% from "macros.html" import player_link %}
+{% block content %}
+<h1>Players</h1>
+<form method="get" class="search">
+  <input type="search" name="q" value="{{ q }}" placeholder="Search by name or account ID" aria-label="Search players">
+  <button>Search</button>
+</form>
+<table>
+  <thead><tr><th>Player</th><th>Badge</th><th class="num">League games</th><th class="num">Win rate</th></tr></thead>
+  <tbody>
+  {% for p in players %}
+    <tr>
+      <td class="with-avatar">{% if p.avatar_url %}<img class="avatar" src="{{ p.avatar_url }}" alt="">{% endif %}{{ player_link(p.account_id, p.name) }}</td>
+      <td>{{ p.badge or "" }}</td>
+      <td class="num">{{ p.games }}</td>
+      <td class="num">{% if p.games %}{{ (100 * p.wins / p.games)|round|int }}%{% endif %}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="4" class="muted">No players found.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}
