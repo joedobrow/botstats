@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% from "macros.html" import tile %}
+{% block content %}
+<h1>Sign up</h1>
+{% if open_seasons %}
+<p class="muted">Signups are open for more than one season. Pick one.</p>
+<div class="tiles">
+  {% for s in open_seasons %}{{ tile(season_url(s) ~ "/signup", s.label, s.division) }}{% endfor %}
+</div>
+{% else %}
+<p class="muted">Signups are closed right now. Check back when the next season opens.</p>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block content %}
+<p class="small"><a href="/info">← Info</a></p>
+<h1>{{ title }}</h1>
+<div class="prose">
+{% for p in text|paragraphs %}<p>{{ p }}</p>{% endfor %}
+</div>
+{% endblock %}

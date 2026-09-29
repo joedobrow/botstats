@@ -67,7 +67,7 @@
 
 <h2>Site text</h2>
 <p class="muted small">Plain text. Leave a blank line between paragraphs.</p>
-{% for key, label, value in [("home_intro", "Home page intro", home_intro), ("rules", "Rules page", rules)] %}
+{% for key, label, value in [("about", "About page", about), ("rules", "Rules page", rules)] %}
 <form method="post" action="/admin/text" class="form">
   <input type="hidden" name="csrf" value="{{ csrf }}">
   <input type="hidden" name="key" value="{{ key }}">

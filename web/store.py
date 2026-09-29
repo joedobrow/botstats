@@ -520,10 +520,10 @@ def match_detail(match_id: int) -> dict | None:
 # ---------------------------------------------------------------------------
 
 DEFAULT_TEXT = {
-    "home_intro": (
+    "about": (
         "A casual Dota 2 league. Sign up as an individual, captains draft teams, "
         "and teams play a weekly regular season followed by playoffs.\n\n"
-        "Log in with Steam to sign up for a season when signups are open."
+        "Log in with Steam from Settings to sign up for a season when signups are open."
     ),
     "rules": "The league admins haven't posted rules yet.",
 }

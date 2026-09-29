@@ -107,8 +107,9 @@ The bot's web server (port 8080) also serves a small league site modeled on rd2l
 - `/seasons`, `/season/<guild_id>/<season_start>`: every season of every division, with Teams, Matches, Leaders and Signups tabs
 - `/players`, `/player/<account_id>`: player search and profiles (league stats per season, heroes, recent matches)
 - `/match/<match_id>`: scoreboard with fantasy points
-- `/login`: Steam sign-in; logged-in players can sign up for seasons with open signups, and manage their signups at `/me`
-- `/admin`: create seasons, open or close signups, rename divisions, edit the home and rules text, download signups as CSV
+- `/`: tiles for Sign-Up (active only while a season has signups open), Seasons, Players and Info (`/info` → Rules, About)
+- `/settings`: Steam log in and out, Discord name, and your signups. Logged-in players can sign up for seasons with open signups
+- `/admin`: create seasons, open or close signups, rename divisions, edit the About and Rules text, download signups as CSV
 
 It reads the bot's own tables (a team is the captain's drafted roster in `player_costs`, and a match side belongs to a team when three or more of its roster played) and keeps its own data in `site_*` tables. Public pages show stats and ranked badges only, never internal or windrun ratings.
 
