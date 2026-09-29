@@ -23,8 +23,8 @@
 // Click-to-rename: swap a name for its edit form, and back on Cancel/Escape.
 document.querySelectorAll(".editable").forEach(function (box) {
   var view = box.querySelector(".edit-view"), form = box.querySelector(".edit-form");
-  var input = form.querySelector("input[name=label]");
-  function open() { view.hidden = true; form.hidden = false; input.focus(); input.select(); }
+  var input = form.querySelector("input:not([type=hidden])");
+  function open() { view.hidden = true; form.hidden = false; input.focus(); if (input.select) input.select(); }
   function close() { form.hidden = true; view.hidden = false; input.value = input.defaultValue; }
   view.addEventListener("click", open);
   view.addEventListener("keydown", function (e) { if (e.key === "Enter") open(); });

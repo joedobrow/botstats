@@ -811,6 +811,29 @@ def upsert_season(guild_id: int, season_start: str,
         """, (guild_id, season_start, league_id, label, _dt.now(_tz.utc).isoformat()))
 
 
+def change_season_start(guild_id: int, old_start: str, new_start: str) -> None:
+    """Move a season to a new start date. The start date is part of the key
+    for everything filed under the season (costs, teams, weeks, the
+    division's current-season pointer, the website's signups), so every
+    table with guild_id + season_start columns is updated together, in one
+    transaction. Explicit week boundaries (season_weeks) keep their dates.
+
+    Raises ValueError if the new date is malformed or already a season.
+    """
+    datetime.strptime(new_start, "%Y-%m-%d")  # ValueError on a bad date
+    with _conn() as conn:
+        if conn.execute("SELECT 1 FROM seasons WHERE guild_id = ? AND season_start = ?",
+                        (guild_id, new_start)).fetchone():
+            raise ValueError(f"There's already a season starting {new_start}.")
+        tables = [r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")]
+        for t in tables:
+            cols = {r[1] for r in conn.execute(f"PRAGMA table_info({t})")}
+            if {"guild_id", "season_start"} <= cols:
+                conn.execute(f"UPDATE {t} SET season_start = ? WHERE guild_id = ? AND season_start = ?",
+                             (new_start, guild_id, old_start))
+    logger.info("Season %s moved to %s for guild %d", old_start, new_start, guild_id)
+
+
 def season_label(season: dict) -> str:
     """Display name for a season row: its label if we have one, else the date."""
     lbl = season.get("label")

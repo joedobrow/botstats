@@ -1,18 +1,18 @@
 {% extends "base.html" %}
-{% from "macros.html" import season_name %}
+{% from "macros.html" import season_name, season_start %}
 {% block content %}
 <h1>Admin</h1>
 
 <h2>Seasons</h2>
 <div class="scroll">
 <table>
-  <thead><tr><th>Season <span class="muted small">(click to rename)</span></th><th>Division</th><th>Starts</th><th class="num">Signups</th><th>Status</th><th></th></tr></thead>
+  <thead><tr><th>Season <span class="muted small">(click to rename)</span></th><th>Division</th><th>Starts{% if is_uberadmin %} <span class="muted small">(click to change)</span>{% endif %}</th><th class="num">Signups</th><th>Status</th><th></th></tr></thead>
   <tbody>
   {% for s in seasons %}
     <tr>
       <td>{{ season_name(s, csrf, is_admin, "/admin") }}</td>
       <td>{{ s.division }}</td>
-      <td>{{ s.season_start }}</td>
+      <td>{{ season_start(s, csrf, is_uberadmin, "/admin") }}</td>
       <td class="num"><a href="{{ season_url(s) }}?tab=signups">{{ s.signup_count }}</a></td>
       <td>
         <form method="post" action="/admin/status" class="inline">

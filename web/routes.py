@@ -452,6 +452,28 @@ async def admin_rename_season(request: web.Request):
     raise web.HTTPFound(_safe_next(data.get("next")) if data.get("next") else "/admin")
 
 
+@routes.post("/admin/season/start")
+async def admin_change_season_start(request: web.Request):
+    _require_uberadmin(request)
+    data = await request.post()
+    season = store.get_season(int(data.get("guild_id", 0)), data.get("season_start", ""))
+    new_start = (data.get("new_start") or "").strip()
+    if not season:
+        raise web.HTTPBadRequest(text="Unknown season.")
+    if new_start != season["season_start"]:
+        try:
+            db.change_season_start(season["guild_id"], season["season_start"], new_start)
+        except ValueError as e:
+            return render(request, "message.html", status=400, title="Start date not changed",
+                          message=str(e) if "already" in str(e) else "That isn't a valid date.")
+    # The season's URL contains its start date, so follow it to the new one.
+    nxt = _safe_next(data.get("next")) if data.get("next") else "/admin"
+    old_url = season_url(season)
+    if nxt.startswith(old_url):
+        nxt = season_url(dict(season, season_start=new_start)) + nxt[len(old_url):]
+    raise web.HTTPFound(nxt)
+
+
 @routes.post("/admin/admins")
 async def admin_manage_admins(request: web.Request):
     _require_uberadmin(request)
