@@ -72,21 +72,3 @@ async def player_summary(account_id: int, api_key: str) -> tuple[str | None, str
     except Exception:
         logger.warning("Steam player summary failed for %d", account_id, exc_info=True)
         return None, None
-
-
-async def player_summaries(account_ids: list[int], api_key: str) -> dict[int, tuple[str | None, str | None]]:
-    """{account_id: (persona name, avatar url)} for many players, 100 per
-    request (the Web API's limit). Accounts Steam doesn't return are left out."""
-    out: dict[int, tuple[str | None, str | None]] = {}
-    if not api_key:
-        return out
-    url = "https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v2/"
-    async with aiohttp.ClientSession(timeout=TIMEOUT) as s:
-        for i in range(0, len(account_ids), 100):
-            ids = ",".join(str(a + STEAM64_OFFSET) for a in account_ids[i:i + 100])
-            async with s.get(url, params={"key": api_key, "steamids": ids}) as r:
-                r.raise_for_status()
-                data = await r.json(content_type=None)
-            for p in data.get("response", {}).get("players", []):
-                out[int(p["steamid"]) - STEAM64_OFFSET] = (p.get("personaname"), p.get("avatarfull"))
-    return out
