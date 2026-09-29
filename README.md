@@ -115,14 +115,14 @@ It reads the bot's own tables (a team is the captain's drafted roster in `player
 
 | Variable | Description |
 |---|---|
-| `SITE_ADMIN_STEAM_IDS` | Comma-separated Steam64 or Dota account IDs allowed into `/admin` |
+| `SITE_UBERADMIN_STEAM_IDS` | Comma-separated Steam64 or Dota account IDs of uberadmins: everything admins can do, plus adding and removing admins on `/admin` |
 | `SITE_BASE_URL` | Public URL, e.g. `https://dota-bot.fly.dev`. Used for the Steam return URL; defaults to the request's host |
 | `STEAM_API_KEY` | Already used by the bot; also fills in Steam names and avatars at login |
 
 Run just the site locally, on a copy of the database:
 
 ```bash
-DISCORD_TOKEN=dev DB_PATH=/path/to/copy.db SITE_ADMIN_STEAM_IDS=<your id> python -m web 8765
+DISCORD_TOKEN=dev DB_PATH=/path/to/copy.db SITE_UBERADMIN_STEAM_IDS=<your id> python -m web 8765
 ```
 
 ---

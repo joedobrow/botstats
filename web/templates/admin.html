@@ -1,15 +1,16 @@
 {% extends "base.html" %}
+{% from "macros.html" import season_name %}
 {% block content %}
 <h1>Admin</h1>
 
 <h2>Seasons</h2>
 <div class="scroll">
 <table>
-  <thead><tr><th>Season</th><th>Division</th><th>Starts</th><th class="num">Signups</th><th>Signups open?</th></tr></thead>
+  <thead><tr><th>Season <span class="muted small">(click to rename)</span></th><th>Division</th><th>Starts</th><th class="num">Signups</th><th>Signups open?</th><th></th></tr></thead>
   <tbody>
   {% for s in seasons %}
     <tr>
-      <td><a href="{{ season_url(s) }}">{{ s.label }}</a></td>
+      <td>{{ season_name(s, csrf, is_admin, "/admin") }}</td>
       <td>{{ s.division }}</td>
       <td>{{ s.season_start }}</td>
       <td class="num"><a href="{{ season_url(s) }}?tab=signups">{{ s.signup_count }}</a></td>
@@ -22,6 +23,7 @@
           {% if s.signups_open %}<span class="tag open">Open</span> <button class="linklike">Close</button>{% else %}<button class="linklike">Open signups</button>{% endif %}
         </form>
       </td>
+      <td><a href="{{ season_url(s) }}">View</a></td>
     </tr>
   {% endfor %}
   </tbody>
@@ -64,6 +66,35 @@
   </tbody>
 </table>
 </div>
+
+{% if is_uberadmin %}
+<h2 id="admins">Admins</h2>
+<p class="muted small">Only uberadmins see this. Uberadmins are set on the server and can't be removed here.</p>
+<table>
+  <thead><tr><th>Player</th><th>Role</th><th>Added</th><th></th></tr></thead>
+  <tbody>
+  {% for a in admins %}
+    <tr>
+      <td><a href="/player/{{ a.account_id }}">{{ a.name or a.account_id }}</a> <span class="muted small">{{ a.account_id }}</span></td>
+      <td>{{ "Uberadmin" if a.uberadmin else "Admin" }}</td>
+      <td class="small muted">{{ (a.added_at or "")[:10] }}</td>
+      <td>{% if not a.uberadmin %}
+        <form method="post" action="/admin/admins" class="inline" onsubmit="return confirm('Remove {{ (a.name or a.account_id)|e }} as an admin?')">
+          <input type="hidden" name="csrf" value="{{ csrf }}">
+          <input type="hidden" name="account_id" value="{{ a.account_id }}">
+          <input type="hidden" name="action" value="remove">
+          <button class="linklike danger">Remove</button>
+        </form>{% endif %}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+<form method="post" action="/admin/admins" class="form grid">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <label>Add an admin <input type="text" name="account_id" required placeholder="Dota account ID or Steam64 ID" inputmode="numeric"></label>
+  <div class="actions"><button class="primary">Add admin</button></div>
+</form>
+{% endif %}
 
 <h2>Site text</h2>
 <p class="muted small">Plain text. Leave a blank line between paragraphs.</p>

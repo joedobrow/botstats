@@ -21,9 +21,11 @@ TEMPLATE_DIR = Path(__file__).parent / "templates"
 STATIC_DIR = Path(__file__).parent / "static"
 COOKIE = "session"
 
-# Steam accounts (Dota account ids or Steam64 ids) allowed into /admin.
-ADMIN_IDS: set[int] = {
-    aid for aid in (account_id_from(x) for x in os.environ.get("SITE_ADMIN_STEAM_IDS", "").split(","))
+# Uberadmins (Dota account ids or Steam64 ids): everything admins can do,
+# plus adding and removing admins. Set only here, so the site can't lock
+# them out. Admins themselves are kept in the site_admins table.
+UBERADMIN_IDS: set[int] = {
+    aid for aid in (account_id_from(x) for x in os.environ.get("SITE_UBERADMIN_STEAM_IDS", "").split(","))
     if aid
 }
 # Public URL of the site, e.g. https://dota-bot.fly.dev. Without it the
@@ -73,6 +75,7 @@ env.globals.update(season_url=season_url, team_url=team_url, hero=store.hero,
 
 def render(request: web.Request, template: str, status: int = 200, **ctx) -> web.Response:
     ctx.update(user=request.get("user"), is_admin=request.get("is_admin", False),
+               is_uberadmin=request.get("is_uberadmin", False),
                csrf=request.get("csrf", ""), path=request.path,
                # Changes whenever the stylesheet does, so browsers never keep a stale copy.
                css_version=int((STATIC_DIR / "style.css").stat().st_mtime))
@@ -96,7 +99,8 @@ async def session_middleware(request: web.Request, handler):
     if sess:
         request["user"] = store.get_user(sess["account_id"])
         request["csrf"] = sess["csrf"]
-        request["is_admin"] = sess["account_id"] in ADMIN_IDS
+        request["is_uberadmin"] = sess["account_id"] in UBERADMIN_IDS
+        request["is_admin"] = request["is_uberadmin"] or store.is_admin(sess["account_id"])
     if request.method == "POST" and not request.path.startswith("/api/"):
         form = await request.post()
         if not sess or form.get("csrf") != sess["csrf"]:
@@ -116,6 +120,12 @@ def _require_admin(request: web.Request) -> None:
     _require_user(request)
     if not request.get("is_admin"):
         raise web.HTTPForbidden(text="Admins only.")
+
+
+def _require_uberadmin(request: web.Request) -> None:
+    _require_user(request)
+    if not request.get("is_uberadmin"):
+        raise web.HTTPForbidden(text="Uberadmins only.")
 
 
 def _base_url(request: web.Request) -> str:
@@ -418,9 +428,43 @@ async def admin_page(request: web.Request):
     divisions = store.division_names()
     with db._conn() as conn:
         div_rows = [dict(r) for r in conn.execute("SELECT * FROM divisions")]
+    admins = []
+    if request.get("is_uberadmin"):
+        rows = store.list_admins()
+        ids = sorted(UBERADMIN_IDS) + [r["account_id"] for r in rows if r["account_id"] not in UBERADMIN_IDS]
+        idents = store.player_identities(ids)
+        added_by = {r["account_id"]: r for r in rows}
+        admins = [{"account_id": aid, "name": idents[aid]["name"], "uberadmin": aid in UBERADMIN_IDS,
+                   "added_at": (added_by.get(aid) or {}).get("added_at")} for aid in ids]
     return render(request, "admin.html", title="Admin", seasons=store.all_seasons(),
-                  divisions=divisions, div_rows=div_rows,
+                  divisions=divisions, div_rows=div_rows, admins=admins,
                   about=store.get_text("about"), rules=store.get_text("rules"))
+
+
+@routes.post("/admin/season/rename")
+async def admin_rename_season(request: web.Request):
+    _require_admin(request)
+    data = await request.post()
+    season = store.get_season(int(data.get("guild_id", 0)), data.get("season_start", ""))
+    label = (data.get("label") or "").strip()[:80]
+    if not season:
+        raise web.HTTPBadRequest(text="Unknown season.")
+    if label:
+        store.rename_season(season["guild_id"], season["season_start"], label)
+    raise web.HTTPFound(_safe_next(data.get("next")) if data.get("next") else "/admin")
+
+
+@routes.post("/admin/admins")
+async def admin_manage_admins(request: web.Request):
+    _require_uberadmin(request)
+    data = await request.post()
+    aid = account_id_from(data.get("account_id", ""))
+    if aid and aid not in UBERADMIN_IDS:
+        if data.get("action") == "remove":
+            store.remove_admin(aid)
+        else:
+            store.add_admin(aid, request["user"]["account_id"])
+    raise web.HTTPFound("/admin#admins")
 
 
 @routes.post("/admin/season")
