@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Settings</h1>
+{% if not user %}
+<p class="muted">Log in with Steam to sign up for seasons and manage your account.</p>
+<p><a class="button primary" href="/login?next=/settings">Log in with Steam</a></p>
+{% else %}
+<div class="profile-head">
+  {% if user.avatar_url %}<img class="avatar big" src="{{ user.avatar_url }}" alt="">{% endif %}
+  <div>
+    <h2 class="flush">{{ user.steam_name or user.account_id }}</h2>
+    <div class="muted">Account ID {{ user.account_id }} · <a href="/player/{{ user.account_id }}">Public profile</a></div>
+  </div>
+</div>
+
+<h2>Profile</h2>
+<form method="post" class="form narrow">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <label>Discord name <span class="muted small">(pre-fills your signups)</span>
+    <input type="text" name="discord" maxlength="64" value="{{ user.discord or '' }}">
+  </label>
+  <div class="actions"><button>Save</button></div>
+</form>
+
+<h2>Your signups</h2>
+<ul>
+{% for s in signups %}
+  <li><a href="{{ season_url(s) }}">{{ s.label }}</a> <span class="muted">({{ s.division }})</span>{% if s.signups_open %} · <a href="{{ season_url(s) }}/signup">Edit</a>{% endif %}</li>
+{% else %}
+  <li class="muted">None yet.</li>
+{% endfor %}
+</ul>
+
+<h2>Account</h2>
+<form method="post" action="/logout">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <button>Log out</button>
+</form>
+{% endif %}
+{% endblock %}

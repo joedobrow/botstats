@@ -165,40 +165,62 @@ async def logout(request: web.Request):
     raise resp
 
 
-@routes.get("/me")
-async def me(request: web.Request):
-    user = _require_user(request)
+@routes.get("/settings")
+async def settings(request: web.Request):
+    user = request.get("user")
+    if not user:
+        return render(request, "settings.html", title="Settings")
     seasons = {(s["guild_id"], s["season_start"]): s for s in store.all_seasons()}
     signups = [seasons[(r["guild_id"], r["season_start"])]
                for r in store.signups_for_player(user["account_id"])
                if (r["guild_id"], r["season_start"]) in seasons]
-    return render(request, "me.html", title="My account", signups=signups,
-                  open_seasons=[s for s in seasons.values() if s["signups_open"]])
+    return render(request, "settings.html", title="Settings", signups=signups)
 
 
-@routes.post("/me")
-async def me_save(request: web.Request):
+@routes.post("/settings")
+async def settings_save(request: web.Request):
     user = _require_user(request)
     form = await request.post()
     store.set_user_discord(user["account_id"], (form.get("discord") or "").strip()[:64] or None)
-    raise web.HTTPFound("/me")
+    raise web.HTTPFound("/settings")
 
 
 # ---------------------------------------------------------------------------
 # Public pages
 # ---------------------------------------------------------------------------
 
+def _open_seasons() -> list[dict]:
+    return [s for s in store.all_seasons() if s["signups_open"]]
+
+
 @routes.get("/")
 async def home(request: web.Request):
-    seasons = store.all_seasons()
-    return render(request, "home.html", intro=store.get_text("home_intro"),
-                  open_seasons=[s for s in seasons if s["signups_open"]],
-                  recent=seasons[:6])
+    return render(request, "home.html", signups_open=bool(_open_seasons()))
+
+
+@routes.get("/signup")
+async def signup_hub(request: web.Request):
+    """The home page's Sign-Up tile: straight to the form when one season is
+    open, a choice when several are."""
+    open_seasons = _open_seasons()
+    if len(open_seasons) == 1:
+        raise web.HTTPFound(season_url(open_seasons[0]) + "/signup")
+    return render(request, "signup_hub.html", title="Sign up", open_seasons=open_seasons)
+
+
+@routes.get("/info")
+async def info(request: web.Request):
+    return render(request, "info.html", title="Info")
+
+
+@routes.get("/about")
+async def about(request: web.Request):
+    return render(request, "text_page.html", title="About", text=store.get_text("about"))
 
 
 @routes.get("/rules")
 async def rules(request: web.Request):
-    return render(request, "rules.html", title="Rules", rules=store.get_text("rules"))
+    return render(request, "text_page.html", title="Rules", text=store.get_text("rules"))
 
 
 @routes.get("/seasons")
@@ -394,7 +416,7 @@ async def admin_page(request: web.Request):
         div_rows = [dict(r) for r in conn.execute("SELECT * FROM divisions")]
     return render(request, "admin.html", title="Admin", seasons=store.all_seasons(),
                   divisions=divisions, div_rows=div_rows,
-                  home_intro=store.get_text("home_intro"), rules=store.get_text("rules"))
+                  about=store.get_text("about"), rules=store.get_text("rules"))
 
 
 @routes.post("/admin/season")

@@ -63,8 +63,6 @@ footer.wrap { padding-top: 16px; padding-bottom: 32px; font-size: 0.85rem; borde
 .brand { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 1.1rem; }
 .brand img { width: 30px; height: 30px; }
 .spacer { flex: 1; }
-.me { display: flex; align-items: center; gap: 6px; }
-.me img { width: 24px; height: 24px; border-radius: 50%; }
 
 /* Buttons and forms */
 button, .button {
@@ -130,7 +128,6 @@ img.hero { width: 24px; height: 24px; }
 .roster li { display: flex; justify-content: space-between; padding: 3px 0; border-top: 1px solid var(--border); }
 
 /* Page headers */
-.hero-banner { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 8px 24px 12px; margin-top: 24px; }
 .page-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap; margin-top: 16px; }
 .profile-head { display: flex; align-items: center; gap: 16px; margin-top: 20px; }
 .stat-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin-top: 20px; }
@@ -146,3 +143,16 @@ h2.side .score { color: var(--text); }
 .prose { max-width: 720px; }
 .prose p { white-space: pre-line; }
 .nowrap { white-space: nowrap; }
+
+/* Tiles */
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-top: 32px; }
+.tile {
+  display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 6px;
+  min-height: 150px; padding: 20px; text-align: center;
+  background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 10px;
+}
+a.tile:hover { text-decoration: none; border-color: var(--accent); }
+.tile-label { font-size: 1.35rem; font-weight: 700; }
+.tile-sub { font-size: 0.85rem; color: var(--muted); }
+.tile.disabled { opacity: 0.45; cursor: not-allowed; }
+h2.flush { margin: 0; }

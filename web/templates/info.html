@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% from "macros.html" import tile %}
+{% block content %}
+<h1>Info</h1>
+<div class="tiles">
+  {{ tile("/rules", "Rules") }}
+  {{ tile("/about", "About") }}
+</div>
+{% endblock %}

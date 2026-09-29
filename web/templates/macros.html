@@ -15,3 +15,11 @@
   <a class="button primary" href="{{ season_url(season) }}/signup">{% if my_signup %}Edit my signup{% else %}Sign up{% endif %}</a>
 {% endif %}
 {%- endmacro %}
+
+{% macro tile(href, label, sub="", disabled=False) -%}
+{% if disabled %}
+<span class="tile disabled" aria-disabled="true"><span class="tile-label">{{ label }}</span>{% if sub %}<span class="tile-sub">{{ sub }}</span>{% endif %}</span>
+{% else %}
+<a class="tile" href="{{ href }}"><span class="tile-label">{{ label }}</span>{% if sub %}<span class="tile-sub">{{ sub }}</span>{% endif %}</a>
+{% endif %}
+{%- endmacro %}
