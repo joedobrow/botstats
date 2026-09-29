@@ -47,3 +47,22 @@
 {% if season.signups_open %}<a class="tag status-signups" href="{{ season_url(season) }}/signup">{{ season.status_label }}</a>
 {%- else %}<span class="tag status-{{ season.status }}">{{ season.status_label }}</span>{% endif %}
 {%- endmacro %}
+
+{# A season start date uberadmins can click to change in place. #}
+{% macro season_start(season, csrf, is_uberadmin, next) -%}
+{% if is_uberadmin %}
+<span class="editable">
+  <span class="edit-view" tabindex="0" role="button" title="Click to change the start date">{{ season.season_start }}</span>
+  <form class="edit-form" method="post" action="/admin/season/start" hidden
+        onsubmit="return confirm('Move this season to the new start date? Its teams, costs, weeks and signups move with it.')">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="hidden" name="guild_id" value="{{ season.guild_id }}">
+    <input type="hidden" name="season_start" value="{{ season.season_start }}">
+    <input type="hidden" name="next" value="{{ next }}">
+    <input type="date" name="new_start" value="{{ season.season_start }}" required aria-label="Start date">
+    <button class="primary">Save</button>
+    <button type="button" class="edit-cancel">Cancel</button>
+  </form>
+</span>
+{% else %}{{ season.season_start }}{% endif %}
+{%- endmacro %}

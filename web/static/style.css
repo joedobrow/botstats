@@ -192,3 +192,4 @@ h1 .edit-form input[type=text] { font-size: 1.2rem; font-weight: 700; width: aut
 a.tag.status-signups:hover { text-decoration: underline; }
 .tag.status-active { background: var(--accent); color: var(--accent-text); }
 td select { width: auto; padding: 3px 6px; }
+.edit-form input[type=date] { width: auto; }
