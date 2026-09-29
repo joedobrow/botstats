@@ -967,6 +967,37 @@ def _apply_override_nicknames(results: list[dict]) -> list[dict]:
     return results
 
 
+def get_display_names(account_ids: list[int]) -> dict[int, str]:
+    """The name to show for each player, the way /player, /lookup and
+    /api/player show it: the /set_player nickname, else the rating-cache
+    name, else the name on their most recent league match. Accounts with
+    none of those are left out. The website uses this so it always agrees
+    with the bot."""
+    ids = list(set(account_ids))
+    out: dict[int, str] = {}
+    with _conn() as conn:
+        for i in range(0, len(ids), 500):  # stay under SQLite's bound-parameter limit
+            chunk = ids[i:i + 500]
+            marks = ",".join("?" * len(chunk))
+            # Lowest priority first; each later source overwrites.
+            for r in conn.execute(f"""
+                SELECT p.account_id, p.name FROM players p
+                JOIN (SELECT account_id, MAX(match_id) AS m FROM players
+                      WHERE account_id IN ({marks}) GROUP BY account_id) last
+                  ON last.account_id = p.account_id AND last.m = p.match_id""", chunk):
+                if (r["name"] or "").strip():
+                    out[r["account_id"]] = r["name"].strip()
+            for r in conn.execute(
+                f"SELECT account_id, name FROM player_ratings_cache WHERE account_id IN ({marks})", chunk):
+                if (r["name"] or "").strip():
+                    out[r["account_id"]] = r["name"].strip()
+            for r in conn.execute(
+                f"SELECT account_id, nickname FROM skill_overrides WHERE account_id IN ({marks})", chunk):
+                if (r["nickname"] or "").strip():
+                    out[r["account_id"]] = r["nickname"].strip()
+    return out
+
+
 def get_latest_week_stats(guild_id: int, week_offset: int = 0) -> list[dict]:
     """Return aggregated per-player stats for the given week.
 

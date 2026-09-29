@@ -299,44 +299,39 @@ def signups_for_player(account_id: int) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 def player_identities(account_ids: list[int]) -> dict[int, dict]:
-    """{account_id: {name, avatar_url, badge}} from what the bot knows, with
-    /set_player nicknames and hidden avatars respected."""
+    """{account_id: {name, avatar_url, badge}}, shown the way the bot shows
+    them: name from db.get_display_names, avatar and badge from the rating
+    cache with /set_player overrides applied. Someone the bot has never seen
+    falls back to their Steam name from logging in to the site."""
     from formatters import format_badge
     if not account_ids:
         return {}
     ids = list(set(account_ids))
-    out: dict[int, dict] = {aid: {"name": None, "avatar_url": None, "badge": None} for aid in ids}
+    names = db.get_display_names(ids)
+    out: dict[int, dict] = {aid: {"name": names.get(aid), "avatar_url": None, "badge": None} for aid in ids}
     with _conn() as conn:
         for i in range(0, len(ids), 500):
             chunk = ids[i:i + 500]
             marks = ",".join("?" * len(chunk))
-            for r in conn.execute(f"""
-                SELECT p.account_id, p.name FROM players p
-                JOIN (SELECT account_id, MAX(match_id) AS m FROM players
-                      WHERE account_id IN ({marks}) GROUP BY account_id) last
-                  ON last.account_id = p.account_id AND last.m = p.match_id""", chunk):
-                out[r["account_id"]]["name"] = r["name"]
             for r in conn.execute(
                 f"SELECT account_id, steam_name, avatar_url FROM site_users WHERE account_id IN ({marks})", chunk):
-                out[r["account_id"]]["name"] = out[r["account_id"]]["name"] or r["steam_name"]
-                out[r["account_id"]]["avatar_url"] = r["avatar_url"]
+                o = out[r["account_id"]]
+                o["name"] = o["name"] or r["steam_name"]
+                o["avatar_url"] = r["avatar_url"]
             for r in conn.execute(f"""
-                SELECT account_id, name, avatar_url, rank_tier, leaderboard_rank
+                SELECT account_id, avatar_url, rank_tier, leaderboard_rank
                 FROM player_ratings_cache WHERE account_id IN ({marks})""", chunk):
                 o = out[r["account_id"]]
-                o["name"] = o["name"] or r["name"]
                 o["avatar_url"] = r["avatar_url"] or o["avatar_url"]
                 if r["rank_tier"]:
                     o["badge"] = format_badge(r["rank_tier"], r["leaderboard_rank"])
             for r in conn.execute(f"""
-                SELECT account_id, nickname, hide_avatar, rank_tier, leaderboard_rank
+                SELECT account_id, hide_avatar, rank_tier, leaderboard_rank
                 FROM skill_overrides WHERE account_id IN ({marks})""", chunk):
                 o = out[r["account_id"]]
-                if r["nickname"] and r["nickname"].strip():
-                    o["name"] = r["nickname"].strip()
                 if r["hide_avatar"]:
                     o["avatar_url"] = None
-                if r["rank_tier"]:
+                if r["rank_tier"] is not None:
                     o["badge"] = format_badge(r["rank_tier"], r["leaderboard_rank"])
     return out
 
