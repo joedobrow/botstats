@@ -942,28 +942,13 @@ def _all_time_start_ts(guild_id: int, season_start_date: str | None) -> int:
 
 
 def _apply_override_nicknames(results: list[dict]) -> list[dict]:
-    """Swap each stat row's in-game name for its /set_player nickname, if any.
-
-    Stat rows are aggregated from `players.name`, which is whatever the Steam
-    persona was at match time — so without this, a nickname only showed up in
-    cache-backed views (/players, /lookup) and not in /player or /leaderboard.
-    """
-    aids = [r["account_id"] for r in results if r.get("account_id") is not None]
-    if not aids:
-        return results
-    with _conn() as conn:
-        nick = {
-            row["account_id"]: row["nickname"]
-            for row in conn.execute(
-                f"SELECT account_id, nickname FROM skill_overrides "
-                f"WHERE nickname IS NOT NULL AND TRIM(nickname) != '' "
-                f"AND account_id IN ({','.join('?' * len(aids))})",
-                aids,
-            ).fetchall()
-        }
+    """Give each stat row the player's display name — the one /player shows
+    (see get_display_names) — instead of whichever in-game name the
+    aggregate query happened to pick from their match rows."""
+    names = get_display_names([r["account_id"] for r in results if r.get("account_id") is not None])
     for r in results:
-        if r.get("account_id") in nick:
-            r["name"] = nick[r["account_id"]]
+        if r.get("account_id") in names:
+            r["name"] = names[r["account_id"]]
     return results
 
 
@@ -2922,8 +2907,9 @@ def get_all_matches(guild_id: int) -> list[dict]:
 def get_match_ids_for_player(guild_id: int, player_name: str) -> set[int]:
     """Return the set of match IDs (for this guild) where a player matching the name played.
 
-    Partial, case-insensitive match against the in-game name or the
-    /set_player nickname.
+    Partial, case-insensitive match against the in-game name, the
+    /set_player nickname, or the rating-cache name — so the name /player
+    displays always finds the player.
     """
     with _conn() as conn:
         rows = conn.execute("""
@@ -2935,8 +2921,12 @@ def get_match_ids_for_player(guild_id: int, player_name: str) -> set[int]:
                    OR p.account_id IN (
                        SELECT account_id FROM skill_overrides
                        WHERE LOWER(nickname) LIKE LOWER(?)
+                   )
+                   OR p.account_id IN (
+                       SELECT account_id FROM player_ratings_cache
+                       WHERE LOWER(name) LIKE LOWER(?)
                    ))
-        """, (guild_id, f"%{player_name}%", f"%{player_name}%")).fetchall()
+        """, (guild_id, f"%{player_name}%", f"%{player_name}%", f"%{player_name}%")).fetchall()
     return {r["match_id"] for r in rows}
 
 
