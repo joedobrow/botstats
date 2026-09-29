@@ -237,10 +237,8 @@ async def rules(request: web.Request):
 
 @routes.get("/seasons")
 async def seasons_page(request: web.Request):
-    by_div: dict[str, list[dict]] = {}
-    for s in store.all_seasons():
-        by_div.setdefault(s["division"], []).append(s)
-    return render(request, "seasons.html", title="Seasons", by_div=by_div)
+    seasons = sorted(store.all_seasons(), key=lambda s: s["season_start"])
+    return render(request, "seasons.html", title="Seasons", seasons=seasons)
 
 
 def _season_or_404(request: web.Request) -> dict:
