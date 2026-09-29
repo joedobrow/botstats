@@ -186,3 +186,9 @@ h2.flush { margin: 0; }
 .edit-form { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .edit-form[hidden] { display: none; }
 h1 .edit-form input[type=text] { font-size: 1.2rem; font-weight: 700; width: auto; min-width: 16ch; }
+
+/* Season status tags */
+.tag.status-signups { background: var(--open-bg); color: var(--open-text); }
+a.tag.status-signups:hover { text-decoration: underline; }
+.tag.status-active { background: var(--accent); color: var(--accent-text); }
+td select { width: auto; padding: 3px 6px; }

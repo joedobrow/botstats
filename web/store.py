@@ -20,6 +20,13 @@ import db
 from db import _conn
 
 SESSION_DAYS = 30
+# Season status: key -> label. "signups" is the only one that takes signups.
+SEASON_STATUSES = {
+    "upcoming": "Upcoming",
+    "signups": "Signups open",
+    "active": "Active",
+    "completed": "Completed",
+}
 POSITIONS = (1, 2, 3, 4, 5)
 CAPTAIN_CHOICES = ("yes", "maybe", "no")
 
@@ -66,7 +73,7 @@ def init_site_tables() -> None:
             CREATE TABLE IF NOT EXISTS site_season_settings (
                 guild_id      INTEGER NOT NULL,
                 season_start  TEXT NOT NULL,
-                signups_open  INTEGER NOT NULL DEFAULT 0,
+                status        TEXT,               -- a SEASON_STATUSES key; NULL = default_status
                 PRIMARY KEY (guild_id, season_start)
             );
 
@@ -98,6 +105,12 @@ def init_site_tables() -> None:
                 value  TEXT NOT NULL
             );
         """)
+
+
+    with _conn() as conn:
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(site_season_settings)")]
+        if "status" not in cols:
+            conn.execute("ALTER TABLE site_season_settings ADD COLUMN status TEXT")
 
 
 # ---------------------------------------------------------------------------
@@ -200,13 +213,13 @@ def set_division_name(guild_id: int, name: str) -> None:
 
 
 def all_seasons() -> list[dict]:
-    """Every season of every division, newest first, with site settings and
-    its match window [start_ts, end_ts). A season ends where the division's
-    next season begins."""
+    """Every season of every division, newest first, with its status, signup
+    count and match window [start_ts, end_ts). A season's matches end where
+    the division's next season begins."""
     names = division_names()
     with _conn() as conn:
-        settings = {
-            (r["guild_id"], r["season_start"]): r["signups_open"]
+        statuses = {
+            (r["guild_id"], r["season_start"]): r["status"]
             for r in conn.execute("SELECT * FROM site_season_settings")
         }
         signup_counts = {
@@ -228,11 +241,30 @@ def all_seasons() -> list[dict]:
                 "league_id": s.get("league_id"),
                 "start_ts": db._all_time_start_ts(guild_id, start),
                 "end_ts": db._all_time_start_ts(guild_id, nxt) if nxt else None,
-                "signups_open": bool(settings.get((guild_id, start))),
+                "status": statuses.get((guild_id, start)),
                 "signup_count": signup_counts.get((guild_id, start), 0),
             })
     out.sort(key=lambda s: s["season_start"], reverse=True)
+    _fill_default_statuses(out)
+    for s in out:
+        s["status_label"] = SEASON_STATUSES[s["status"]]
+        s["signups_open"] = s["status"] == "signups"
     return out
+
+
+def _fill_default_statuses(seasons: list[dict]) -> None:
+    """Seasons no admin has set a status for: the newest season that has
+    started is active, earlier ones completed, future ones upcoming."""
+    today = datetime.now(timezone.utc).date().isoformat()
+    started = [s for s in seasons if s["season_start"] <= today]  # newest first
+    newest = started[0] if started else None
+    for s in seasons:
+        if s["status"] in SEASON_STATUSES:
+            continue
+        if s["season_start"] > today:
+            s["status"] = "upcoming"
+        else:
+            s["status"] = "active" if s is newest else "completed"
 
 
 def get_season(guild_id: int, season_start: str) -> dict | None:
@@ -250,12 +282,12 @@ def rename_season(guild_id: int, season_start: str, label: str) -> None:
     db.upsert_season(guild_id, season_start, label=label)
 
 
-def set_signups_open(guild_id: int, season_start: str, is_open: bool) -> None:
+def set_status(guild_id: int, season_start: str, status: str) -> None:
     with _conn() as conn:
         conn.execute("""
-            INSERT INTO site_season_settings (guild_id, season_start, signups_open) VALUES (?, ?, ?)
-            ON CONFLICT(guild_id, season_start) DO UPDATE SET signups_open = excluded.signups_open
-        """, (guild_id, season_start, int(is_open)))
+            INSERT INTO site_season_settings (guild_id, season_start, status) VALUES (?, ?, ?)
+            ON CONFLICT(guild_id, season_start) DO UPDATE SET status = excluded.status
+        """, (guild_id, season_start, status))
 
 
 def _season_for(seasons: list[dict], guild_id: int, ts: int) -> dict | None:

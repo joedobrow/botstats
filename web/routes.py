@@ -70,7 +70,7 @@ env = jinja2.Environment(
 )
 env.filters.update(date=_fmt_date, duration=_fmt_duration, paragraphs=_paragraphs)
 env.globals.update(season_url=season_url, team_url=team_url, hero=store.hero,
-                   POSITION_NAMES=POSITION_NAMES)
+                   POSITION_NAMES=POSITION_NAMES, SEASON_STATUSES=store.SEASON_STATUSES)
 
 
 def render(request: web.Request, template: str, status: int = 200, **ctx) -> web.Response:
@@ -482,11 +482,13 @@ async def admin_new_season(request: web.Request):
     raise web.HTTPFound("/admin")
 
 
-@routes.post("/admin/signups")
-async def admin_toggle_signups(request: web.Request):
+@routes.post("/admin/status")
+async def admin_set_status(request: web.Request):
     _require_admin(request)
     data = await request.post()
-    store.set_signups_open(int(data["guild_id"]), data["season_start"], data.get("open") == "1")
+    if data.get("status") not in store.SEASON_STATUSES:
+        raise web.HTTPBadRequest(text="Unknown status.")
+    store.set_status(int(data["guild_id"]), data["season_start"], data["status"])
     raise web.HTTPFound(_safe_next(data.get("next")) if data.get("next") else "/admin")
 
 
