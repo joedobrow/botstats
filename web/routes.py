@@ -55,7 +55,8 @@ def _paragraphs(text: str) -> list[str]:
 
 
 def season_url(season: dict) -> str:
-    return f"/season/{season['guild_id']}/{season['season_start']}"
+    """A season's page. Its id is its Dota league id, so URLs never change."""
+    return f"/season/{season['id']}"
 
 
 def team_url(season: dict, captain: str) -> str:
@@ -182,10 +183,8 @@ async def settings(request: web.Request):
     user = request.get("user")
     if not user:
         return render(request, "settings.html", title="Settings")
-    seasons = {(s["guild_id"], s["season_start"]): s for s in store.all_seasons()}
-    signups = [seasons[(r["guild_id"], r["season_start"])]
-               for r in store.signups_for_player(user["account_id"])
-               if (r["guild_id"], r["season_start"]) in seasons]
+    seasons = {s["id"]: s for s in store.all_seasons()}
+    signups = [seasons[sid] for sid in store.signup_season_ids(user["account_id"]) if sid in seasons]
     return render(request, "settings.html", title="Settings", signups=signups)
 
 
@@ -242,23 +241,29 @@ async def seasons_page(request: web.Request):
 
 
 def _season_or_404(request: web.Request) -> dict:
-    try:
-        guild_id = int(request.match_info["guild_id"])
-    except ValueError:
-        raise web.HTTPNotFound()
-    season = store.get_season(guild_id, request.match_info["season_start"])
+    season_id = request.match_info["season_id"]
+    season = store.get_season(int(season_id)) if season_id.isdigit() else None
     if not season:
         raise web.HTTPNotFound()
     return season
 
 
-@routes.get("/season/{guild_id}/{season_start}")
+def _form_season(data) -> dict:
+    """The season an admin form names by its season_id field."""
+    season_id = str(data.get("season_id") or "")
+    season = store.get_season(int(season_id)) if season_id.isdigit() else None
+    if not season:
+        raise web.HTTPBadRequest(text="Unknown season.")
+    return season
+
+
+@routes.get("/season/{season_id}")
 async def season_page(request: web.Request):
     season = _season_or_404(request)
     tab = request.query.get("tab", "teams")
     ctx: dict = {"season": season, "tab": tab, "title": season["label"]}
     if tab == "signups":
-        ctx["signups"] = store.list_signups(season["guild_id"], season["season_start"])
+        ctx["signups"] = store.list_signups(season["id"])
     elif tab == "leaders":
         ctx["leaders"] = store.season_leaders(season)
     elif tab == "matches":
@@ -274,12 +279,11 @@ async def season_page(request: web.Request):
             + [t["captain_account_id"] for t in teams if t["captain_account_id"]])
         ctx["teams"], ctx["idents"] = teams, idents
     if request.get("user"):
-        ctx["my_signup"] = store.get_signup(season["guild_id"], season["season_start"],
-                                            request["user"]["account_id"])
+        ctx["my_signup"] = store.get_signup(season["id"], request["user"]["account_id"])
     return render(request, "season.html", **ctx)
 
 
-@routes.get("/season/{guild_id}/{season_start}/team/{captain}")
+@routes.get("/season/{season_id}/team/{captain}")
 async def team_page(request: web.Request):
     season = _season_or_404(request)
     captain = request.match_info["captain"]
@@ -322,14 +326,14 @@ async def player_page(request: web.Request):
         s = store._season_for(seasons, m["guild_id"], m["start_time"])
         m["season"] = s
         if s:
-            by_season.setdefault((s["guild_id"], s["season_start"]), []).append(m)
+            by_season.setdefault(s["id"], []).append(m)
     season_rows = []
     for s in seasons:
-        rows = by_season.get((s["guild_id"], s["season_start"]))
+        rows = by_season.get(s["id"])
         if rows:
-            costs = db.get_player_costs(s["guild_id"], s["season_start"]).get(account_id) or {}
+            costs = db.get_player_costs(s["id"]).get(account_id) or {}
             cap = costs.get("captain")
-            team = db.get_season_teams(s["guild_id"], s["season_start"]).get((cap or "").lower(), {})
+            team = db.get_season_teams(s["id"]).get((cap or "").lower(), {})
             season_rows.append({"season": s, "stats": store.aggregate(rows), "captain": cap,
                                 "team_name": team.get("team_name") or cap, "cost": costs.get("cost")})
     hero_counts: dict[int, dict] = {}
@@ -358,11 +362,11 @@ async def match_page(request: web.Request):
 # Signups
 # ---------------------------------------------------------------------------
 
-@routes.get("/season/{guild_id}/{season_start}/signup")
+@routes.get("/season/{season_id}/signup")
 async def signup_form(request: web.Request):
     season = _season_or_404(request)
     user = _require_user(request)
-    existing = store.get_signup(season["guild_id"], season["season_start"], user["account_id"])
+    existing = store.get_signup(season["id"], user["account_id"])
     if not season["signups_open"] and not existing:
         return render(request, "message.html", title="Signups closed",
                       message="Signups for this season aren't open.")
@@ -371,18 +375,18 @@ async def signup_form(request: web.Request):
                   existing=existing, errors=[])
 
 
-@routes.post("/season/{guild_id}/{season_start}/signup")
+@routes.post("/season/{season_id}/signup")
 async def signup_submit(request: web.Request):
     season = _season_or_404(request)
     user = _require_user(request)
-    g, s, aid = season["guild_id"], season["season_start"], user["account_id"]
-    existing = store.get_signup(g, s, aid)
+    sid, aid = season["id"], user["account_id"]
+    existing = store.get_signup(sid, aid)
     data = await request.post()
     if not season["signups_open"]:
         return render(request, "message.html", title="Signups closed",
                       message="Signups for this season are closed, so it can't be changed.")
     if data.get("action") == "withdraw":
-        store.delete_signup(g, s, aid)
+        store.delete_signup(sid, aid)
         raise web.HTTPFound(season_url(season) + "?tab=signups")
 
     errors = []
@@ -407,7 +411,7 @@ async def signup_submit(request: web.Request):
         form = dict(data, positions=",".join(map(str, positions)))
         return render(request, "signup.html", status=400, title="Sign up", season=season,
                       form=form, existing=existing, errors=errors)
-    store.save_signup(g, s, aid, mmr=mmr, positions=positions, captain=captain,
+    store.save_signup(sid, aid, mmr=mmr, positions=positions, captain=captain,
                       discord=discord, statement=statement or None)
     if not user.get("discord"):
         store.set_user_discord(aid, discord)
@@ -443,12 +447,10 @@ async def admin_page(request: web.Request):
 async def admin_rename_season(request: web.Request):
     _require_admin(request)
     data = await request.post()
-    season = store.get_season(int(data.get("guild_id", 0)), data.get("season_start", ""))
+    season = _form_season(data)
     label = (data.get("label") or "").strip()[:80]
-    if not season:
-        raise web.HTTPBadRequest(text="Unknown season.")
     if label:
-        store.rename_season(season["guild_id"], season["season_start"], label)
+        store.rename_season(season["id"], label)
     raise web.HTTPFound(_safe_next(data.get("next")) if data.get("next") else "/admin")
 
 
@@ -456,22 +458,15 @@ async def admin_rename_season(request: web.Request):
 async def admin_change_season_start(request: web.Request):
     _require_uberadmin(request)
     data = await request.post()
-    season = store.get_season(int(data.get("guild_id", 0)), data.get("season_start", ""))
+    season = _form_season(data)
     new_start = (data.get("new_start") or "").strip()
-    if not season:
-        raise web.HTTPBadRequest(text="Unknown season.")
     if new_start != season["season_start"]:
         try:
-            db.change_season_start(season["guild_id"], season["season_start"], new_start)
+            store.set_season_start(season["id"], new_start)
         except ValueError as e:
             return render(request, "message.html", status=400, title="Start date not changed",
                           message=str(e) if "already" in str(e) else "That isn't a valid date.")
-    # The season's URL contains its start date, so follow it to the new one.
-    nxt = _safe_next(data.get("next")) if data.get("next") else "/admin"
-    old_url = season_url(season)
-    if nxt.startswith(old_url):
-        nxt = season_url(dict(season, season_start=new_start)) + nxt[len(old_url):]
-    raise web.HTTPFound(nxt)
+    raise web.HTTPFound(_safe_next(data.get("next")) if data.get("next") else "/admin")
 
 
 @routes.post("/admin/admins")
@@ -493,14 +488,16 @@ async def admin_new_season(request: web.Request):
     data = await request.post()
     try:
         guild_id = int(data["guild_id"])
+        league_id = int(data["league_id"])
         start = datetime.strptime(data["season_start"], "%Y-%m-%d").strftime("%Y-%m-%d")
     except (KeyError, ValueError):
-        raise web.HTTPBadRequest(text="Pick a division and a start date.")
+        raise web.HTTPBadRequest(text="Pick a division, and enter the league ID and a start date.")
     if guild_id not in store.division_names():
         raise web.HTTPBadRequest(text="Unknown division.")
-    league_id = data.get("league_id", "").strip()
-    store.create_season(guild_id, start, (data.get("label") or "").strip() or None,
-                        int(league_id) if league_id.isdigit() else None)
+    try:
+        store.create_season(league_id, guild_id, start, (data.get("label") or "").strip() or None)
+    except ValueError as e:
+        return render(request, "message.html", status=400, title="Season not created", message=str(e))
     raise web.HTTPFound("/admin")
 
 
@@ -510,7 +507,7 @@ async def admin_set_status(request: web.Request):
     data = await request.post()
     if data.get("status") not in store.SEASON_STATUSES:
         raise web.HTTPBadRequest(text="Unknown status.")
-    store.set_status(int(data["guild_id"]), data["season_start"], data["status"])
+    store.set_status(_form_season(data)["id"], data["status"])
     raise web.HTTPFound(_safe_next(data.get("next")) if data.get("next") else "/admin")
 
 
@@ -537,14 +534,12 @@ async def admin_text(request: web.Request):
 async def admin_delete_signup(request: web.Request):
     _require_admin(request)
     data = await request.post()
-    season = store.get_season(int(data["guild_id"]), data["season_start"])
-    if season:
-        store.delete_signup(season["guild_id"], season["season_start"], int(data["account_id"]))
-        raise web.HTTPFound(season_url(season) + "?tab=signups")
-    raise web.HTTPFound("/admin")
+    season = _form_season(data)
+    store.delete_signup(season["id"], int(data["account_id"]))
+    raise web.HTTPFound(season_url(season) + "?tab=signups")
 
 
-@routes.get("/season/{guild_id}/{season_start}/signups.csv")
+@routes.get("/season/{season_id}/signups.csv")
 async def admin_signups_csv(request: web.Request):
     _require_admin(request)
     season = _season_or_404(request)
@@ -552,14 +547,14 @@ async def admin_signups_csv(request: web.Request):
     w = csv.writer(buf)
     w.writerow(["Account ID", "Name", "Badge", "MMR", "Positions", "Captain", "Discord",
                 "Statement", "Dotabuff", "Signed up"])
-    for r in store.list_signups(season["guild_id"], season["season_start"]):
+    for r in store.list_signups(season["id"]):
         w.writerow([r["account_id"], r["name"], r["badge"] or "", r["mmr"] or "",
                     " ".join(map(str, r["positions"])), r["captain"], r["discord"] or "",
                     r["statement"] or "", f"https://www.dotabuff.com/players/{r['account_id']}",
                     r["created_at"]])
     return web.Response(
         text=buf.getvalue(), content_type="text/csv",
-        headers={"Content-Disposition": f'attachment; filename="signups-{season["season_start"]}.csv"'},
+        headers={"Content-Disposition": f'attachment; filename="signups-{season["id"]}.csv"'},
     )
 
 

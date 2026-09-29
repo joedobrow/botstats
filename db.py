@@ -30,16 +30,18 @@ def _conn() -> sqlite3.Connection:
 
 def init_db():
     """Create tables if they don't exist. Call once at startup."""
+    _migrate_seasons_to_ids()
     with _conn() as conn:
         conn.executescript("""
             -- Division config per Discord server
             CREATE TABLE IF NOT EXISTS divisions (
-                guild_id        INTEGER PRIMARY KEY,  -- Discord server ID
-                league_id       INTEGER NOT NULL,
-                region          TEXT NOT NULL,        -- 'us_west' or 'us_east'
-                game_mode       TEXT NOT NULL,        -- 'cm' or 'ad'
-                season_start    TEXT NOT NULL,        -- 'YYYY-MM-DD'
-                created_at      TEXT NOT NULL
+                guild_id          INTEGER PRIMARY KEY,  -- Discord server ID
+                region            TEXT NOT NULL,        -- 'us_west' or 'us_east'
+                game_mode         TEXT NOT NULL,        -- 'cm' or 'ad'
+                -- The season commands default to. A season's id is its Dota
+                -- league id, so this is also the league the fetcher pulls.
+                current_season_id INTEGER REFERENCES seasons(id),
+                created_at        TEXT NOT NULL
             );
 
             CREATE TABLE IF NOT EXISTS matches (
@@ -295,20 +297,16 @@ def init_db():
                 set_at                  TEXT NOT NULL
             );
 
-            -- Player draft costs per season. (guild_id, season_start) scopes a season;
-            -- account_id is the OpenDota account ID parsed from the Dotabuff URL.
+            -- Player draft costs per season. account_id is the OpenDota
+            -- account ID parsed from the Dotabuff URL.
             CREATE TABLE IF NOT EXISTS player_costs (
-                guild_id      INTEGER NOT NULL,
-                season_start  TEXT NOT NULL,
+                season_id     INTEGER NOT NULL REFERENCES seasons(id),
                 account_id    INTEGER NOT NULL,
                 cost          INTEGER NOT NULL,
                 captain       TEXT,
                 mmr           INTEGER,
-                PRIMARY KEY (guild_id, season_start, account_id)
+                PRIMARY KEY (season_id, account_id)
             );
-
-            CREATE INDEX IF NOT EXISTS idx_player_costs_lookup
-                ON player_costs(guild_id, season_start);
 
             -- Explicit week boundaries per season, replacing pure calendar
             -- math so bye weeks / reschedules can be handled directly
@@ -319,41 +317,35 @@ def init_db():
             -- get_season_week_range/get_current_season_week, which fall
             -- back to the legacy calendar formula when none are defined.
             CREATE TABLE IF NOT EXISTS season_weeks (
-                guild_id      INTEGER NOT NULL,
-                season_start  TEXT NOT NULL,
+                season_id     INTEGER NOT NULL REFERENCES seasons(id),
                 week_number   INTEGER NOT NULL,
                 start_ts      INTEGER NOT NULL,
                 end_ts        INTEGER NOT NULL,
-                PRIMARY KEY (guild_id, season_start, week_number)
+                PRIMARY KEY (season_id, week_number)
             );
 
-            CREATE INDEX IF NOT EXISTS idx_season_weeks_lookup
-                ON season_weeks(guild_id, season_start);
-
-            -- Per-season team identity (real team name + logo), keyed by the
-            -- captain string that appears in player_costs. Replaces the old
-            -- hardcoded team_metadata.py dict so a new season is a data change,
-            -- not a code change.
-            -- One row per season this guild has run. Lets commands offer a
-            -- season: filter and give it a human label; divisions only ever
-            -- holds the *current* season, so without this the history is
-            -- reachable but unnameable.
+            -- One row per season a division has run, identified by the
+            -- season's Dota league id (RD2L Season 39 = 20056, as on
+            -- OpenDota/Dotabuff). Everything filed under a season (costs,
+            -- weeks, teams, the division's current season, website signups)
+            -- points at seasons.id; the start date is just a field.
             CREATE TABLE IF NOT EXISTS seasons (
+                id            INTEGER PRIMARY KEY,  -- Dota league id
                 guild_id      INTEGER NOT NULL,
-                season_start  TEXT NOT NULL,
-                league_id     INTEGER,
+                season_start  TEXT NOT NULL,        -- 'YYYY-MM-DD'
                 label         TEXT,
                 created_at    TEXT NOT NULL,
-                PRIMARY KEY (guild_id, season_start)
+                UNIQUE (guild_id, season_start)
             );
 
+            -- Per-season team identity (real team name + logo), keyed by the
+            -- captain string that appears in player_costs.
             CREATE TABLE IF NOT EXISTS season_teams (
-                guild_id      INTEGER NOT NULL,
-                season_start  TEXT NOT NULL,
+                season_id     INTEGER NOT NULL REFERENCES seasons(id),
                 captain       TEXT NOT NULL,      -- lowercased captain key
                 team_name     TEXT NOT NULL,
                 logo_url      TEXT,
-                PRIMARY KEY (guild_id, season_start, captain)
+                PRIMARY KEY (season_id, captain)
             );
 
             -- Per-guild roster of "tracked" players. Lets /set_player add a
@@ -402,60 +394,147 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_chat_match ON chat_messages(match_id);
         """)
     _migrate_ranked_mmr_overrides_to_rank()
-    _seed_s38_season_teams()
-    _backfill_season_registry()
     logger.info("Database initialised at %s", DB_PATH)
 
 
-def _backfill_season_registry():
-    """Register any season that already has data but predates the seasons table:
-    each division's current season, plus every season_start seen in player_costs.
-    League id comes from the division row where it lines up. Labels stay NULL —
-    they render as the start date until /start_new_season sets a real one."""
-    with _conn() as conn:
-        divs = conn.execute(
-            "SELECT guild_id, league_id, season_start FROM divisions").fetchall()
-        for d in divs:
-            conn.execute("""
-                INSERT INTO seasons (guild_id, season_start, league_id, label, created_at)
-                VALUES (?, ?, ?, NULL, datetime('now'))
-                ON CONFLICT(guild_id, season_start) DO UPDATE SET
-                    league_id = COALESCE(seasons.league_id, excluded.league_id)
-            """, (d["guild_id"], d["season_start"], d["league_id"]))
-        conn.execute("""
-            INSERT INTO seasons (guild_id, season_start, league_id, label, created_at)
-            SELECT DISTINCT pc.guild_id, pc.season_start, NULL, NULL, datetime('now')
-            FROM player_costs pc
-            WHERE NOT EXISTS (
-                SELECT 1 FROM seasons s
-                WHERE s.guild_id = pc.guild_id AND s.season_start = pc.season_start
-            )
+def _migrate_seasons_to_ids() -> None:
+    """One-time migration from seasons keyed by (guild_id, season_start) to
+    seasons keyed by their Dota league id. Every season any table mentions
+    becomes a seasons row whose id is its league id — from the seasons
+    registry, or for a division's current season, the division's league.
+    Costs, weeks and teams are rebuilt with season_id, and divisions'
+    (league_id, season_start) pair becomes current_season_id.
+
+    Runs in one transaction and checks row counts, so it lands completely or
+    not at all. Refuses (and changes nothing) if a season has no league id,
+    or two seasons claim the same one. No-op on a migrated or new database."""
+    conn = sqlite3.connect(DB_PATH, isolation_level=None)  # manage the transaction ourselves
+    conn.row_factory = sqlite3.Row
+    try:
+        cols = lambda t: {r[1] for r in conn.execute(f"PRAGMA table_info({t})")}
+        if "season_start" not in cols("player_costs") and "season_start" not in cols("divisions"):
+            return
+        # Every statement goes through execute(), inside one explicit
+        # transaction. (executescript() would commit it partway through.)
+        def run(script: str) -> None:
+            for stmt in script.split(";"):
+                if stmt.strip():
+                    conn.execute(stmt)
+
+        conn.execute("BEGIN IMMEDIATE")
+        before = {t: conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
+                  for t in ("player_costs", "season_weeks", "season_teams", "divisions")}
+
+        run("""
+            CREATE TEMP TABLE all_seasons AS
+                SELECT guild_id, season_start FROM seasons
+                UNION SELECT guild_id, season_start FROM divisions
+                UNION SELECT guild_id, season_start FROM player_costs
+                UNION SELECT guild_id, season_start FROM season_weeks
+                UNION SELECT guild_id, season_start FROM season_teams;
+
+            -- A division's league is the one it actually fetches, so it wins
+            -- for that division's current season.
+            CREATE TEMP TABLE season_keys AS
+                SELECT a.guild_id, a.season_start,
+                       COALESCE(d.league_id, s.league_id) AS id,
+                       s.label, COALESCE(s.created_at, datetime('now')) AS created_at
+                FROM all_seasons a
+                LEFT JOIN seasons s   ON s.guild_id = a.guild_id AND s.season_start = a.season_start
+                LEFT JOIN divisions d ON d.guild_id = a.guild_id AND d.season_start = a.season_start;
+        """)
+        missing = conn.execute(
+            "SELECT guild_id, season_start FROM temp.season_keys WHERE id IS NULL OR id = 0").fetchall()
+        dupes = conn.execute(
+            "SELECT id, COUNT(*) FROM temp.season_keys GROUP BY id HAVING COUNT(*) > 1").fetchall()
+        if missing or dupes:
+            raise RuntimeError(
+                "Can't key seasons by league id. "
+                + (f"No league id for: {[tuple(r) for r in missing]}. " if missing else "")
+                + (f"League ids used by more than one season: {[tuple(r) for r in dupes]}. " if dupes else "")
+                + "Set seasons.league_id for these, then restart.")
+
+        run("""
+            CREATE TABLE seasons_new (
+                id            INTEGER PRIMARY KEY,
+                guild_id      INTEGER NOT NULL,
+                season_start  TEXT NOT NULL,
+                label         TEXT,
+                created_at    TEXT NOT NULL,
+                UNIQUE (guild_id, season_start)
+            );
+            INSERT INTO seasons_new (id, guild_id, season_start, label, created_at)
+                SELECT id, guild_id, season_start, label, created_at FROM temp.season_keys;
+
+            CREATE TABLE player_costs_new (
+                season_id     INTEGER NOT NULL REFERENCES seasons(id),
+                account_id    INTEGER NOT NULL,
+                cost          INTEGER NOT NULL,
+                captain       TEXT,
+                mmr           INTEGER,
+                PRIMARY KEY (season_id, account_id)
+            );
+            INSERT INTO player_costs_new
+                SELECT n.id, pc.account_id, pc.cost, pc.captain, pc.mmr
+                FROM player_costs pc JOIN seasons_new n USING (guild_id, season_start);
+
+            CREATE TABLE season_weeks_new (
+                season_id     INTEGER NOT NULL REFERENCES seasons(id),
+                week_number   INTEGER NOT NULL,
+                start_ts      INTEGER NOT NULL,
+                end_ts        INTEGER NOT NULL,
+                PRIMARY KEY (season_id, week_number)
+            );
+            INSERT INTO season_weeks_new
+                SELECT n.id, w.week_number, w.start_ts, w.end_ts
+                FROM season_weeks w JOIN seasons_new n USING (guild_id, season_start);
+
+            CREATE TABLE season_teams_new (
+                season_id     INTEGER NOT NULL REFERENCES seasons(id),
+                captain       TEXT NOT NULL,
+                team_name     TEXT NOT NULL,
+                logo_url      TEXT,
+                PRIMARY KEY (season_id, captain)
+            );
+            INSERT INTO season_teams_new
+                SELECT n.id, t.captain, t.team_name, t.logo_url
+                FROM season_teams t JOIN seasons_new n USING (guild_id, season_start);
+
+            CREATE TABLE divisions_new (
+                guild_id          INTEGER PRIMARY KEY,
+                region            TEXT NOT NULL,
+                game_mode         TEXT NOT NULL,
+                current_season_id INTEGER REFERENCES seasons(id),
+                created_at        TEXT NOT NULL,
+                scold_channel_id  INTEGER DEFAULT NULL
+            );
+            INSERT INTO divisions_new
+                SELECT d.guild_id, d.region, d.game_mode, n.id, d.created_at, d.scold_channel_id
+                FROM divisions d LEFT JOIN seasons_new n USING (guild_id, season_start);
+
+            DROP TABLE player_costs;  ALTER TABLE player_costs_new RENAME TO player_costs;
+            DROP TABLE season_weeks;  ALTER TABLE season_weeks_new RENAME TO season_weeks;
+            DROP TABLE season_teams;  ALTER TABLE season_teams_new RENAME TO season_teams;
+            DROP TABLE divisions;     ALTER TABLE divisions_new    RENAME TO divisions;
+            DROP TABLE seasons;       ALTER TABLE seasons_new      RENAME TO seasons;
+            DROP TABLE temp.all_seasons;
+            DROP TABLE temp.season_keys;
         """)
 
-
-def _seed_s38_season_teams():
-    """One-shot: move the old hardcoded team_metadata.py dict into season_teams
-    so the S38 cards/H2H keep their real names + logos after the table exists.
-    No-op once the rows are present (or if that season isn't configured here)."""
-    S38_GUILD, S38_SEASON = 1481800158826991718, "2026-04-28"
-    with _conn() as conn:
-        row = conn.execute(
-            "SELECT 1 FROM season_teams WHERE guild_id = ? AND season_start = ? LIMIT 1",
-            (S38_GUILD, S38_SEASON),
-        ).fetchone()
-        if row:
-            return
-    try:
-        from team_metadata import _LEGACY_S38_TEAMS
+        after = {t: conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0] for t in before}
+        orphans = conn.execute("SELECT COUNT(*) FROM divisions WHERE current_season_id IS NULL").fetchone()[0]
+        if after != before or orphans:
+            raise RuntimeError(f"season id migration lost rows: before={before} after={after} "
+                               f"divisions without a season={orphans}")
+        conn.execute("COMMIT")
+        seasons = conn.execute("SELECT id, season_start, label FROM seasons ORDER BY season_start").fetchall()
+        logger.info("Migrated seasons to league ids: %s; rows %s", [tuple(r) for r in seasons], after)
     except Exception:
-        return
-    teams = [
-        {"captain": cap, "team_name": info["team_name"], "logo_url": info.get("logo_url")}
-        for cap, info in _LEGACY_S38_TEAMS.items()
-    ]
-    if teams:
-        upsert_season_teams(S38_GUILD, S38_SEASON, teams)
-        logger.info("Seeded %d S38 team identities into season_teams", len(teams))
+        if conn.in_transaction:
+            conn.execute("ROLLBACK")
+        raise
+    finally:
+        conn.close()
 
 
 def _migrate_ranked_mmr_overrides_to_rank():
@@ -529,19 +608,20 @@ def get_division(guild_id: int) -> dict | None:
     return dict(row) if row else None
 
 
-def upsert_division(guild_id: int, league_id: int, region: str, game_mode: str, season_start: str, scold_channel_id: int | None = None):
-    """Create or update a division config."""
+def upsert_division(guild_id: int, region: str, game_mode: str,
+                    current_season_id: int, scold_channel_id: int | None = None):
+    """Create or update a division config. current_season_id is a season's
+    id — its Dota league id — and is the league the fetcher pulls."""
     with _conn() as conn:
         conn.execute("""
-            INSERT INTO divisions (guild_id, league_id, region, game_mode, season_start, scold_channel_id, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+            INSERT INTO divisions (guild_id, region, game_mode, current_season_id, scold_channel_id, created_at)
+            VALUES (?, ?, ?, ?, ?, datetime('now'))
             ON CONFLICT(guild_id) DO UPDATE SET
-                league_id = excluded.league_id,
                 region = excluded.region,
                 game_mode = excluded.game_mode,
-                season_start = excluded.season_start,
+                current_season_id = excluded.current_season_id,
                 scold_channel_id = excluded.scold_channel_id
-        """, (guild_id, league_id, region, game_mode, season_start, scold_channel_id))
+        """, (guild_id, region, game_mode, current_season_id, scold_channel_id))
 
 
 def get_all_divisions() -> list[dict]:
@@ -691,68 +771,176 @@ def _week_start(week_offset: int = 0) -> tuple[int, int]:
 
 
 def _season_week_start(week_number: int, season_start_date: str) -> tuple[int, int]:
-    """Return (start_unix, end_unix) for a specific season week.
+    """Return (start_unix, end_unix) for a specific season week, by calendar.
 
-    week_number=1 means the first week of the season.
-    season_start_date is a string in 'YYYY-MM-DD' format.
+    week_number=1 means the calendar week (Mon–Sun, UTC) containing the
+    season's start date. season_start_date is a 'YYYY-MM-DD' string.
     """
-    # Parse season start date
     season_start = datetime.strptime(season_start_date, "%Y-%m-%d")
     season_start = season_start.replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=timezone.utc)
-
-    # Find the Monday of the week containing season start
     season_monday = season_start - timedelta(days=season_start.weekday())
-
-    # Calculate the start of the requested week (week_number is 1-indexed)
     target_monday = season_monday + timedelta(weeks=week_number - 1)
     target_sunday = target_monday + timedelta(days=7) - timedelta(seconds=1)
-
     return int(target_monday.timestamp()), int(target_sunday.timestamp())
 
 
-def _season_weeks_defined(guild_id: int, season_start_date: str) -> bool:
-    """True once any explicit season_weeks rows exist for this guild/season."""
+# ---------------------------------------------------------------------------
+# Seasons
+#
+# A season is a row in `seasons`, identified by seasons.id — the season's
+# Dota league id (RD2L Season 39 = 20056). Everything filed under a season —
+# costs, weeks, teams, a division's current season, the website's signups —
+# refers to that id. The start date is an ordinary field.
+# ---------------------------------------------------------------------------
+
+def get_season(season_id: int) -> dict | None:
+    """One season: {id (its Dota league id), guild_id, season_start, label, created_at}."""
     with _conn() as conn:
-        row = conn.execute(
-            "SELECT 1 FROM season_weeks WHERE guild_id = ? AND season_start = ? LIMIT 1",
-            (guild_id, season_start_date),
-        ).fetchone()
+        row = conn.execute("SELECT * FROM seasons WHERE id = ?", (season_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def get_season_by_start(guild_id: int, season_start: str) -> dict | None:
+    """The guild's season starting on this date, if there is one."""
+    with _conn() as conn:
+        row = conn.execute("SELECT * FROM seasons WHERE guild_id = ? AND season_start = ?",
+                           (guild_id, season_start)).fetchone()
+    return dict(row) if row else None
+
+
+def get_seasons(guild_id: int) -> list[dict]:
+    """Every season this guild has run, newest first."""
+    with _conn() as conn:
+        rows = conn.execute("SELECT * FROM seasons WHERE guild_id = ? ORDER BY season_start DESC",
+                            (guild_id,)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_all_seasons() -> list[dict]:
+    """Every season of every guild, newest first."""
+    with _conn() as conn:
+        rows = conn.execute("SELECT * FROM seasons ORDER BY season_start DESC, id DESC").fetchall()
+    return [dict(r) for r in rows]
+
+
+def upsert_season(season_id: int, guild_id: int, season_start: str, label: str | None = None) -> None:
+    """Create a season — season_id is its Dota league id — or update its
+    division and start date if it exists. label=None keeps any existing
+    label. Raises ValueError if the guild already has a different season
+    starting that day."""
+    with _conn() as conn:
+        clash = conn.execute("SELECT id FROM seasons WHERE guild_id = ? AND season_start = ? AND id != ?",
+                             (guild_id, season_start, season_id)).fetchone()
+        if clash:
+            raise ValueError(f"League {clash['id']} already starts on {season_start}.")
+        conn.execute("""
+            INSERT INTO seasons (id, guild_id, season_start, label, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                guild_id     = excluded.guild_id,
+                season_start = excluded.season_start,
+                label        = COALESCE(excluded.label, seasons.label)
+        """, (season_id, guild_id, season_start, label, datetime.now(timezone.utc).isoformat()))
+
+
+def update_season(season_id: int, *, label: str | None = None, season_start: str | None = None) -> None:
+    """Rename a season and/or move its start date. Nothing else changes:
+    costs, weeks, teams and signups point at the season's id. Explicit week
+    boundaries keep their own dates.
+
+    Raises ValueError for a malformed date, or one another season of the
+    same guild already starts on."""
+    with _conn() as conn:
+        if season_start is not None:
+            datetime.strptime(season_start, "%Y-%m-%d")  # ValueError on a bad date
+            clash = conn.execute("""
+                SELECT 1 FROM seasons
+                WHERE season_start = ? AND id != ?
+                  AND guild_id = (SELECT guild_id FROM seasons WHERE id = ?)
+            """, (season_start, season_id, season_id)).fetchone()
+            if clash:
+                raise ValueError(f"There's already a season starting {season_start}.")
+            conn.execute("UPDATE seasons SET season_start = ? WHERE id = ?", (season_start, season_id))
+        if label is not None:
+            conn.execute("UPDATE seasons SET label = ? WHERE id = ?", (label, season_id))
+
+
+def season_label(season: dict) -> str:
+    """Display name for a season row: its label if we have one, else the date."""
+    lbl = season.get("label")
+    return lbl if lbl else f"Season starting {season['season_start']}"
+
+
+def get_current_season(guild_id: int) -> dict | None:
+    """The division's current season — what commands use when no season is given."""
+    with _conn() as conn:
+        row = conn.execute("""
+            SELECT s.* FROM divisions d JOIN seasons s ON s.id = d.current_season_id
+            WHERE d.guild_id = ?
+        """, (guild_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def get_active_draft_season() -> dict | None:
+    """The newest division's current season that has draft data — the one
+    the stream-card pages show, since they take no season parameter."""
+    with _conn() as conn:
+        row = conn.execute("""
+            SELECT s.* FROM divisions d JOIN seasons s ON s.id = d.current_season_id
+            WHERE EXISTS (SELECT 1 FROM player_costs pc WHERE pc.season_id = s.id)
+            ORDER BY s.season_start DESC
+            LIMIT 1
+        """).fetchone()
+    return dict(row) if row else None
+
+
+def set_current_season(guild_id: int, season_id: int) -> None:
+    with _conn() as conn:
+        conn.execute("UPDATE divisions SET current_season_id = ? WHERE guild_id = ?", (season_id, guild_id))
+
+
+# ---------------------------------------------------------------------------
+# Season weeks
+# ---------------------------------------------------------------------------
+
+def _season_weeks_defined(season_id: int) -> bool:
+    """True once any explicit season_weeks rows exist for this season."""
+    with _conn() as conn:
+        row = conn.execute("SELECT 1 FROM season_weeks WHERE season_id = ? LIMIT 1", (season_id,)).fetchone()
     return row is not None
 
 
-def get_season_week_range(guild_id: int, season_start_date: str, week_number: int) -> tuple[int, int]:
+def get_season_week_range(season_id: int, week_number: int) -> tuple[int, int]:
     """Canonical (start_unix, end_unix) for a season week. Prefers an
     explicit season_weeks row (so byes/reschedules can override a single
-    week); falls back to the calendar formula when the guild/season has no
-    explicit weeks defined yet (e.g. any season before this feature existed)."""
+    week); falls back to the calendar formula when the season has no
+    explicit weeks defined (e.g. any season before this feature existed)."""
     with _conn() as conn:
         row = conn.execute(
-            "SELECT start_ts, end_ts FROM season_weeks "
-            "WHERE guild_id = ? AND season_start = ? AND week_number = ?",
-            (guild_id, season_start_date, week_number),
+            "SELECT start_ts, end_ts FROM season_weeks WHERE season_id = ? AND week_number = ?",
+            (season_id, week_number),
         ).fetchone()
     if row:
         return row["start_ts"], row["end_ts"]
-    return _season_week_start(week_number, season_start_date)
+    return _season_week_start(week_number, get_season(season_id)["season_start"])
 
 
-def get_current_season_week(guild_id: int, season_start_date: str) -> int:
+def get_current_season_week(season_id: int) -> int:
     """Canonical 'current week' resolver, used wherever week=None needs to
     mean something concrete (leaderboard/player/matches default, /summary).
 
     With explicit weeks defined: the week whose range contains right now, or
     the closest one (last if we're past every defined week, first if we're
     before all of them). Falls back to the legacy get_latest_season_week
-    calendar logic when no explicit weeks exist for this guild/season."""
-    if not _season_weeks_defined(guild_id, season_start_date):
-        return get_latest_season_week(guild_id, season_start_date) or 1
+    calendar logic when the season has no explicit weeks."""
+    if not _season_weeks_defined(season_id):
+        return get_latest_season_week(season_id) or 1
 
     now_ts = int(datetime.now(timezone.utc).timestamp())
     with _conn() as conn:
         rows = conn.execute(
-            "SELECT week_number, start_ts, end_ts FROM season_weeks "
-            "WHERE guild_id = ? AND season_start = ? ORDER BY start_ts",
-            (guild_id, season_start_date),
+            "SELECT week_number, start_ts, end_ts FROM season_weeks WHERE season_id = ? ORDER BY start_ts",
+            (season_id,),
         ).fetchall()
 
     current = rows[0]["week_number"]
@@ -764,94 +952,101 @@ def get_current_season_week(guild_id: int, season_start_date: str) -> int:
     return current
 
 
+def get_season_weeks(season_id: int) -> list[dict]:
+    """All explicitly-defined weeks for this season, ordered by week_number."""
+    with _conn() as conn:
+        rows = conn.execute(
+            "SELECT week_number, start_ts, end_ts FROM season_weeks WHERE season_id = ? ORDER BY week_number",
+            (season_id,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def upsert_season_week(season_id: int, week_number: int, start_ts: int, end_ts: int) -> None:
+    """Insert/update one explicit week boundary."""
+    with _conn() as conn:
+        conn.execute("""
+            INSERT INTO season_weeks (season_id, week_number, start_ts, end_ts)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(season_id, week_number) DO UPDATE SET
+                start_ts = excluded.start_ts,
+                end_ts   = excluded.end_ts
+        """, (season_id, week_number, start_ts, end_ts))
+
+
+def delete_season_week(season_id: int, week_number: int) -> bool:
+    """Remove one week's explicit definition. Returns True if a row was removed."""
+    with _conn() as conn:
+        cur = conn.execute("DELETE FROM season_weeks WHERE season_id = ? AND week_number = ?",
+                           (season_id, week_number))
+    return cur.rowcount > 0
+
+
+def generate_season_weeks(season_id: int, num_weeks: int, first_week: int = 1) -> None:
+    """Bulk-create consecutive 7-day week blocks starting at `first_week`.
+
+    first_week=1 (default) numbers them 1..num_weeks, with week 1 being the
+    calendar week containing the season's start date. first_week=0 numbers
+    them 0..num_weeks-1 for seasons that open with a scrim/"week 0" that
+    doesn't count toward seeding — week 0 is then the week containing the
+    start date and week 1 is the week after.
+
+    Individual weeks can be adjusted afterward via upsert_season_week /
+    delete_season_week (e.g. a bye) without affecting any other week."""
+    start_date = get_season(season_id)["season_start"]
+    with _conn() as conn:
+        conn.executemany("""
+            INSERT INTO season_weeks (season_id, week_number, start_ts, end_ts)
+            VALUES (:season_id, :week_number, :start_ts, :end_ts)
+            ON CONFLICT(season_id, week_number) DO UPDATE SET
+                start_ts = excluded.start_ts,
+                end_ts   = excluded.end_ts
+        """, [
+            {
+                "season_id": season_id,
+                "week_number": n,
+                # Offset so `first_week` maps onto the calendar week containing
+                # the start date, whatever we've chosen to number that week.
+                "start_ts": _season_week_start(n - first_week + 1, start_date)[0],
+                "end_ts": _season_week_start(n - first_week + 1, start_date)[1],
+            }
+            for n in range(first_week, first_week + num_weeks)
+        ])
+
+
+def _all_time_start_ts(season_id: int | None) -> int:
+    """Lower bound for a season's matches: the earliest explicitly-defined
+    week's start (if the season has explicit weeks), else the legacy
+    week-zero calendar calculation, else 0 (no season at all)."""
+    if not season_id:
+        return 0
+    if _season_weeks_defined(season_id):
+        with _conn() as conn:
+            row = conn.execute("SELECT MIN(start_ts) AS s FROM season_weeks WHERE season_id = ?",
+                               (season_id,)).fetchone()
+        if row and row["s"] is not None:
+            return row["s"]
+    season_start = datetime.strptime(get_season(season_id)["season_start"], "%Y-%m-%d")
+    season_start = season_start.replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=timezone.utc)
+    season_monday = season_start - timedelta(days=season_start.weekday())
+    week_zero_start = season_monday - timedelta(weeks=1)
+    return int(week_zero_start.timestamp())
+
+
 # ---------------------------------------------------------------------------
 # Season teams (team identity: real name + logo, per season)
 # ---------------------------------------------------------------------------
 
-# ---------------------------------------------------------------------------
-# Season registry (which seasons this guild has run)
-# ---------------------------------------------------------------------------
-
-def get_seasons(guild_id: int) -> list[dict]:
-    """Every season this guild has run, newest first.
-
-    Unions the registry with any season_start that actually has costs or
-    weeks on file, so seasons predating the registry still show up.
-    """
-    with _conn() as conn:
-        rows = conn.execute("""
-            SELECT s.season_start,
-                   s.league_id,
-                   s.label
-            FROM seasons s WHERE s.guild_id = :g
-            UNION
-            SELECT DISTINCT pc.season_start, NULL, NULL
-            FROM player_costs pc WHERE pc.guild_id = :g
-              AND pc.season_start NOT IN (SELECT season_start FROM seasons WHERE guild_id = :g)
-            UNION
-            SELECT DISTINCT sw.season_start, NULL, NULL
-            FROM season_weeks sw WHERE sw.guild_id = :g
-              AND sw.season_start NOT IN (SELECT season_start FROM seasons WHERE guild_id = :g)
-            ORDER BY season_start DESC
-        """, {"g": guild_id}).fetchall()
-    return [dict(r) for r in rows]
-
-
-def upsert_season(guild_id: int, season_start: str,
-                  league_id: int | None = None, label: str | None = None) -> None:
-    """Register a season. Passing None for league_id/label keeps any existing value."""
-    from datetime import datetime as _dt, timezone as _tz
-    with _conn() as conn:
-        conn.execute("""
-            INSERT INTO seasons (guild_id, season_start, league_id, label, created_at)
-            VALUES (?, ?, ?, ?, ?)
-            ON CONFLICT(guild_id, season_start) DO UPDATE SET
-                league_id = COALESCE(excluded.league_id, seasons.league_id),
-                label     = COALESCE(excluded.label,     seasons.label)
-        """, (guild_id, season_start, league_id, label, _dt.now(_tz.utc).isoformat()))
-
-
-def change_season_start(guild_id: int, old_start: str, new_start: str) -> None:
-    """Move a season to a new start date. The start date is part of the key
-    for everything filed under the season (costs, teams, weeks, the
-    division's current-season pointer, the website's signups), so every
-    table with guild_id + season_start columns is updated together, in one
-    transaction. Explicit week boundaries (season_weeks) keep their dates.
-
-    Raises ValueError if the new date is malformed or already a season.
-    """
-    datetime.strptime(new_start, "%Y-%m-%d")  # ValueError on a bad date
-    with _conn() as conn:
-        if conn.execute("SELECT 1 FROM seasons WHERE guild_id = ? AND season_start = ?",
-                        (guild_id, new_start)).fetchone():
-            raise ValueError(f"There's already a season starting {new_start}.")
-        tables = [r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")]
-        for t in tables:
-            cols = {r[1] for r in conn.execute(f"PRAGMA table_info({t})")}
-            if {"guild_id", "season_start"} <= cols:
-                conn.execute(f"UPDATE {t} SET season_start = ? WHERE guild_id = ? AND season_start = ?",
-                             (new_start, guild_id, old_start))
-    logger.info("Season %s moved to %s for guild %d", old_start, new_start, guild_id)
-
-
-def season_label(season: dict) -> str:
-    """Display name for a season row: its label if we have one, else the date."""
-    lbl = season.get("label")
-    return lbl if lbl else f"Season starting {season['season_start']}"
-
-
-def get_season_teams(guild_id: int, season_start_date: str) -> dict[str, dict]:
-    """All teams for a guild/season as {lowercased_captain: {team_name, logo_url}}."""
+def get_season_teams(season_id: int) -> dict[str, dict]:
+    """All teams for a season as {lowercased_captain: {team_name, logo_url}}."""
     with _conn() as conn:
         rows = conn.execute(
-            "SELECT captain, team_name, logo_url FROM season_teams "
-            "WHERE guild_id = ? AND season_start = ?",
-            (guild_id, season_start_date),
+            "SELECT captain, team_name, logo_url FROM season_teams WHERE season_id = ?", (season_id,),
         ).fetchall()
     return {r["captain"]: {"team_name": r["team_name"], "logo_url": r["logo_url"]} for r in rows}
 
 
-def upsert_season_teams(guild_id: int, season_start_date: str, teams: list[dict]) -> int:
+def upsert_season_teams(season_id: int, teams: list[dict]) -> int:
     """Insert/update team identities. Each dict needs captain + team_name;
     logo_url optional. Captain is stored lowercased so lookups are
     case-insensitive against whatever player_costs holds."""
@@ -859,15 +1054,14 @@ def upsert_season_teams(guild_id: int, season_start_date: str, teams: list[dict]
         return 0
     with _conn() as conn:
         conn.executemany("""
-            INSERT INTO season_teams (guild_id, season_start, captain, team_name, logo_url)
-            VALUES (:guild_id, :season_start, :captain, :team_name, :logo_url)
-            ON CONFLICT(guild_id, season_start, captain) DO UPDATE SET
+            INSERT INTO season_teams (season_id, captain, team_name, logo_url)
+            VALUES (:season_id, :captain, :team_name, :logo_url)
+            ON CONFLICT(season_id, captain) DO UPDATE SET
                 team_name = excluded.team_name,
                 logo_url  = COALESCE(excluded.logo_url, season_teams.logo_url)
         """, [
             {
-                "guild_id": guild_id,
-                "season_start": season_start_date,
+                "season_id": season_id,
                 "captain": (t["captain"] or "").strip().lower(),
                 "team_name": t["team_name"],
                 "logo_url": t.get("logo_url"),
@@ -876,92 +1070,6 @@ def upsert_season_teams(guild_id: int, season_start_date: str, teams: list[dict]
         ])
     return len(teams)
 
-
-def get_season_weeks(guild_id: int, season_start_date: str) -> list[dict]:
-    """All explicitly-defined weeks for this guild/season, ordered by week_number."""
-    with _conn() as conn:
-        rows = conn.execute(
-            "SELECT week_number, start_ts, end_ts FROM season_weeks "
-            "WHERE guild_id = ? AND season_start = ? ORDER BY week_number",
-            (guild_id, season_start_date),
-        ).fetchall()
-    return [dict(r) for r in rows]
-
-
-def upsert_season_week(guild_id: int, season_start_date: str, week_number: int, start_ts: int, end_ts: int) -> None:
-    """Insert/update one explicit week boundary."""
-    with _conn() as conn:
-        conn.execute("""
-            INSERT INTO season_weeks (guild_id, season_start, week_number, start_ts, end_ts)
-            VALUES (?, ?, ?, ?, ?)
-            ON CONFLICT(guild_id, season_start, week_number) DO UPDATE SET
-                start_ts = excluded.start_ts,
-                end_ts   = excluded.end_ts
-        """, (guild_id, season_start_date, week_number, start_ts, end_ts))
-
-
-def delete_season_week(guild_id: int, season_start_date: str, week_number: int) -> bool:
-    """Remove one week's explicit definition. Returns True if a row was removed."""
-    with _conn() as conn:
-        cur = conn.execute(
-            "DELETE FROM season_weeks WHERE guild_id = ? AND season_start = ? AND week_number = ?",
-            (guild_id, season_start_date, week_number),
-        )
-    return cur.rowcount > 0
-
-
-def generate_season_weeks(guild_id: int, season_start_date: str, num_weeks: int,
-                          first_week: int = 1) -> None:
-    """Bulk-create consecutive 7-day week blocks starting at `first_week`.
-
-    first_week=1 (default) numbers them 1..num_weeks, with week 1 being the
-    calendar week containing season_start. first_week=0 numbers them
-    0..num_weeks-1 for seasons that open with a scrim/"week 0" that doesn't
-    count toward seeding — week 0 is then the week containing season_start
-    and week 1 is the week after.
-
-    Individual weeks can be adjusted afterward via upsert_season_week /
-    delete_season_week (e.g. a bye) without affecting any other week."""
-    with _conn() as conn:
-        conn.executemany("""
-            INSERT INTO season_weeks (guild_id, season_start, week_number, start_ts, end_ts)
-            VALUES (:guild_id, :season_start, :week_number, :start_ts, :end_ts)
-            ON CONFLICT(guild_id, season_start, week_number) DO UPDATE SET
-                start_ts = excluded.start_ts,
-                end_ts   = excluded.end_ts
-        """, [
-            {
-                "guild_id": guild_id,
-                "season_start": season_start_date,
-                "week_number": n,
-                "start_ts": _season_week_start(n - first_week + 1, season_start_date)[0],
-                "end_ts": _season_week_start(n - first_week + 1, season_start_date)[1],
-            }
-            # Offset so `first_week` maps onto the calendar week containing
-            # season_start, whatever we've chosen to number that week.
-            for n in range(first_week, first_week + num_weeks)
-        ])
-
-
-def _all_time_start_ts(guild_id: int, season_start_date: str | None) -> int:
-    """Lower bound for 'all-time' queries: the earliest explicitly-defined
-    week's start (if any weeks are defined for this guild/season), else the
-    legacy week-zero calendar calculation, else 0 (no season_start at all)."""
-    if not season_start_date:
-        return 0
-    if _season_weeks_defined(guild_id, season_start_date):
-        with _conn() as conn:
-            row = conn.execute(
-                "SELECT MIN(start_ts) AS s FROM season_weeks WHERE guild_id = ? AND season_start = ?",
-                (guild_id, season_start_date),
-            ).fetchone()
-        if row and row["s"] is not None:
-            return row["s"]
-    season_start = datetime.strptime(season_start_date, "%Y-%m-%d")
-    season_start = season_start.replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=timezone.utc)
-    season_monday = season_start - timedelta(days=season_start.weekday())
-    week_zero_start = season_monday - timedelta(weeks=1)
-    return int(week_zero_start.timestamp())
 
 
 def _apply_override_nicknames(results: list[dict]) -> list[dict]:
@@ -1086,7 +1194,7 @@ def get_latest_week_stats(guild_id: int, week_offset: int = 0) -> list[dict]:
     return _apply_override_nicknames(results)
 
 
-def get_stats_for_season_week(guild_id: int, week_number: int, season_start_date: str) -> list[dict]:
+def get_stats_for_season_week(season_id: int, week_number: int) -> list[dict]:
     """Return aggregated per-player stats for a specific season week.
 
     Resolves through get_season_week_range so an explicitly-defined week
@@ -1094,7 +1202,8 @@ def get_stats_for_season_week(guild_id: int, week_number: int, season_start_date
     calendar formula — the formula assumes week 1 is the first week, so it
     puts week 0 a week BEFORE the season and finds nothing.
     """
-    start, end = get_season_week_range(guild_id, season_start_date, week_number)
+    guild_id = get_season(season_id)["guild_id"]
+    start, end = get_season_week_range(season_id, week_number)
     with _conn() as conn:
         rows = conn.execute("""
             SELECT
@@ -1164,7 +1273,7 @@ def get_stats_for_season_week(guild_id: int, week_number: int, season_start_date
         d["diff"] = diffs.get(d["account_id"], 0.0)
         d["diff_vs_lobby"] = diffs_vs_lobby.get(d["account_id"], 0.0)
         results.append(d)
-    costs = get_player_costs(guild_id, season_start_date)
+    costs = get_player_costs(season_id)
     results = _attach_costs(results, costs)
     _compute_value(results)
     attendance_map = _compute_attendance(guild_id, start, end, costs)
@@ -1173,21 +1282,21 @@ def get_stats_for_season_week(guild_id: int, week_number: int, season_start_date
     return _apply_override_nicknames(results)
 
 
-def get_all_time_stats(guild_id: int, season_start_date: str = None,
+def get_all_time_stats(guild_id: int, season_id: int | None = None,
                        cross_season: bool = False) -> list[dict]:
     """Return aggregated per-player stats across all matches for a division.
 
-    If season_start_date is provided, only includes matches from that date
+    If season_id is given, only includes matches from that season's start
     onwards. With cross_season=True the match window opens up to every match
     the guild has ever recorded (all seasons), while cost-derived fields
-    (cost/captain/value/attendance) still come from season_start_date — those
+    (cost/captain/value/attendance) still come from season_id — those
     describe a specific draft, so they stay season-scoped by definition.
     """
     from fantasy import calculate_fantasy_points
 
     # cross_season widens the match window to the guild's entire history;
-    # cost/attendance below still key off season_start_date.
-    start_ts = 0 if cross_season else _all_time_start_ts(guild_id, season_start_date)
+    # cost/attendance below still key off season_id.
+    start_ts = 0 if cross_season else _all_time_start_ts(season_id)
 
     with _conn() as conn:
         rows = conn.execute("""
@@ -1257,14 +1366,14 @@ def get_all_time_stats(guild_id: int, season_start_date: str = None,
         d["diff"] = diffs.get(d["account_id"], 0.0)
         d["diff_vs_lobby"] = diffs_vs_lobby.get(d["account_id"], 0.0)
         results.append(d)
-    if season_start_date:
-        costs = get_player_costs(guild_id, season_start_date)
+    if season_id:
+        costs = get_player_costs(season_id)
         results = _attach_costs(results, costs)
         _compute_value(results)
         # Attendance is "what share of your team's season did you show up for",
         # so it always uses the season window even when the stat rows above
         # were widened to every season by cross_season.
-        season_ts = _all_time_start_ts(guild_id, season_start_date)
+        season_ts = _all_time_start_ts(season_id)
         attendance_map = _compute_attendance(guild_id, season_ts, None, costs)
         for s in results:
             s["attendance"] = attendance_map.get(s["account_id"])
@@ -1609,7 +1718,7 @@ def is_avatar_hidden(account_id: int) -> bool:
     return bool(row and row["hide_avatar"])
 
 
-def compute_fantasy_adjusted_ratings(guild_id: int, season_start: str) -> dict[int, dict]:
+def compute_fantasy_adjusted_ratings(season_id: int) -> dict[int, dict]:
     """For each cached player in this guild, fit a regression line of
     fantasy diff (boosted by winrate) vs. base internal_rating, then return a
     per-account_id dict of fantasy-adjusted ratings.
@@ -1621,8 +1730,8 @@ def compute_fantasy_adjusted_ratings(guild_id: int, season_start: str) -> dict[i
 
     Uses every match the guild has ever recorded, across all seasons: a
     rating is a judgement of the player, not of their current season.
-    (season_start only scopes the draft-cost fields get_all_time_stats also
-    returns, which this doesn't use.) Before this was explicit, the S39
+    (season_id picks the guild, and only scopes the draft-cost fields
+    get_all_time_stats also returns, which this doesn't use.) Before this was explicit, the S39
     rollover quietly narrowed it to the current season's games.
 
     Returns: {account_id: {
@@ -1631,12 +1740,13 @@ def compute_fantasy_adjusted_ratings(guild_id: int, season_start: str) -> dict[i
         "diff": float, "expected": float, "residual": float, "pct": float,
     }}
     """
+    guild_id = get_season(season_id)["guild_id"]
     cached = get_guild_cached_ratings(guild_id)
     rows = [dict(r) for r in cached]
     if not rows:
         return {}
 
-    stats = get_all_time_stats(guild_id, season_start, cross_season=True)
+    stats = get_all_time_stats(guild_id, season_id, cross_season=True)
     diff_by_aid: dict[int, float] = {}
     games_by_aid: dict[int, int] = {}
     for s in stats:
@@ -1901,7 +2011,7 @@ def delete_skill_override(account_id: int) -> bool:
         return cur.rowcount > 0
 
 
-def get_captain_account_ids(guild_id: int, season_start: str) -> dict[str, int | None]:
+def get_captain_account_ids(season_id: int) -> dict[str, int | None]:
     """Map each captain name from player_costs to an account_id by exact
     case-insensitive name match against (in order):
       1. skill_overrides.nickname
@@ -1910,13 +2020,14 @@ def get_captain_account_ids(guild_id: int, season_start: str) -> dict[str, int |
       4. players.name globally
     Returns {captain_name: account_id_or_None}.
     """
+    guild_id = get_season(season_id)["guild_id"]
     with _conn() as conn:
         captains = [
             r["captain"]
             for r in conn.execute(
                 "SELECT DISTINCT captain FROM player_costs "
-                "WHERE guild_id = ? AND season_start = ? AND captain IS NOT NULL",
-                (guild_id, season_start),
+                "WHERE season_id = ? AND captain IS NOT NULL",
+                (season_id,),
             ).fetchall()
         ]
         result: dict[str, int | None] = {cap: None for cap in captains}
@@ -1954,7 +2065,7 @@ def get_captain_account_ids(guild_id: int, season_start: str) -> dict[str, int |
 
 
 def get_head_to_head_matches(
-    guild_id: int, season_start: str, captain_a: str, captain_b: str,
+    season_id: int, captain_a: str, captain_b: str,
 ) -> list[dict]:
     """Find matches where both teams had ≥3 of their roster on opposite sides.
 
@@ -1962,10 +2073,11 @@ def get_head_to_head_matches(
         match_id, start_time, duration, a_won (bool)
     Sorted by start_time ascending.
     """
-    start_ts = _all_time_start_ts(guild_id, season_start)
+    guild_id = get_season(season_id)["guild_id"]
+    start_ts = _all_time_start_ts(season_id)
 
-    costs = get_player_costs(guild_id, season_start)
-    cap_aids = get_captain_account_ids(guild_id, season_start)
+    costs = get_player_costs(season_id)
+    cap_aids = get_captain_account_ids(season_id)
 
     def _roster(cap_name: str) -> set[int]:
         s = {aid for aid, c in costs.items() if c.get("captain") == cap_name}
@@ -2028,7 +2140,7 @@ def get_head_to_head_matches(
 
 
 def get_match_team_captains(
-    guild_id: int, season_start: str, match_ids: list[int],
+    season_id: int, match_ids: list[int],
 ) -> dict[int, dict[str, str | None]]:
     """Attribute each side of each match to a team, keyed by captain.
 
@@ -2039,11 +2151,11 @@ def get_match_team_captains(
 
     Returns {match_id: {"radiant": captain_or_None, "dire": captain_or_None}}.
     """
-    if not match_ids or not season_start:
+    if not match_ids or not season_id:
         return {}
 
-    costs = get_player_costs(guild_id, season_start)
-    cap_aids = get_captain_account_ids(guild_id, season_start)
+    costs = get_player_costs(season_id)
+    cap_aids = get_captain_account_ids(season_id)
     rosters: dict[str, set[int]] = {}
     for aid, c in costs.items():
         if c.get("captain"):
@@ -2077,7 +2189,7 @@ def get_match_team_captains(
     return result
 
 
-def get_team_match_aggregates(guild_id: int, season_start: str) -> dict[str, dict]:
+def get_team_match_aggregates(season_id: int) -> dict[str, dict]:
     """Per-team stats computed match-by-match instead of per-player-row.
 
     Algorithm:
@@ -2094,11 +2206,12 @@ def get_team_match_aggregates(guild_id: int, season_start: str) -> dict[str, dic
     games_played here counts *team matches* (not player-games), and wins is
     a real team W-L.
     """
-    start_ts = _all_time_start_ts(guild_id, season_start)
+    guild_id = get_season(season_id)["guild_id"]
+    start_ts = _all_time_start_ts(season_id)
 
     # Rosters: captain → {account_ids}
-    costs = get_player_costs(guild_id, season_start)
-    captain_aids = get_captain_account_ids(guild_id, season_start)
+    costs = get_player_costs(season_id)
+    captain_aids = get_captain_account_ids(season_id)
     rosters: dict[str, set[int]] = {}
     for aid, c in costs.items():
         cap = c.get("captain")
@@ -2112,7 +2225,7 @@ def get_team_match_aggregates(guild_id: int, season_start: str) -> dict[str, dic
         return {}
 
     # Display-name list per team (for the roster line in the embed).
-    all_stats = {s["account_id"]: s for s in get_all_time_stats(guild_id, season_start)}
+    all_stats = {s["account_id"]: s for s in get_all_time_stats(guild_id, season_id)}
     member_names: dict[str, list[str]] = {}
     for cap, aids in rosters.items():
         names = []
@@ -2245,7 +2358,7 @@ def get_team_match_aggregates(guild_id: int, season_start: str) -> dict[str, dic
     return teams
 
 
-def get_team_aggregates(guild_id: int, season_start: str) -> dict[str, dict]:
+def get_team_aggregates(season_id: int) -> dict[str, dict]:
     """Aggregate season stats by team (keyed by captain name).
 
     Per-game stats (gpm, kda, hero_damage, etc.) are weighted-averaged by
@@ -2256,10 +2369,10 @@ def get_team_aggregates(guild_id: int, season_start: str) -> dict[str, dict]:
     Stats that don't aggregate meaningfully (diff, value, attendance) are
     omitted.
     """
-    costs = get_player_costs(guild_id, season_start)
+    costs = get_player_costs(season_id)
     if not costs:
         return {}
-    all_stats = {s["account_id"]: s for s in get_all_time_stats(guild_id, season_start)}
+    all_stats = {s["account_id"]: s for s in get_all_time_stats(get_season(season_id)["guild_id"], season_id)}
 
     by_captain: dict[str, list[dict]] = {}
     for aid, c in costs.items():
@@ -2272,7 +2385,7 @@ def get_team_aggregates(guild_id: int, season_start: str) -> dict[str, dict]:
 
     # Fold the captain's own stats into their team (when we can resolve the
     # captain name to an account_id).
-    captain_aids = get_captain_account_ids(guild_id, season_start)
+    captain_aids = get_captain_account_ids(season_id)
     for cap, cap_aid in captain_aids.items():
         if not cap_aid or cap not in by_captain:
             continue
@@ -2337,15 +2450,17 @@ def _mirror_alts_into(result: dict[int, dict]) -> None:
             result[alt_id] = result[main_id]
 
 
-def get_player_costs(guild_id: int, season_start: str) -> dict[int, dict]:
+def get_player_costs(season_id: int) -> dict[int, dict]:
     """Return {account_id: {cost, captain, mmr}} for the season. Alts with
     no cost row of their own get their main's mirrored under their own
     account_id too — see _mirror_alts_into."""
     with _conn() as conn:
         rows = conn.execute(
-            "SELECT account_id, cost, captain, mmr FROM player_costs "
-            "WHERE guild_id = ? AND season_start = ?",
-            (guild_id, season_start),
+            # Explicit order (priciest first) — rosters and member lists
+            # follow it, and table order isn't guaranteed.
+            "SELECT account_id, cost, captain, mmr FROM player_costs WHERE season_id = ? "
+            "ORDER BY cost DESC, account_id",
+            (season_id,),
         ).fetchall()
     result = {
         r["account_id"]: {"cost": r["cost"], "captain": r["captain"], "mmr": r["mmr"]}
@@ -2355,21 +2470,20 @@ def get_player_costs(guild_id: int, season_start: str) -> dict[int, dict]:
     return result
 
 
-def upsert_player_costs(guild_id: int, season_start: str, costs: list[dict]):
+def upsert_player_costs(season_id: int, costs: list[dict]):
     """Insert/update player costs. Each dict needs account_id, cost; captain + mmr optional."""
     if not costs:
         return
     with _conn() as conn:
         conn.executemany("""
-            INSERT INTO player_costs (guild_id, season_start, account_id, cost, captain, mmr)
-            VALUES (:guild_id, :season_start, :account_id, :cost, :captain, :mmr)
-            ON CONFLICT(guild_id, season_start, account_id) DO UPDATE SET
+            INSERT INTO player_costs (season_id, account_id, cost, captain, mmr)
+            VALUES (:season_id, :account_id, :cost, :captain, :mmr)
+            ON CONFLICT(season_id, account_id) DO UPDATE SET
                 cost    = excluded.cost,
                 captain = excluded.captain,
                 mmr     = excluded.mmr
         """, [{
-            "guild_id":     guild_id,
-            "season_start": season_start,
+            "season_id":    season_id,
             "captain":      None,
             "mmr":          None,
             **c,
@@ -2682,26 +2796,26 @@ def _compute_value(stats: list[dict]) -> list[dict]:
 
 
 def get_player_team_diff(
-    guild_id: int,
     account_id: int,
-    season_start_date: str,
+    season_id: int,
     week_number: int | None = None,
 ) -> dict | None:
     """
     Per-match comparison of one player's fantasy points to the average of their
     4 same-side teammates. Aggregated across all matches in the requested range.
 
-    week_number=None or -1 → all-time (filtered by season_start_date).
+    week_number=None or -1 → all-time (from the season's start onwards).
     Otherwise scoped to that season week.
 
     Returns None if the player has no matches in range.
     """
+    guild_id = get_season(season_id)["guild_id"]
     if week_number is None or week_number == -1:
         # All-time: mirror the season-start filter used by get_all_time_stats
-        start = _all_time_start_ts(guild_id, season_start_date)
+        start = _all_time_start_ts(season_id)
         end = 2**31 - 1
     else:
-        start, end = get_season_week_range(guild_id, season_start_date, week_number)
+        start, end = get_season_week_range(season_id, week_number)
 
     with _conn() as conn:
         target_matches = conn.execute("""
@@ -2794,8 +2908,10 @@ def get_all_weeks(guild_id: int) -> list[dict]:
     return [dict(r) for r in rows]
 
 
-def get_latest_season_week(guild_id: int, season_start_date: str) -> int | None:
+def get_latest_season_week(season_id: int) -> int | None:
     """Return the latest season week number that has data, or None if no data."""
+    season = get_season(season_id)
+    guild_id, season_start_date = season["guild_id"], season["season_start"]
     with _conn() as conn:
         row = conn.execute("""
             SELECT MAX(start_time) AS latest_time FROM matches WHERE guild_id = ?
@@ -2836,9 +2952,10 @@ def get_matches_for_week(guild_id: int, week_offset: int = 0) -> list[dict]:
     return [dict(r) for r in rows]
 
 
-def get_matches_for_season_week(guild_id: int, week_number: int, season_start_date: str) -> list[dict]:
+def get_matches_for_season_week(season_id: int, week_number: int) -> list[dict]:
     """Return all matches for a specific season week (1-indexed)."""
-    start, end = get_season_week_range(guild_id, season_start_date, week_number)
+    guild_id = get_season(season_id)["guild_id"]
+    start, end = get_season_week_range(season_id, week_number)
     with _conn() as conn:
         rows = conn.execute("""
             SELECT
@@ -2868,16 +2985,16 @@ def latest_match_fetch(guild_id: int) -> str | None:
     return row[0] if row else None
 
 
-def get_latest_matches(guild_id: int, season_start_date: str | None = None) -> list[dict]:
+def get_latest_matches(guild_id: int, season_id: int | None = None) -> list[dict]:
     """Return all matches from the current season week (via
     get_current_season_week/get_season_week_range, so this respects explicit
     week boundaries — including byes — instead of a raw calendar week).
 
     Falls back to the plain "most recent calendar week with a match" when no
-    season_start_date is available at all (e.g. division not configured)."""
-    if season_start_date:
-        week_number = get_current_season_week(guild_id, season_start_date)
-        start, end = get_season_week_range(guild_id, season_start_date, week_number)
+    season is available at all (e.g. division not configured)."""
+    if season_id:
+        week_number = get_current_season_week(season_id)
+        start, end = get_season_week_range(season_id, week_number)
         with _conn() as conn:
             rows = conn.execute("""
                 SELECT match_id, start_time, duration, radiant_win, radiant_score, dire_score

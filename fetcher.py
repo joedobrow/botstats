@@ -2,7 +2,7 @@
 Fetcher — talks to the OpenDota API.
 
 Flow:
-  1. Load division config from DB (league_id, region, game_mode)
+  1. Load division config from DB (current season = league id, region, game_mode)
   2. GET /leagues/{league_id}/matches  →  list of recent matches for the league
   3. Filter by region clusters and game mode
   4. For each surviving match_id, GET /matches/{match_id}  →  full player data
@@ -155,7 +155,7 @@ async def fetch_and_store_matches_for_division(guild_id: int) -> int:
         logger.warning("No division configured for guild %d", guild_id)
         return 0
 
-    league_id = division["league_id"]
+    league_id = division["current_season_id"]  # a season's id is its Dota league id
     region = division["region"]
     game_mode_key = division["game_mode"]
 
