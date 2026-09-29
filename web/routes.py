@@ -237,7 +237,7 @@ async def rules(request: web.Request):
 
 @routes.get("/seasons")
 async def seasons_page(request: web.Request):
-    seasons = sorted(store.all_seasons(), key=lambda s: s["season_start"])
+    seasons = sorted(store.all_seasons(), key=lambda s: s["season_start"], reverse=True)
     return render(request, "seasons.html", title="Seasons", seasons=seasons)
 
 
