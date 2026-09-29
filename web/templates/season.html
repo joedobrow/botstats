@@ -1,10 +1,10 @@
 {% extends "base.html" %}
-{% from "macros.html" import player_link, team_cell, signup_button %}
+{% from "macros.html" import player_link, team_cell, signup_button, season_name %}
 {% block content %}
 <div class="page-head">
   <div>
     <div class="muted small">{{ season.division }}{% if season.league_id %} · League {{ season.league_id }}{% endif %}</div>
-    <h1>{{ season.label }}</h1>
+    <h1>{{ season_name(season, csrf, is_admin, path) }}</h1>
     <div class="muted small">Starts {{ season.season_start }}{% if season.signups_open %} · <span class="tag open">Signups open</span>{% endif %}</div>
   </div>
   <div>{{ signup_button(season, my_signup) }}</div>

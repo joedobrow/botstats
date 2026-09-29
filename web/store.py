@@ -84,6 +84,14 @@ def init_site_tables() -> None:
                 PRIMARY KEY (guild_id, season_start, account_id)
             );
 
+            -- Site admins. Uberadmins come from SITE_UBERADMIN_STEAM_IDS
+            -- and manage this list from /admin.
+            CREATE TABLE IF NOT EXISTS site_admins (
+                account_id  INTEGER PRIMARY KEY,
+                added_by    INTEGER,
+                added_at    TEXT NOT NULL
+            );
+
             -- Editable text blocks (home intro, rules).
             CREATE TABLE IF NOT EXISTS site_text (
                 key    TEXT PRIMARY KEY,
@@ -143,6 +151,27 @@ def get_session(token: str) -> dict | None:
 def delete_session(token: str) -> None:
     with _conn() as conn:
         conn.execute("DELETE FROM site_sessions WHERE token = ?", (token,))
+
+
+def is_admin(account_id: int) -> bool:
+    with _conn() as conn:
+        return conn.execute("SELECT 1 FROM site_admins WHERE account_id = ?", (account_id,)).fetchone() is not None
+
+
+def list_admins() -> list[dict]:
+    with _conn() as conn:
+        return [dict(r) for r in conn.execute("SELECT * FROM site_admins ORDER BY added_at")]
+
+
+def add_admin(account_id: int, added_by: int) -> None:
+    with _conn() as conn:
+        conn.execute("INSERT OR IGNORE INTO site_admins (account_id, added_by, added_at) VALUES (?, ?, ?)",
+                     (account_id, added_by, _now()))
+
+
+def remove_admin(account_id: int) -> None:
+    with _conn() as conn:
+        conn.execute("DELETE FROM site_admins WHERE account_id = ?", (account_id,))
 
 
 # ---------------------------------------------------------------------------
@@ -213,6 +242,12 @@ def get_season(guild_id: int, season_start: str) -> dict | None:
 
 def create_season(guild_id: int, season_start: str, label: str, league_id: int | None) -> None:
     db.upsert_season(guild_id, season_start, league_id=league_id, label=label)
+
+
+def rename_season(guild_id: int, season_start: str, label: str) -> None:
+    """Rename a season. It's the bot's seasons.label, so Discord's season
+    filters show the new name too."""
+    db.upsert_season(guild_id, season_start, label=label)
 
 
 def set_signups_open(guild_id: int, season_start: str, is_open: bool) -> None:
