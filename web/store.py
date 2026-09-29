@@ -84,16 +84,6 @@ def init_site_tables() -> None:
                 PRIMARY KEY (guild_id, season_start, account_id)
             );
 
-            -- Current Steam persona names and avatars, refreshed weekly
-            -- (see refresh_steam_names). Match rows only hold the name a
-            -- player had when that match was fetched.
-            CREATE TABLE IF NOT EXISTS site_steam_names (
-                account_id  INTEGER PRIMARY KEY,
-                name        TEXT,
-                avatar_url  TEXT,
-                fetched_at  TEXT NOT NULL
-            );
-
             -- Editable text blocks (home intro, rules).
             CREATE TABLE IF NOT EXISTS site_text (
                 key    TEXT PRIMARY KEY,
@@ -309,11 +299,8 @@ def signups_for_player(account_id: int) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 def player_identities(account_ids: list[int]) -> dict[int, dict]:
-    """{account_id: {name, avatar_url, badge}} from what the bot knows.
-
-    Name, first found: /set_player nickname, current Steam name (weekly
-    refresh), Steam name at site login, name on their latest league match,
-    rating-cache name. Hidden avatars stay hidden."""
+    """{account_id: {name, avatar_url, badge}} from what the bot knows, with
+    /set_player nicknames and hidden avatars respected."""
     from formatters import format_badge
     if not account_ids:
         return {}
@@ -331,14 +318,8 @@ def player_identities(account_ids: list[int]) -> dict[int, dict]:
                 out[r["account_id"]]["name"] = r["name"]
             for r in conn.execute(
                 f"SELECT account_id, steam_name, avatar_url FROM site_users WHERE account_id IN ({marks})", chunk):
-                # A login is newer than any match name.
-                out[r["account_id"]]["name"] = r["steam_name"] or out[r["account_id"]]["name"]
+                out[r["account_id"]]["name"] = out[r["account_id"]]["name"] or r["steam_name"]
                 out[r["account_id"]]["avatar_url"] = r["avatar_url"]
-            for r in conn.execute(
-                f"SELECT account_id, name, avatar_url FROM site_steam_names WHERE account_id IN ({marks})", chunk):
-                o = out[r["account_id"]]
-                o["name"] = r["name"] or o["name"]
-                o["avatar_url"] = r["avatar_url"] or o["avatar_url"]
             for r in conn.execute(f"""
                 SELECT account_id, name, avatar_url, rank_tier, leaderboard_rank
                 FROM player_ratings_cache WHERE account_id IN ({marks})""", chunk):
@@ -358,33 +339,6 @@ def player_identities(account_ids: list[int]) -> dict[int, dict]:
                 if r["rank_tier"]:
                     o["badge"] = format_badge(r["rank_tier"], r["leaderboard_rank"])
     return out
-
-
-def steam_names_age_days() -> float | None:
-    """Days since the last Steam name refresh, or None if there's never been one."""
-    with _conn() as conn:
-        row = conn.execute("SELECT MAX(fetched_at) AS t FROM site_steam_names").fetchone()
-    if not row or not row["t"]:
-        return None
-    return (datetime.now(timezone.utc) - datetime.fromisoformat(row["t"])).total_seconds() / 86400
-
-
-def known_account_ids() -> list[int]:
-    """Everyone the site can show: league players, drafted players, site users."""
-    with _conn() as conn:
-        return [r[0] for r in conn.execute("""
-            SELECT account_id FROM players UNION SELECT account_id FROM player_costs
-            UNION SELECT account_id FROM site_users""")]
-
-
-def save_steam_names(summaries: dict[int, tuple[str | None, str | None]]) -> None:
-    now = _now()
-    with _conn() as conn:
-        conn.executemany("""
-            INSERT INTO site_steam_names (account_id, name, avatar_url, fetched_at) VALUES (?, ?, ?, ?)
-            ON CONFLICT(account_id) DO UPDATE SET
-                name = excluded.name, avatar_url = excluded.avatar_url, fetched_at = excluded.fetched_at
-        """, [(aid, name, avatar, now) for aid, (name, avatar) in summaries.items()])
 
 
 def search_players(q: str, limit: int = 200) -> list[dict]:

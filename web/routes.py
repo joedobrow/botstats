@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import asyncio
 import csv
 import io
-import logging
 import os
 from datetime import datetime
 from pathlib import Path
@@ -18,8 +16,6 @@ import db
 from config import LEAGUE_TZ, STEAM_API_KEY
 from player_api import account_id_from
 from web import steam, store
-
-logger = logging.getLogger(__name__)
 
 TEMPLATE_DIR = Path(__file__).parent / "templates"
 STATIC_DIR = Path(__file__).parent / "static"
@@ -511,38 +507,9 @@ async def error_middleware(request: web.Request, handler):
         return not_found(request)
 
 
-STEAM_NAME_REFRESH_DAYS = 7
-
-
-async def _steam_name_refresher(app: web.Application) -> None:
-    """Refresh everyone's Steam name once a week. Checks every 6 hours
-    whether a week has passed, so restarts don't trigger extra fetches."""
-    while True:
-        age = store.steam_names_age_days()
-        if STEAM_API_KEY and (age is None or age >= STEAM_NAME_REFRESH_DAYS):
-            try:
-                ids = store.known_account_ids()
-                summaries = await steam.player_summaries(ids, STEAM_API_KEY)
-                store.save_steam_names(summaries)
-                logger.info("Refreshed Steam names: %d of %d accounts", len(summaries), len(ids))
-            except Exception:
-                logger.warning("Steam name refresh failed; will retry in 6 hours", exc_info=True)
-        await asyncio.sleep(6 * 3600)
-
-
-async def _start_background(app: web.Application) -> None:
-    app["steam_name_refresher"] = asyncio.create_task(_steam_name_refresher(app))
-
-
-async def _stop_background(app: web.Application) -> None:
-    app["steam_name_refresher"].cancel()
-
-
 def setup(app: web.Application) -> None:
     """Add the website's routes to the bot's aiohttp app."""
     store.init_site_tables()
-    app.on_startup.append(_start_background)
-    app.on_cleanup.append(_stop_background)
     app.middlewares.append(error_middleware)
     app.middlewares.append(session_middleware)
     app.router.add_routes(routes)
