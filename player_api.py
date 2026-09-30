@@ -37,7 +37,7 @@ def account_id_from(raw: str) -> int | None:
 
 def build(account_id: int, guild_id: int | None) -> dict | None:
     """The payload for one player, or None if the bot knows nothing about them."""
-    from db import (compute_fantasy_adjusted_ratings, get_division, get_rating_cache_row,
+    from db import (compute_fantasy_adjusted_ratings, get_guild_division, get_rating_cache_row,
                     get_skill_override, latest_match_fetch)
     from formatters import format_badge
 
@@ -49,11 +49,12 @@ def build(account_id: int, guild_id: int | None) -> dict | None:
     manual = override.get("internal_rating_override")
     base = manual if manual is not None else cache.get("internal_rating")
     rating = base
-    division = get_division(guild_id) if guild_id else None
+    # The adjustment is the one /player shows in that server's division.
+    division = get_guild_division(guild_id) if guild_id else None
     if manual is None and base is not None and division:
         # Alts are judged on their main's history, as /player does.
         effective = cache.get("alt_account_for") or account_id
-        adj = compute_fantasy_adjusted_ratings(division["current_season_id"]).get(effective)
+        adj = compute_fantasy_adjusted_ratings(division["current_season_id"], division["id"]).get(effective)
         if adj:
             rating = adj["adjusted_rating"]
 
@@ -110,6 +111,6 @@ def build(account_id: int, guild_id: int | None) -> dict | None:
         "updated_at": updated,
         # The newer of: this player's data, and the division's latest match —
         # a rating moves when anyone in the division plays.
-        "changed_at": max(filter(None, [updated, latest_match_fetch(guild_id) if guild_id else None]),
+        "changed_at": max(filter(None, [updated, latest_match_fetch(division["id"]) if division else None]),
                           default=updated),
     }

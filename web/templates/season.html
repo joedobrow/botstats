@@ -120,6 +120,7 @@
           <form method="post" action="/admin/signup/delete" class="inline" onsubmit="return confirm('Remove {{ s.name|e }} from signups?')">
             <input type="hidden" name="csrf" value="{{ csrf }}">
             <input type="hidden" name="season_id" value="{{ season.id }}">
+    <input type="hidden" name="division_id" value="{{ season.division_id }}">
             <input type="hidden" name="account_id" value="{{ s.account_id }}">
             <button class="linklike danger">Remove</button>
           </form>

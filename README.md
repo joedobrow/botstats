@@ -80,6 +80,17 @@ League/region/mode are configured per Discord server at runtime via `/config`:
 /config league:<id> region:<us_west|us_east|any> mode:<cm|ad> season_start:<YYYY-MM-DD>
 ```
 
+### Divisions
+
+A division is one competition within the league (e.g. NA, EU): its own game
+mode, server region, rosters and games. Divisions are records of their own,
+not Discord servers: each has an optional Discord server where its commands
+run, and several may share one (commands then use the server's default
+division). Every game belongs to one division, assigned when it's fetched
+(`fetcher.pick_division`: the division whose mode and region fit, and if
+several do, whose drafted rosters include most of the game's players).
+`/config name:` names or renames a division.
+
 ### Seasons
 
 A season is identified by its **Dota league id** — RD2L Season 39 is `20056`,
@@ -96,7 +107,15 @@ within that.
 is required the first time a league is seen), and `/start_new_season` rolls a
 division over to a new league. Every `season:` option in Discord accepts the
 league id, the start date, or the season's name. The stats API endpoints take
-`?season_id=<league_id>`, or the older `?guild_id=...&season_start=YYYY-MM-DD`.
+`?season_id=<league_id>` (plus `&division=<slug>` when several divisions play
+in it), or the older `?guild_id=...&season_start=YYYY-MM-DD`.
+
+### Schema migrations
+
+Structural schema changes are numbered migrations in `db._MIGRATIONS`; the
+database records how far it got in `PRAGMA user_version`, and `init_db`
+applies the rest in order, each in one transaction with row-count checks.
+Append new ones; never edit or reorder existing ones.
 
 You can also bind a `scold_channel` to silently delete posts there. Re-run `/config` to update.
 
@@ -122,7 +141,7 @@ The bot ships with a `Dockerfile` and `fly.toml` configured for fly.io.
 
 The bot's web server (port 8080) also serves a small league site modeled on rd2l.gg, from the `web/` package:
 
-- `/seasons`, `/season/<league_id>`: every season of every division, with Teams, Matches, Leaders and Signups tabs
+- `/seasons`, `/season/<league_id>/<division>`: every season of every division, with Teams, Matches, Leaders and Signups tabs (`/season/<league_id>` goes to the division, or offers a choice when several play in it)
 - `/players`, `/player/<account_id>`: player search and profiles (league stats per season, heroes, recent matches)
 - `/match/<match_id>`: scoreboard with fantasy points
 - `/`: tiles for Sign-Up (active only while a season has signups open), Seasons, Players and Info (`/info` → Rules, About)
