@@ -338,3 +338,10 @@ th.sorted-desc::after { content: " ▼"; font-size: 0.7em; }
 .draft img.draft-model { width: 34px; height: 34px; object-fit: contain; margin-right: 4px; }
 .profile-head .rating { color: var(--text); }
 .draft .draft-unknown { display: inline-grid; place-items: center; width: 30px; height: 30px; border-radius: 4px; background: var(--tag-bg); color: var(--muted); font-size: 0.8rem; }
+
+/* Team logo: clickable for admins and the captain */
+.logo-button { padding: 0; border: 0; background: none; cursor: pointer; border-radius: 8px; }
+.logo-button:hover .logo, .logo-button:focus-visible .logo { outline: 2px solid var(--accent); outline-offset: 3px; }
+.logo-empty { display: inline-grid; place-items: center; width: 80px; height: 80px; border: 2px dashed var(--border); border-radius: 8px; color: var(--muted); font-size: 0.8rem; }
+.dialog { border: 1px solid var(--border); border-radius: 10px; background: var(--surface); color: var(--text); padding: 20px 24px; max-width: 420px; width: calc(100% - 32px); }
+.dialog::backdrop { background: rgba(0, 0, 0, 0.45); }

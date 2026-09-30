@@ -628,7 +628,7 @@ async def vibecheck_handler(request: web.Request) -> web.Response:
 
 
 def create_app() -> web.Application:
-    app = web.Application()
+    app = web.Application(client_max_size=6 * 1024 * 1024)  # team logo uploads (5 MB) plus form overhead
     app.router.add_get("/vibecheck", vibecheck_handler)
     app.router.add_get("/ad-helper", ad_helper_handler)
     app.router.add_get("/card/player/{account_id}", player_card_handler)

@@ -9,8 +9,18 @@ change.
 from __future__ import annotations
 
 import logging
+import os
 
 logger = logging.getLogger(__name__)
+
+# Logos uploaded on the website are stored with a site-relative path
+# (/uploads/...). The bot downloads logos over HTTP to draw its cards, so
+# resolve those against its own web server.
+_LOCAL_WEB = os.environ.get("LOCAL_WEB_URL", "http://127.0.0.1:8080")
+
+
+def _absolute(url: str | None) -> str | None:
+    return f"{_LOCAL_WEB}{url}" if url and url.startswith("/") else url
 
 
 def get_team_info(captain: str | None, season_id: int | None = None,
@@ -28,7 +38,7 @@ def get_team_info(captain: str | None, season_id: int | None = None,
             from db import get_season_teams
             info = get_season_teams(season_id, division_id).get(captain.strip().lower())
             if info:
-                return info
+                return dict(info, logo_url=_absolute(info.get("logo_url")))
         except Exception:
             logger.exception("season_teams lookup failed for %s", captain)
     return {"team_name": captain, "logo_url": None}

@@ -16,7 +16,7 @@ from aiohttp import web
 import db
 from config import LEAGUE_TZ, STEAM_API_KEY
 from player_api import account_id_from
-from web import steam, store
+from web import steam, store, uploads
 
 TEMPLATE_DIR = Path(__file__).parent / "templates"
 STATIC_DIR = Path(__file__).parent / "static"
@@ -317,7 +317,53 @@ async def team_page(request: web.Request):
     stats = {p["account_id"]: p for p in db.get_all_time_stats(season["division_id"], season["id"])}
     return render(request, "team.html", title=team["name"], season=season, team=team,
                   matches=team_matches, idents=store.player_identities(member_ids),
-                  stats=stats, team_names={c: t["name"] for c, t in teams.items()})
+                  stats=stats, team_names={c: t["name"] for c, t in teams.items()},
+                  can_edit=_can_edit_team(request, team), notice=request.query.get("notice"))
+
+
+def _can_edit_team(request: web.Request, team: dict) -> bool:
+    """Admins, and the team's own captain, may rename it and change its logo."""
+    user = request.get("user")
+    return bool(request.get("is_admin")
+                or (user and team.get("captain_account_id") == user["account_id"]))
+
+
+def _editable_team(request: web.Request) -> tuple[dict, dict]:
+    season = _season_or_404(request)
+    team = next((t for t in store.season_teams(season, matches=[])
+                 if t["captain"] == request.match_info["captain"]), None)
+    if not team:
+        raise web.HTTPNotFound()
+    _require_user(request)
+    if not _can_edit_team(request, team):
+        raise web.HTTPForbidden(text="Only an admin or this team's captain can change it.")
+    return season, team
+
+
+@routes.post("/season/{season_id}/{division}/team/{captain}/name")
+async def team_rename(request: web.Request):
+    season, team = _editable_team(request)
+    name = ((await request.post()).get("label") or "").strip()[:60]
+    if name:
+        store.set_team_identity(season, team, name=name)
+    raise web.HTTPFound(team_url(season, team["captain"]))
+
+
+@routes.post("/season/{season_id}/{division}/team/{captain}/logo")
+async def team_logo(request: web.Request):
+    season, team = _editable_team(request)
+    upload = (await request.post()).get("logo")
+    if not isinstance(upload, web.FileField):
+        raise web.HTTPFound(team_url(season, team["captain"]) + "?notice=Choose+an+image+file.")
+    try:
+        url = uploads.save_team_logo(upload.file.read(), season["id"], season["division_id"], team["captain"])
+    except uploads.BadImage as e:
+        raise web.HTTPFound(team_url(season, team["captain"]) + "?" + urlencode({"notice": str(e)}))
+    old = team.get("logo_url")
+    store.set_team_identity(season, team, logo_url=url)
+    if old != url:
+        uploads.delete_upload(old)
+    raise web.HTTPFound(team_url(season, team["captain"]))
 
 
 @routes.get("/players")
@@ -596,3 +642,5 @@ def setup(app: web.Application) -> None:
     app.middlewares.append(session_middleware)
     app.router.add_routes(routes)
     app.router.add_static("/static/", path=str(STATIC_DIR), show_index=False)
+    uploads.UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    app.router.add_static(uploads.URL_PREFIX, path=str(uploads.UPLOAD_DIR), show_index=False)
