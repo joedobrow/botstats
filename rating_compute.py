@@ -262,18 +262,29 @@ def age_in_days(account_id: int) -> float | None:
     return (datetime.now(timezone.utc) - when).total_seconds() / 86400
 
 
-async def refresh_if_stale(account_id: int, max_age_days: float = MAX_AGE_DAYS) -> bool:
+async def refresh_if_stale(account_id: int, max_age_days: float = MAX_AGE_DAYS,
+                           compute_missing: bool = False) -> bool:
     """Re-rate this account if what's cached has gone stale, so that reading a
     rating is what keeps it current. Returns whether it refreshed.
+
+    `compute_missing` also rates an account with nothing cached at all, for a
+    caller that was asked about this player by name and should answer with a
+    number. Left off by default: a caller sweeping ids it hasn't been asked
+    about shouldn't conjure a rating for each one.
 
     Costs one windrun call, which is serialised at one every five seconds, so
     callers that read many players at once (the leaderboard, /players) must not
     use this — they'd queue minutes of work for numbers nobody asked about.
     """
     age = age_in_days(account_id)
-    if age is None or age < max_age_days:
+    if age is None:
+        if not compute_missing:
+            return False
+        logger.info("No cached rating for %d; computing on read", account_id)
+    elif age < max_age_days:
         return False
-    logger.info("Rating for %d is %.1f days old; refreshing on read", account_id, age)
+    else:
+        logger.info("Rating for %d is %.1f days old; refreshing on read", account_id, age)
     await compute_and_cache_rating(account_id)
     return True
 

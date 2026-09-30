@@ -519,7 +519,9 @@ async def player(interaction: discord.Interaction, name: str, week: int = None, 
         # is people looked up once. Reading one is what keeps it current.
         import rating_compute
         try:
-            await rating_compute.refresh_if_stale(account_id)
+            # compute_missing: someone asked about this player by name, so
+            # answer with a number even if we've never rated them.
+            await rating_compute.refresh_if_stale(account_id, compute_missing=True)
         except Exception:
             logger.exception("stale-rating refresh failed for %d in /player", account_id)
         rating: int | None = None
