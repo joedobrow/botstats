@@ -565,20 +565,28 @@ async def player_api_handler(request: web.Request) -> web.Response:
                                  status=400)
     guild_id = API_DEFAULT_GUILD_ID
 
-    if get_rating_cache_row(account_id) is None and get_skill_override(account_id) is None:
+    import rating_compute
+
+    known = get_rating_cache_row(account_id) is not None or get_skill_override(account_id) is not None
+    stale = known and (rating_compute.age_in_days(account_id) or 0) >= rating_compute.MAX_AGE_DAYS
+    if not known or stale:
+        # Both cases cost a windrun call, so both come out of the same budget.
         now = time.time()
         recent = [t for t in _new_lookups.get(caller, []) if now - t < 3600]
-        if len(recent) >= PLAYER_API_NEW_LOOKUPS_PER_HOUR and caller != "owner":
+        over_budget = len(recent) >= PLAYER_API_NEW_LOOKUPS_PER_HOUR and caller != "owner"
+        if over_budget and not known:
             return web.json_response(
                 {"error": f"too many never-seen players this hour (limit "
                           f"{PLAYER_API_NEW_LOOKUPS_PER_HOUR}); cached players still work"},
                 status=429, headers={"Retry-After": "3600"})
-        _new_lookups[caller] = recent + [now]
-        from rating_compute import compute_and_cache_rating
-        try:
-            await compute_and_cache_rating(account_id)
-        except Exception:
-            logger.exception("player API: couldn't compute rating for %s", account_id)
+        if not over_budget:
+            _new_lookups[caller] = recent + [now]
+            try:
+                await rating_compute.compute_and_cache_rating(account_id)
+            except Exception:
+                logger.exception("player API: couldn't compute rating for %s", account_id)
+        # Over budget with something cached: serve what we have. The payload
+        # already says how old it is, which beats refusing to answer.
 
     payload = player_api.build(account_id, guild_id)
     if payload is None:
