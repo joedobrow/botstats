@@ -25,3 +25,6 @@ rating_model.py
 *.rtf
 rating_curve_analysis.csv
 rating_curve_analysis.features.json
+
+# Website uploads (team logos) — live on the data volume in production
+uploads/

@@ -576,6 +576,17 @@ def season_teams(season: dict, matches: list[dict] | None = None) -> list[dict]:
     return sorted(teams.values(), key=lambda t: (-t["wins"], t["losses"], t["name"].lower()))
 
 
+def set_team_identity(season: dict, team: dict, *, name: str | None = None,
+                      logo_url: str | None = None) -> None:
+    """Rename a team and/or give it a new logo. It's the bot's season_teams
+    row, so Discord's cards show the change too."""
+    db.upsert_season_teams(season["id"], season["division_id"], [{
+        "captain": team["captain"],
+        "team_name": name or team["name"],
+        "logo_url": logo_url,          # None keeps the current logo
+    }])
+
+
 def match_detail(match_id: int) -> dict | None:
     with _conn() as conn:
         m = conn.execute("SELECT * FROM matches WHERE match_id = ?", (match_id,)).fetchone()
