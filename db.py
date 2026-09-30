@@ -2602,6 +2602,49 @@ def get_head_to_head_matches(
     return results
 
 
+def add_manual_match(*, division_id: int, league_id: int, start_time: int,
+                     winner: str, loser: str, set_by: int | None = None) -> int:
+    """Record one game that was played but has no Dota match of its own —
+    the usual reason being that nobody ticketed it, so OpenDota has nothing to
+    fetch and the result would otherwise be lost.
+
+    The row carries no players, no duration and no scores, because none of
+    that is known: only who played and who won. Its id is negative, which no
+    real match id ever is, so "entered by hand" is legible everywhere from the
+    id alone. Both sides get a team override, which is what lets the record
+    count it without any player rows to attribute.
+
+    Returns the new (negative) match id.
+    """
+    now = datetime.now(timezone.utc)
+    with _conn() as conn:
+        lowest = conn.execute("SELECT MIN(match_id) FROM matches").fetchone()[0] or 0
+        match_id = min(lowest, 0) - 1
+        conn.execute("""
+            INSERT INTO matches (match_id, division_id, league_id, start_time, duration,
+                                 game_mode, cluster, radiant_win, radiant_score, dire_score,
+                                 fetched_at)
+            VALUES (?, ?, ?, ?, 0, 0, 0, 1, 0, 0, ?)
+        """, (match_id, division_id, league_id, start_time, now.isoformat()))
+    # Radiant is the winner: with no real sides to speak of, one of them has
+    # to be, and this keeps radiant_win meaning what it means everywhere else.
+    set_match_team_override(match_id, "radiant", winner, set_by=set_by)
+    set_match_team_override(match_id, "dire", loser, set_by=set_by)
+    logger.info("Manual result %d: %s beat %s in division %s", match_id, winner, loser, division_id)
+    return match_id
+
+
+def delete_manual_match(match_id: int) -> bool:
+    """Remove a hand-entered result. Refuses anything with a real match id:
+    those came from OpenDota and are re-fetchable facts, not data entry."""
+    if match_id >= 0:
+        raise ValueError("only hand-entered results (negative ids) can be deleted")
+    with _conn() as conn:
+        cur = conn.execute("DELETE FROM matches WHERE match_id = ?", (match_id,))
+        conn.execute("DELETE FROM match_team_overrides WHERE match_id = ?", (match_id,))
+    return cur.rowcount > 0
+
+
 def set_match_team_override(match_id: int, side: str, captain: str | None,
                            *, automatic: bool = False, set_by: int | None = None) -> None:
     """Say which team played one side of a match. `automatic` removes the

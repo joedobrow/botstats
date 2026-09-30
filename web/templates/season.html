@@ -21,10 +21,8 @@
   {% for r in rounds %}
   <section class="panel">
     <h2 class="with-action">{{ r.label }}
-      {% if r.played %}<span class="tag">Played</span>
-      {% elif r.proposed %}<span class="tag">Proposed</span>{% endif %}
+      {% if r.played %}<span class="tag">Completed</span>{% endif %}
     </h2>
-    {% if r.pairs %}
     <div class="scroll">
     <table>
       <tbody>
@@ -49,14 +47,10 @@
       </tbody>
     </table>
     </div>
-    {% else %}
-    <p class="muted small">Pairs once the earlier weeks are played.</p>
-    {% endif %}
   </section>
   {% endfor %}
-  <p class="muted small">Proposed pairings take the standings in order and pair each team with the
-    nearest one it hasn't met. They're a suggestion, not a schedule — results decide the weeks
-    after the next one, so those are left empty.</p>
+  <p class="muted small">The week still to play is paired by taking the standings in order and
+    drawing each team against the nearest one it hasn't met. It's a suggestion, not a schedule.</p>
   {% else %}
   <p class="muted">Matchups appear here once the season has weeks and teams.</p>
   {% endif %}

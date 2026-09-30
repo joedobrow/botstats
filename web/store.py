@@ -580,11 +580,14 @@ def season_matchups(season: dict) -> list[dict]:
     """Who plays whom, week by week.
 
     A week that has been played reports its real pairings, read from the
-    matches. The next one is a proposed Swiss pairing: teams are taken in
-    standings order and paired with the nearest team they haven't met yet, so
-    equal records meet and nobody plays the same side twice while there's
-    anyone left. Weeks after that depend on results nobody has yet, so they're
-    left empty rather than guessed at.
+    matches. The next one is a Swiss pairing: teams are taken in standings
+    order and paired with the nearest team they haven't met yet, so equal
+    records meet and nobody plays the same side twice while there's anyone
+    left.
+
+    The week being played comes first, then the completed ones newest first.
+    Weeks after the next turn on results nobody has yet, so they aren't
+    returned at all — an empty row for each of them was only ever noise.
 
     Returns [{week, label, dates, played, pairs: [{a, b, a_name, b_name,
     a_record, b_record, winner, match_ids, rematch, bye}]}].
@@ -639,7 +642,7 @@ def season_matchups(season: dict) -> list[dict]:
         return pairs
 
     standings = [t["captain"] for t in teams]     # season_teams sorts by record already
-    out, proposed = [], False
+    completed, upcoming = [], None
     for w in weeks:
         played = per_week.get(w["week_number"], {})
         if played:
@@ -651,14 +654,12 @@ def season_matchups(season: dict) -> list[dict]:
                               "a_record": record(a), "b_record": record(b), "winner": winner,
                               "match_ids": p["match_ids"], "rematch": False, "bye": False})
             pairs.sort(key=lambda p: p["a_name"].lower())
-        elif not proposed and len(standings) > 1:
-            pairs, proposed = swiss(standings), True
-        else:
-            pairs = []
-        out.append({"week": w["week_number"], "label": f"Week {w['week_number']}",
-                    "dates": w, "played": bool(played), "proposed": bool(pairs) and not played,
-                    "pairs": pairs})
-    return out
+            completed.append({"week": w["week_number"], "label": f"Week {w['week_number']}",
+                              "dates": w, "played": True, "pairs": pairs})
+        elif upcoming is None and len(standings) > 1:
+            upcoming = {"week": w["week_number"], "label": f"Week {w['week_number']}",
+                        "dates": w, "played": False, "pairs": swiss(standings)}
+    return ([upcoming] if upcoming else []) + completed[::-1]
 
 
 def team_of(season: dict, account_id: int) -> dict | None:
