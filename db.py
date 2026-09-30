@@ -3492,6 +3492,45 @@ def match_exists(match_id: int) -> bool:
     return row is not None
 
 
+def assign_builds_to_heroes(match_id: int, builds: dict[int, list[tuple[int, int]]]) -> dict[int, list[tuple[int, int]]]:
+    """Put each drafted build on the player who actually played it.
+
+    builds: {account_id as the draft source said: [(pick_order, ability_id)]}.
+    The source can put a build on the wrong player (seat swaps), but every
+    build includes its hero model pick (ability_id = -hero_id), and the
+    players table knows who played which hero — so a build goes to the
+    player whose hero is its model. Builds with no model, or whose hero no
+    one played, keep the source's player."""
+    with _conn() as conn:
+        played = {r["hero_id"]: r["account_id"] for r in conn.execute(
+            "SELECT account_id, hero_id FROM players WHERE match_id = ?", (match_id,))}
+    out: dict[int, list[tuple[int, int]]] = {}
+    for source_account, picks in builds.items():
+        model = next((-a for _, a in picks if a < 0), None)
+        out.setdefault(played.get(model, source_account), []).extend(picks)
+    return out
+
+
+def realign_stored_drafts() -> int:
+    """Re-file every stored draft's builds by hero (assign_builds_to_heroes).
+    No network. Returns how many games changed."""
+    with _conn() as conn:
+        match_ids = [r[0] for r in conn.execute("SELECT DISTINCT match_id FROM match_drafts")]
+    changed = 0
+    for mid in match_ids:
+        with _conn() as conn:
+            rows = conn.execute("SELECT pick_order, account_id, ability_id FROM match_drafts WHERE match_id = ?",
+                                (mid,)).fetchall()
+        builds: dict[int, list[tuple[int, int]]] = {}
+        for r in rows:
+            builds.setdefault(r["account_id"], []).append((r["pick_order"], r["ability_id"]))
+        fixed = assign_builds_to_heroes(mid, builds)
+        if fixed != builds:
+            save_match_draft(mid, [(po, aid, ab) for aid, picks in fixed.items() for po, ab in picks])
+            changed += 1
+    return changed
+
+
 def save_match_draft(match_id: int, picks: list[tuple[int, int, int]]) -> None:
     """Store a game's draft: (pick_order, account_id, ability_id) per pick,
     replacing any stored before."""

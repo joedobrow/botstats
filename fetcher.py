@@ -17,7 +17,7 @@ from config import OPENDOTA_API_KEY, REGION_CLUSTERS, GAME_MODE_FILTERS
 from db import (
     upsert_match, upsert_players, upsert_chat_messages, match_is_complete, get_division,
     get_season_divisions, get_player_costs, get_captain_account_ids,
-    save_match_draft, games_missing_drafts,
+    save_match_draft, games_missing_drafts, assign_builds_to_heroes,
 )
 
 logger = logging.getLogger(__name__)
@@ -410,11 +410,16 @@ async def fetch_draft(match_id: int) -> bool:
         return False
     owner = {aid: p.get("steamId") for side in ("radiant", "dire")
              for p in data.get(side, []) for aid in p.get("abilities", [])}
-    picks = [(pk["pickOrder"], owner[pk["abilityId"]], pk["abilityId"])
-             for pk in data["picks"] if owner.get(pk["abilityId"])]
-    if not picks:
+    builds: dict[int, list[tuple[int, int]]] = {}
+    for pk in data["picks"]:
+        if owner.get(pk["abilityId"]):
+            builds.setdefault(owner[pk["abilityId"]], []).append((pk["pickOrder"], pk["abilityId"]))
+    if not builds:
         return False
-    save_match_draft(match_id, picks)
+    # windrun can pin a build on the wrong player (seat swaps); file each
+    # build under whoever actually played its hero.
+    builds = assign_builds_to_heroes(match_id, builds)
+    save_match_draft(match_id, [(po, account, ability) for account, picks in builds.items() for po, ability in picks])
     return True
 
 
