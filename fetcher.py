@@ -17,6 +17,7 @@ from config import OPENDOTA_API_KEY, REGION_CLUSTERS, GAME_MODE_FILTERS
 from db import (
     upsert_match, upsert_players, upsert_chat_messages, match_is_complete, get_division,
     get_season_divisions, get_player_costs, get_captain_account_ids,
+    save_match_draft, games_missing_drafts,
 )
 
 logger = logging.getLogger(__name__)
@@ -355,6 +356,8 @@ async def fetch_and_store_season(season_id: int) -> int:
 
             full.setdefault("leagueid", league_id)
             n_players = _store_full_match(full, division["id"])
+            if game_mode == 18:
+                await fetch_draft(mid)
             stored += 1
             logger.info("Stored match %d (%d players)", mid, n_players)
 
@@ -393,4 +396,32 @@ async def refetch_incomplete_games(season_id: int) -> int:
             n = _store_full_match(full, division_id)
             filled += 1 if n else 0
             logger.info("Filled match %d (%d players)", mid, n)
+    return filled
+
+
+async def fetch_draft(match_id: int) -> bool:
+    """Store an Ability Draft game's picks from windrun.io (the model hero
+    and abilities each player drafted, in pick order). windrun's client
+    keeps to its rate limit. Returns whether a draft was stored."""
+    from windrun import fetch_match
+    data = await fetch_match(match_id)
+    if not data or not data.get("picks"):
+        logger.info("No windrun draft for match %d", match_id)
+        return False
+    owner = {aid: p.get("steamId") for side in ("radiant", "dire")
+             for p in data.get(side, []) for aid in p.get("abilities", [])}
+    picks = [(pk["pickOrder"], owner[pk["abilityId"]], pk["abilityId"])
+             for pk in data["picks"] if owner.get(pk["abilityId"])]
+    if not picks:
+        return False
+    save_match_draft(match_id, picks)
+    return True
+
+
+async def backfill_drafts(season_id: int) -> int:
+    """Fetch drafts for a season's Ability Draft games that have none stored."""
+    filled = 0
+    for match_id in games_missing_drafts(season_id):
+        filled += await fetch_draft(match_id)
+    logger.info("League %d: stored %d drafts", season_id, filled)
     return filled

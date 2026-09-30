@@ -282,7 +282,7 @@ async def season_page(request: web.Request):
     if tab == "signups":
         ctx["signups"] = store.list_signups(season)
     elif tab == "leaders":
-        ctx["leaders"] = store.season_leaders(season)
+        ctx["leaders"], ctx["min_games"], ctx["max_games"] = store.season_leaders(season)
     elif tab == "matches":
         matches = store.season_matches(season)
         ctx["matches"] = [m for m in matches if m["radiant_team"] or m["dire_team"]]
@@ -357,15 +357,10 @@ async def player_page(request: web.Request):
                           if r["account_id"] == account_id), None) or store.aggregate(rows)
             season_rows.append({"season": s, "stats": stats, "captain": cap,
                                 "team_name": team.get("team_name") or cap, "cost": costs.get("cost")})
-    hero_counts: dict[int, dict] = {}
-    for m in matches:
-        h = hero_counts.setdefault(m["hero_id"], {"hero": m["hero"], "games": 0, "wins": 0})
-        h["games"] += 1
-        h["wins"] += m["won"]
     return render(request, "player.html", title=ident["name"] or str(account_id),
                   account_id=account_id, ident=ident, overall=store.aggregate(matches),
                   season_rows=season_rows, matches=matches[:50],
-                  heroes=sorted(hero_counts.values(), key=lambda h: -h["games"])[:10])
+                  rating=store.player_ratings().get(account_id))
 
 
 @routes.get("/match/{match_id}")

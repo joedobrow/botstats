@@ -6,10 +6,10 @@
   <div>
     <h1>{{ ident.name or account_id }}</h1>
     <div class="muted">
-      {% if ident.badge %}{{ ident.badge }} · {% endif %}
+      {% if rating is not none %}Rating <strong class="rating">{{ rating }}</strong> · {% endif %}
+      <a href="https://windrun.io/players/{{ account_id }}" rel="noopener">Windrun</a> ·
       <a href="https://www.dotabuff.com/players/{{ account_id }}" rel="noopener">Dotabuff</a> ·
-      <a href="https://www.opendota.com/players/{{ account_id }}" rel="noopener">OpenDota</a> ·
-      <a href="https://windrun.io/players/{{ account_id }}" rel="noopener">Windrun</a>
+      <a href="https://www.opendota.com/players/{{ account_id }}" rel="noopener">OpenDota</a>
     </div>
   </div>
 </div>
@@ -42,13 +42,6 @@
   {% endfor %}
   </tbody>
 </table>
-</div>
-
-<h2>Most played heroes</h2>
-<div class="hero-list">
-{% for h in heroes %}
-  <div class="hero-chip">{{ hero_icon(h.hero) }}<span>{{ h.hero.name }}</span><span class="muted small">{{ h.games }} · {{ h.wins }}W</span></div>
-{% endfor %}
 </div>
 
 <h2>Recent matches</h2>

@@ -41,6 +41,27 @@ def hero(hero_id: int) -> dict:
     return _HEROES.get(hero_id) or {"name": f"Hero {hero_id}", "slug": ""}
 
 
+_STATIC = Path(__file__).parent / "static"
+_ABILITIES: dict[int, dict] = {int(k): v for k, v in json.loads((_STATIC / "abilities.json").read_text()).items()}
+_SERVERS: dict[int, str] = {int(k): v for k, v in json.loads((_STATIC / "servers.json").read_text()).items()}
+
+
+def draft_pick(ability_id: int) -> dict:
+    """A drafted pick for display: {"kind": "hero"|"ability", "name", "slug"}.
+    Negative ids are hero models."""
+    if ability_id < 0:
+        h = hero(-ability_id)
+        return {"kind": "hero", "name": h["name"], "slug": h["slug"]}
+    a = _ABILITIES.get(ability_id)
+    return {"kind": "ability", "name": a["dname"] if a else f"Ability {ability_id}",
+            "img": a["img"] if a and a.get("img") else ""}
+
+
+def server_name(cluster: int) -> str:
+    """The region a game server is in, from OpenDota's list."""
+    return _SERVERS.get(cluster) or f"Server {cluster}"
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
@@ -408,7 +429,7 @@ def player_identities(account_ids: list[int]) -> dict[int, dict]:
     return out
 
 
-def search_players(q: str, limit: int = 200) -> list[dict]:
+def search_players(q: str = "", limit: int | None = None) -> list[dict]:
     """Everyone who has played a league match or logged in, filtered by name."""
     with _conn() as conn:
         rows = conn.execute("""
@@ -430,8 +451,11 @@ def search_players(q: str, limit: int = 200) -> list[dict]:
         if ql and ql not in s["name"].lower() and ql != str(aid):
             continue
         out.append(s)
+    ratings = player_ratings()
+    for s in out:
+        s["rating"] = ratings.get(s["account_id"])
     out.sort(key=lambda s: (-s["games"], s["name"].lower()))
-    return out[:limit]
+    return out[:limit] if limit else out
 
 
 def player_matches(account_id: int) -> list[dict]:
@@ -478,11 +502,31 @@ def aggregate(rows: list[dict]) -> dict:
 # Season pages
 # ---------------------------------------------------------------------------
 
-def season_leaders(season: dict) -> list[dict]:
-    """Per-player stats for the season, best fantasy points first — the same
-    rows the bot's season-scoped stats come from."""
-    rows = db.ranked(db.get_all_time_stats(season["division_id"], season["id"]))
-    return sorted(rows, key=lambda r: -r["fantasy_points"])
+def season_leaders(season: dict) -> tuple[list[dict], int, int]:
+    """The season's leaderboard, best fantasy points first: the same rows
+    the bot's season-scoped stats come from, qualified the way /leaderboard
+    qualifies them (db.qualified). Returns (rows, threshold, max_games)."""
+    rows, threshold, max_games = db.qualified(db.ranked(db.get_all_time_stats(season["division_id"], season["id"])))
+    return sorted(rows, key=lambda r: -r["fantasy_points"]), threshold, max_games
+
+
+def player_ratings() -> dict[int, int]:
+    """{account_id: displayed internal rating} for everyone, as the bot
+    shows it (db.displayed_ratings) in the division they last played in."""
+    by_division = {d["id"]: db.displayed_ratings(d["id"]) for d in divisions()}
+    with _conn() as conn:
+        last_division = {r[0]: r[1] for r in conn.execute("""
+            SELECT p.account_id, m.division_id FROM players p JOIN matches m USING (match_id)
+            JOIN (SELECT account_id, MAX(match_id) AS last FROM players GROUP BY account_id) l
+              ON l.account_id = p.account_id AND l.last = p.match_id""")}
+    out: dict[int, int] = {}
+    for ratings in by_division.values():
+        for aid, r in ratings.items():
+            out.setdefault(aid, r)
+    for aid, did in last_division.items():
+        if aid in by_division.get(did, {}):
+            out[aid] = by_division[did][aid]
+    return out
 
 
 def season_matches(season: dict) -> list[dict]:
@@ -540,10 +584,13 @@ def match_detail(match_id: int) -> dict | None:
         players = [dict(r) for r in conn.execute(
             "SELECT * FROM players WHERE match_id = ? ORDER BY player_slot, id", (match_id,))]
     m = dict(m)
+    m["server"] = server_name(m["cluster"])
+    draft = db.get_match_draft(match_id)
     idents = player_identities([p["account_id"] for p in players])
     for p in players:
         p["display_name"] = idents.get(p["account_id"], {}).get("name") or p["name"]
         p["hero"] = hero(p["hero_id"])
+        p["draft"] = [draft_pick(i) for i in draft.get(p["account_id"], [])]
         p["match_duration"] = m["duration"]
         p["fantasy_points"] = db._per_match_fp(p)
     m["radiant"] = [p for p in players if p["team_side"] == "radiant"]

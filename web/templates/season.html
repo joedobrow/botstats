@@ -76,21 +76,22 @@
   {% endif %}
 
 {% elif tab == "leaders" %}
+  <p class="muted small">This season's games only. Players with at least {{ min_games }} of {{ max_games }} games (half of the most active player's), so stand-ins don't top the list.</p>
   <div class="scroll">
-  <table>
-    <thead><tr><th>#</th><th>Player</th><th class="num">Games</th><th class="num">W–L</th><th class="num">Fantasy</th><th class="num">KDA</th><th class="num">GPM</th><th class="num">XPM</th><th class="num">Hero dmg</th></tr></thead>
+  <table class="sortable">
+    <thead><tr><th data-sort-type="num">#</th><th data-sort-type="text">Player</th><th class="num" data-sort-type="num" data-sort-first="desc">Games</th><th class="num" data-sort-type="num" data-sort-first="desc">W–L</th><th class="num" data-sort-type="num" data-sort-first="desc">Fantasy</th><th class="num" data-sort-type="num" data-sort-first="desc">KDA</th><th class="num" data-sort-type="num" data-sort-first="desc">GPM</th><th class="num" data-sort-type="num" data-sort-first="desc">XPM</th><th class="num" data-sort-type="num" data-sort-first="desc">Hero dmg</th></tr></thead>
     <tbody>
     {% for p in leaders %}
       <tr>
         <td class="muted">{{ loop.index }}</td>
-        <td>{{ player_link(p.account_id, p.name) }}</td>
+        <td data-sort="{{ p.name|lower }}">{{ player_link(p.account_id, p.name) }}</td>
         <td class="num">{{ p.games_played }}</td>
-        <td class="num">{{ p.wins }}–{{ p.games_played - p.wins }}</td>
+        <td class="num" data-sort="{{ p.wins }}">{{ p.wins }}–{{ p.games_played - p.wins }}</td>
         <td class="num">{{ "%.1f"|format(p.fantasy_points) }}</td>
         <td class="num">{{ "%.2f"|format(p.kda) }}</td>
         <td class="num">{{ p.gpm|round|int }}</td>
         <td class="num">{{ p.xpm|round|int }}</td>
-        <td class="num">{{ "{:,}".format(p.hero_damage|round|int) }}</td>
+        <td class="num" data-sort="{{ p.hero_damage|round|int }}">{{ "{:,}".format(p.hero_damage|round|int) }}</td>
       </tr>
     {% else %}
       <tr><td colspan="9" class="muted">No matches yet.</td></tr>

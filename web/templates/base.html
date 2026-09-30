@@ -4,7 +4,20 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% if title %}{{ title }} · {% endif %}CADL</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Alfa+Slab+One&display=swap">
 <link rel="stylesheet" href="/static/style.css?v={{ css_version }}">
+<script>
+// Experiment: ?look=inverted / ?look=classic, remembered while browsing.
+(function () {
+  var look = new URLSearchParams(location.search).get("look");
+  try {
+    if (look) localStorage.setItem("look", look); else look = localStorage.getItem("look");
+  } catch (e) {}
+  if (look === "inverted") document.documentElement.classList.add("inverted");
+})();
+</script>
 </head>
 <body>
 <header class="topbar">
@@ -19,6 +32,64 @@
 {% block content %}{% endblock %}
 </main>
 <script>
+// Sortable tables: <table class="sortable">; a header's data-sort-type is
+// "num" or "text", data-sort-first="desc" to start descending. A cell's
+// data-sort, when present, is the value sorted by; empty values go last.
+document.querySelectorAll("table.sortable").forEach(function (table) {
+  var headers = table.querySelectorAll("thead th[data-sort-type]");
+  headers.forEach(function (th) {
+    th.tabIndex = 0;
+    th.setAttribute("role", "button");
+    function sort() {
+      var col = Array.prototype.indexOf.call(th.parentNode.children, th);
+      var num = th.dataset.sortType === "num";
+      var desc = th.classList.contains("sorted-asc") ? true
+               : th.classList.contains("sorted-desc") ? false
+               : th.dataset.sortFirst === "desc";
+      headers.forEach(function (h) { h.classList.remove("sorted-asc", "sorted-desc"); h.removeAttribute("aria-sort"); });
+      th.classList.add(desc ? "sorted-desc" : "sorted-asc");
+      th.setAttribute("aria-sort", desc ? "descending" : "ascending");
+      var body = table.tBodies[0];
+      var rows = Array.prototype.filter.call(body.rows, function (r) { return !r.classList.contains("no-results"); });
+      function key(r) {
+        var cell = r.cells[col]; if (!cell) return null;
+        var v = cell.dataset.sort !== undefined ? cell.dataset.sort : cell.textContent.trim();
+        if (v === "") return null;
+        return num ? parseFloat(v.replace(/[^0-9.\-]/g, "")) : v.toLowerCase();
+      }
+      rows.sort(function (a, b) {
+        var x = key(a), y = key(b);
+        if (x === null || (num && isNaN(x))) return 1;
+        if (y === null || (num && isNaN(y))) return -1;
+        return (x < y ? -1 : x > y ? 1 : 0) * (desc ? -1 : 1);
+      });
+      rows.forEach(function (r) { body.insertBefore(r, body.querySelector("tr.no-results")); });
+    }
+    th.addEventListener("click", sort);
+    th.addEventListener("keydown", function (e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); sort(); } });
+  });
+});
+
+// Live search: <form data-live-filter="#table"> filters that table's rows
+// (by their data-search text) as you type.
+document.querySelectorAll("form[data-live-filter]").forEach(function (form) {
+  var table = document.querySelector(form.dataset.liveFilter);
+  var input = form.querySelector("input[type=search]");
+  if (!table || !input) return;
+  function filter() {
+    var q = input.value.trim().toLowerCase(), shown = 0;
+    Array.prototype.forEach.call(table.tBodies[0].rows, function (r) {
+      if (r.classList.contains("no-results")) return;
+      var hit = !q || (r.dataset.search || "").indexOf(q) !== -1;
+      r.hidden = !hit; if (hit) shown++;
+    });
+    var empty = table.querySelector("tr.no-results"); if (empty) empty.hidden = shown > 0;
+  }
+  input.addEventListener("input", filter);
+  form.addEventListener("submit", function (e) { e.preventDefault(); filter(); });
+  filter();
+});
+
 // Click-to-rename: swap a name for its edit form, and back on Cancel/Escape.
 document.querySelectorAll(".editable").forEach(function (box) {
   var view = box.querySelector(".edit-view"), form = box.querySelector(".edit-form");
