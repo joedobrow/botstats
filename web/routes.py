@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import io
+import logging
 import os
 import re
 from datetime import datetime
@@ -35,6 +36,7 @@ BASE_URL = os.environ.get("SITE_BASE_URL", "").rstrip("/")
 
 POSITION_NAMES = {1: "Safe lane", 2: "Mid", 3: "Off lane", 4: "Soft support", 5: "Hard support"}
 
+logger = logging.getLogger(__name__)
 routes = web.RouteTableDef()
 
 
@@ -317,7 +319,9 @@ async def team_page(request: web.Request):
     stats = {p["account_id"]: p for p in db.get_all_time_stats(season["division_id"], season["id"])}
     return render(request, "team.html", title=team["name"], season=season, team=team,
                   matches=team_matches, idents=store.player_identities(member_ids),
-                  stats=stats, team_names={c: t["name"] for c, t in teams.items()},
+                  stats=stats, ratings=db.displayed_ratings(season["division_id"]),
+                  team_names={c: t["name"] for c, t in teams.items()},
+                  opponents=[(c, t["name"]) for c, t in sorted(teams.items(), key=lambda kv: kv[1]["name"].lower())],
                   can_edit=_can_edit_team(request, team), notice=request.query.get("notice"))
 
 
@@ -364,6 +368,63 @@ async def team_logo(request: web.Request):
     if old != url:
         uploads.delete_upload(old)
     raise web.HTTPFound(team_url(season, team["captain"]))
+
+
+@routes.post("/season/{season_id}/{division}/team/{captain}/match/{match_id}/opponent")
+async def match_opponent(request: web.Request):
+    """Say which team played the other side of a match. Three of a team's five
+    have to play a side for it to be attributed automatically, so a night of
+    stand-ins leaves a real result credited to nobody."""
+    season = _season_or_404(request)
+    _require_admin(request)
+    captain = request.match_info["captain"]
+    match_id = int(request.match_info["match_id"])
+    form = await request.post()
+    side = form.get("side")
+    choice = (form.get("captain") or "").strip()
+    if side not in ("radiant", "dire"):
+        raise web.HTTPBadRequest(text="side must be radiant or dire")
+    if choice == "__auto__":
+        db.set_match_team_override(match_id, side, None, automatic=True)
+        notice = f"Match {match_id}: opponent back to whatever the rosters say."
+    elif choice == "__standins__":
+        db.set_match_team_override(match_id, side, None, set_by=request["user"]["account_id"])
+        notice = f"Match {match_id}: opponent recorded as stand-ins."
+    else:
+        teams = {t["captain"] for t in store.season_teams(season, matches=[])}
+        if choice not in teams:
+            raise web.HTTPBadRequest(text=f"{choice!r} isn't a team this season")
+        db.set_match_team_override(match_id, side, choice, set_by=request["user"]["account_id"])
+        notice = f"Match {match_id}: opponent set to {choice}."
+    raise web.HTTPFound(team_url(season, captain) + "?" + urlencode({"notice": notice}))
+
+
+@routes.post("/season/{season_id}/{division}/team/{captain}/match/add")
+async def match_add(request: web.Request):
+    """Pull in a game that was played but never ticketed, by its match id."""
+    from fetcher import fetch_and_store_match
+
+    season = _season_or_404(request)
+    _require_admin(request)
+    captain = request.match_info["captain"]
+    raw = ((await request.post()).get("match_id") or "").strip()
+    # People paste whole Dotabuff/OpenDota URLs as often as bare ids.
+    digits = re.sub(r"\D", "", raw.rsplit("/", 1)[-1] if "/" in raw else raw)
+    back = team_url(season, captain)
+    if not digits:
+        raise web.HTTPFound(back + "?" + urlencode({"notice": "That isn't a match id."}))
+    try:
+        added = await fetch_and_store_match(int(digits), season["division_id"], league_id=season["id"])
+    except ValueError as e:
+        raise web.HTTPFound(back + "?" + urlencode({"notice": str(e)}))
+    except Exception:
+        logger.exception("manual match add failed for %s", digits)
+        raise web.HTTPFound(back + "?" + urlencode({
+            "notice": "Couldn't reach OpenDota for that match. Try again in a minute."}))
+    notice = (f"Match {added['match_id']} " + ("re-fetched" if added["already"] else "added")
+              + f" with {added['players']} players. If its sides aren't attributed, "
+                f"set the teams on the rows below.")
+    raise web.HTTPFound(back + "?" + urlencode({"notice": notice}))
 
 
 @routes.get("/players")

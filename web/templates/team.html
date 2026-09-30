@@ -19,7 +19,7 @@
         <button type="button" class="edit-cancel">Cancel</button>
       </form>
     </span>{% else %}{{ team.name }}{% endif %}</h1>
-    <div class="muted">Captain {{ team.captain }} · {{ team.wins }}–{{ team.losses }}</div>
+    <div class="muted">{{ team.wins }}–{{ team.losses }}</div>
   </div>
 </div>
 {% if can_edit %}
@@ -40,22 +40,24 @@
 <h2>Roster</h2>
 <div class="scroll">
 <table>
-  <thead><tr><th>Player</th><th class="num">Cost</th><th class="num">Games</th><th class="num">W–L</th><th class="num">Fantasy</th><th class="num">KDA</th><th class="num">GPM</th></tr></thead>
+  <thead><tr><th>Player</th><th class="num">Rating</th><th class="num">Cost</th><th class="num">Games</th><th class="num">W–L</th><th class="num">Fantasy</th></tr></thead>
   <tbody>
   {% set members = ([{"account_id": team.captain_account_id, "cost": None, "is_captain": True}] if team.captain_account_id else []) + team.roster|sort(attribute="cost", reverse=True)|list %}
   {% for p in members if p.is_captain or p.account_id != team.captain_account_id %}
     {% set s = stats.get(p.account_id) %}
     <tr>
-      <td>{{ player_link(p.account_id, idents[p.account_id].name) }}{% if p.is_captain %} <span class="tag">C</span>{% endif %}</td>
+      <td class="with-avatar">
+        {% if idents[p.account_id].avatar_url %}<img class="avatar" src="{{ idents[p.account_id].avatar_url }}" alt="">{% endif %}
+        {{ player_link(p.account_id, idents[p.account_id].name) }}{% if p.is_captain %} <span class="tag">C</span>{% endif %}
+      </td>
+      <td class="num">{{ ratings.get(p.account_id) or "—" }}</td>
       <td class="num">{% if p.cost %}${{ p.cost }}{% endif %}</td>
       {% if s %}
       <td class="num">{{ s.games_played }}</td>
       <td class="num">{{ s.wins }}–{{ s.games_played - s.wins }}</td>
       <td class="num">{{ "%.1f"|format(s.fantasy_points) }}</td>
-      <td class="num">{{ "%.2f"|format(s.kda) }}</td>
-      <td class="num">{{ s.gpm|round|int }}</td>
       {% else %}
-      <td class="num muted" colspan="5">No games</td>
+      <td class="num muted" colspan="3">No games</td>
       {% endif %}
     </tr>
   {% endfor %}
@@ -63,16 +65,42 @@
 </table>
 </div>
 
-<h2>Matches</h2>
+<h2 class="with-action">Matches
+  {% if is_admin %}<button type="button" class="add-button" data-open-dialog="add-match-dialog"
+    title="Add a game that was played but never ticketed">+</button>{% endif %}
+</h2>
 <table>
   <thead><tr><th>Date</th><th>Opponent</th><th>Result</th><th class="num">Length</th><th></th></tr></thead>
   <tbody>
   {% for m in matches %}
     {% set on_radiant = m.radiant_team == team.captain %}
     {% set won = (m.radiant_win and on_radiant) or (not m.radiant_win and not on_radiant) %}
+    {% set opp = m.dire_team if on_radiant else m.radiant_team %}
     <tr>
       <td>{{ m.start_time|date("%b %-d") }}</td>
-      <td>{{ team_cell(season, m.dire_team if on_radiant else m.radiant_team, team_names) }}</td>
+      <td>
+        {% if is_admin %}
+        <span class="editable">
+          <span class="edit-view" tabindex="0" role="button" title="Click to set which team this was">
+            {{ team_cell(season, opp, team_names) }}
+          </span>
+          <form class="edit-form" method="post"
+                action="{{ team_url(season, team.captain) }}/match/{{ m.match_id }}/opponent" hidden>
+            <input type="hidden" name="csrf" value="{{ csrf }}">
+            <input type="hidden" name="side" value="{{ "dire" if on_radiant else "radiant" }}">
+            <select name="captain" aria-label="Opponent">
+              <option value="__auto__">Work it out from the rosters</option>
+              <option value="__standins__"{% if not opp %} selected{% endif %}>Stand-ins</option>
+              {% for cap, name in opponents if cap != team.captain %}
+              <option value="{{ cap }}"{% if cap == opp %} selected{% endif %}>{{ name }}</option>
+              {% endfor %}
+            </select>
+            <button class="primary">Save</button>
+            <button type="button" class="edit-cancel">Cancel</button>
+          </form>
+        </span>
+        {% else %}{{ team_cell(season, opp, team_names) }}{% endif %}
+      </td>
       <td class="{{ 'win' if won else 'loss' }}">{{ "Win" if won else "Loss" }}</td>
       <td class="num">{{ m.duration|duration }}</td>
       <td><a href="/match/{{ m.match_id }}">Details</a></td>
@@ -82,4 +110,21 @@
   {% endfor %}
   </tbody>
 </table>
+{% if is_admin %}
+<dialog id="add-match-dialog" class="dialog">
+  <form method="post" action="{{ team_url(season, team.captain) }}/match/add" class="form">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <h2 class="flush">Add a match</h2>
+    <p class="muted small">For a game that was played but never ticketed. Paste its match id or a
+      Dotabuff/OpenDota link — it's fetched from OpenDota and counted in this season. If the sides
+      come out as stand-ins, set the teams on the rows above.</p>
+    <input type="text" name="match_id" inputmode="numeric" placeholder="8123456789" required
+           aria-label="Match id">
+    <div class="actions">
+      <button class="primary">Add</button>
+      <button type="button" data-close-dialog>Cancel</button>
+    </div>
+  </form>
+</dialog>
+{% endif %}
 {% endblock %}
