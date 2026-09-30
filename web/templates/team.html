@@ -103,8 +103,20 @@
         {% else %}{{ team_cell(season, opp, team_names) }}{% endif %}
       </td>
       <td class="{{ 'win' if won else 'loss' }}">{{ "Win" if won else "Loss" }}</td>
-      <td class="num">{{ m.duration|duration }}</td>
-      <td><a href="/match/{{ m.match_id }}">Details</a></td>
+      <td class="num">{% if m.match_id > 0 %}{{ m.duration|duration }}{% else %}<span class="muted">—</span>{% endif %}</td>
+      <td>
+        {% if m.match_id > 0 %}<a href="/match/{{ m.match_id }}">Details</a>
+        {% else %}<span class="tag">By hand</span>
+          {% if is_admin %}
+          <form method="post" class="inline"
+                action="{{ team_url(season, team.captain) }}/match/{{ m.match_id }}/delete"
+                onsubmit="return confirm('Remove this result?')">
+            <input type="hidden" name="csrf" value="{{ csrf }}">
+            <button class="linklike danger">Remove</button>
+          </form>
+          {% endif %}
+        {% endif %}
+      </td>
     </tr>
   {% else %}
     <tr><td colspan="5" class="muted">No matches yet.</td></tr>
@@ -113,19 +125,41 @@
 </table>
 {% if is_admin %}
 <dialog id="add-match-dialog" class="dialog">
-  <form method="post" action="{{ team_url(season, team.captain) }}/match/add" class="form">
+  <h2 class="flush">Add a match</h2>
+  <p class="muted small">For a game that was played but isn't on the site. A game nobody ticketed
+    has no Dota match to fetch, so enter the result; if it <em>was</em> ticketed, the match id
+    brings the whole game in.</p>
+  <form method="post" action="{{ team_url(season, team.captain) }}/match/record" class="form">
     <input type="hidden" name="csrf" value="{{ csrf }}">
-    <h2 class="flush">Add a match</h2>
-    <p class="muted small">For a game that was played but never ticketed. Paste its match id or a
-      Dotabuff/OpenDota link — it's fetched from OpenDota and counted in this season. If the sides
-      come out as stand-ins, set the teams on the rows above.</p>
-    <input type="text" name="match_id" inputmode="numeric" placeholder="8123456789" required
-           aria-label="Match id">
+    <label>Against
+      <select name="opponent" required>
+        <option value="" disabled selected>Pick a team</option>
+        {% for cap, name in opponents if cap != team.captain %}
+        <option value="{{ cap }}">{{ name }}{% if name != cap %} ({{ cap }}){% endif %}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <div class="form grid">
+      <label>Games {{ team.name }} won <input type="number" name="won" value="1" min="0" max="7" required></label>
+      <label>Games they lost <input type="number" name="lost" value="1" min="0" max="7" required></label>
+    </div>
+    <label>Played on <input type="date" name="played" required></label>
     <div class="actions">
-      <button class="primary">Add</button>
+      <button class="primary">Record the result</button>
       <button type="button" data-close-dialog>Cancel</button>
     </div>
   </form>
+  <details>
+    <summary class="muted small">It was ticketed — fetch it by match id</summary>
+    <form method="post" action="{{ team_url(season, team.captain) }}/match/add" class="form">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <p class="muted small">Pastes as a match id or a Dotabuff/OpenDota link. The whole game comes
+        in, players and all. If its sides come out as stand-ins, set the teams on the rows above.</p>
+      <input type="text" name="match_id" inputmode="numeric" placeholder="8123456789" required
+             aria-label="Match id">
+      <div class="actions"><button>Fetch it</button></div>
+    </form>
+  </details>
 </dialog>
 {% endif %}
 {% endblock %}

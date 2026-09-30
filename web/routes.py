@@ -403,6 +403,63 @@ async def match_opponent(request: web.Request):
     raise web.HTTPFound(team_url(season, captain) + "?" + urlencode({"notice": notice}))
 
 
+@routes.post("/season/{season_id}/{division}/team/{captain}/match/record")
+async def match_record(request: web.Request):
+    """Enter a result for a game that has no Dota match to fetch. Most games
+    that go missing were never ticketed, so there is nothing to look up —
+    only the teams and who won."""
+    season = _season_or_404(request)
+    _require_admin(request)
+    captain = request.match_info["captain"]
+    back = team_url(season, captain)
+    data = await request.post()
+
+    teams = {t["captain"]: t for t in store.season_teams(season, matches=[])}
+    opponent = (data.get("opponent") or "").strip()
+    if opponent not in teams or opponent == captain:
+        raise web.HTTPFound(back + "?" + urlencode({"notice": "Pick which team they played."}))
+    try:
+        won, lost = int(data.get("won") or 0), int(data.get("lost") or 0)
+    except ValueError:
+        raise web.HTTPFound(back + "?" + urlencode({"notice": "Games won and lost must be numbers."}))
+    if won < 0 or lost < 0 or not 1 <= won + lost <= 7:
+        raise web.HTTPFound(back + "?" + urlencode({
+            "notice": "Enter between 1 and 7 games in total."}))
+    try:
+        # Midday in the league's own timezone, so the result lands in the week
+        # it was played whatever the UTC offset does to the boundaries.
+        day = datetime.strptime((data.get("played") or "").strip(), "%Y-%m-%d")
+        played_at = int(day.replace(hour=12, tzinfo=LEAGUE_TZ).timestamp())
+    except ValueError:
+        raise web.HTTPFound(back + "?" + urlencode({"notice": "Give the date it was played."}))
+
+    for _ in range(won):
+        db.add_manual_match(division_id=season["division_id"], league_id=season["id"],
+                            start_time=played_at, winner=captain, loser=opponent,
+                            set_by=request["user"]["account_id"])
+    for _ in range(lost):
+        db.add_manual_match(division_id=season["division_id"], league_id=season["id"],
+                            start_time=played_at, winner=opponent, loser=captain,
+                            set_by=request["user"]["account_id"])
+    raise web.HTTPFound(back + "?" + urlencode({
+        "notice": f"Recorded {won}–{lost} against {teams[opponent]['name']}."}))
+
+
+@routes.post("/season/{season_id}/{division}/team/{captain}/match/{match_id}/delete")
+async def match_delete(request: web.Request):
+    """Take back a hand-entered result. Real matches stay: they're facts from
+    OpenDota, and voiding one is a different question."""
+    season = _season_or_404(request)
+    _require_admin(request)
+    captain = request.match_info["captain"]
+    try:
+        removed = db.delete_manual_match(int(request.match_info["match_id"]))
+    except ValueError as e:
+        raise web.HTTPBadRequest(text=str(e))
+    raise web.HTTPFound(team_url(season, captain) + "?" + urlencode({
+        "notice": "Result removed." if removed else "That result was already gone."}))
+
+
 @routes.post("/season/{season_id}/{division}/team/{captain}/match/add")
 async def match_add(request: web.Request):
     """Pull in a game that was played but never ticketed, by its match id."""
