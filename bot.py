@@ -10,7 +10,7 @@ from config import DISCORD_TOKEN, ADMIN_USER_ID, REGION_CLUSTERS, GAME_MODE_FILT
 from fetcher import fetch_and_store_matches_for_division, fetch_and_store_season
 from db import (init_db, get_division, get_guild_division, create_division, update_division,
                 get_all_divisions, get_scold_channel, set_guild_settings, get_guild_settings,
-                get_season, upsert_season, set_current_season, season_label, ranked)
+                get_season, upsert_season, set_current_season, season_label, ranked, qualified)
 from formatters import format_leaderboard, format_player_stats, format_team_stats
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -445,9 +445,7 @@ async def leaderboard(interaction: discord.Interaction, stat: app_commands.Choic
             max_games = None
         else:
             # Min-games qualification: 50% of the most-active player's games, rounded down
-            max_games = max((s.get("games_played", 0) or 0) for s in stats) if stats else 0
-            threshold = max_games // 2
-            stats = [s for s in stats if (s.get("games_played", 0) or 0) >= threshold]
+            stats, threshold, max_games = qualified(stats)
 
         limit = None if all else 10
 
@@ -1865,13 +1863,9 @@ async def summary(interaction: discord.Interaction, season: str = None, public: 
         alltime_stats_full = ranked(get_all_time_stats(division["id"], season_id))
 
         # Min-games qualification (50% of most-active player's count) applied per scope.
-        week_max = max((s.get("games_played", 0) or 0) for s in week_stats_full) if week_stats_full else 0
-        week_threshold = week_max // 2
-        week_qualified = [s for s in week_stats_full if (s.get("games_played", 0) or 0) >= week_threshold]
+        week_qualified, week_threshold, week_max = qualified(week_stats_full)
 
-        alltime_max = max((s.get("games_played", 0) or 0) for s in alltime_stats_full) if alltime_stats_full else 0
-        alltime_threshold = alltime_max // 2
-        alltime_qualified = [s for s in alltime_stats_full if (s.get("games_played", 0) or 0) >= alltime_threshold]
+        alltime_qualified, alltime_threshold, alltime_max = qualified(alltime_stats_full)
 
         # Send 10 full leaderboards: for each position (1..5), latest-week then all-time.
         for pos in [1, 2, 3, 4, 5]:

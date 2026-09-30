@@ -89,9 +89,21 @@ CREATE TABLE IF NOT EXISTS players (
 );"""
 
 
+# Ability Draft picks, one row per pick, from windrun.io (fetch_draft in
+# fetcher.py). ability_id < 0 is a hero "model" pick (-hero_id).
+DRAFTS_TABLE = """
+CREATE TABLE IF NOT EXISTS match_drafts (
+    match_id    INTEGER NOT NULL REFERENCES matches(match_id),
+    pick_order  INTEGER NOT NULL,
+    account_id  INTEGER NOT NULL,
+    ability_id  INTEGER NOT NULL,
+    PRIMARY KEY (match_id, pick_order)
+)"""
+
+
 # Bumped by each structural migration in _MIGRATIONS; stored in the database
 # as PRAGMA user_version so every migration runs exactly once, in order.
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 def init_db():
@@ -269,6 +281,8 @@ def init_db():
             );
 
             {PLAYERS_TABLE};
+
+            {DRAFTS_TABLE};
 
             CREATE INDEX IF NOT EXISTS idx_players_match   ON players(match_id);
             CREATE INDEX IF NOT EXISTS idx_players_account ON players(account_id);
@@ -932,9 +946,23 @@ def _rebuild_matches_and_players(conn: sqlite3.Connection) -> None:
     """)
 
 
+def _add_match_drafts(conn: sqlite3.Connection) -> None:
+    """Migration 3: a table for Ability Draft picks (match_drafts)."""
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute(DRAFTS_TABLE)
+        conn.execute("PRAGMA user_version = 3")
+        conn.execute("COMMIT")
+        logger.info("Migration 3: added match_drafts")
+    except Exception:
+        if conn.in_transaction:
+            conn.execute("ROLLBACK")
+        raise
+
+
 # Structural migrations, in order; the database's PRAGMA user_version is the
 # number of the last one applied. Append new ones; never reorder or edit.
-_MIGRATIONS = [_migrate_seasons_to_ids, _migrate_to_divisions]
+_MIGRATIONS = [_migrate_seasons_to_ids, _migrate_to_divisions, _add_match_drafts]
 
 
 def _migrate_ranked_mmr_overrides_to_rank():
@@ -1795,6 +1823,15 @@ def get_all_time_stats(division_id: int, season_id: int | None = None,
     return _apply_override_nicknames(results)
 
 
+def qualified(stats: list[dict]) -> tuple[list[dict], int, int]:
+    """Players with enough games to rank: at least half as many as the most
+    active player (rounded down), so stand-ins don't top a leaderboard.
+    Returns (rows, threshold, max_games)."""
+    max_games = max((s.get("games_played") or 0 for s in stats), default=0)
+    threshold = max_games // 2
+    return [s for s in stats if (s.get("games_played") or 0) >= threshold], threshold, max_games
+
+
 def ranked(stats: list[dict]) -> list[dict]:
     """Stat rows with one row per person, for anything that ranks or pools
     players (leaderboards, percentile pools). Drops the copies
@@ -2251,6 +2288,35 @@ def get_division_cached_ratings(division_id: int, include_all: bool = False) -> 
                 d["internal_rating"] = d["group_rating"]
             result.append(d)
     return result
+
+
+def displayed_ratings(division_id: int) -> dict[int, int]:
+    """{account_id: rating} — the internal rating to show each rated player,
+    as of the division's current season: a /set_player rating override as
+    set; otherwise the cached rating (pooled across a player's accounts),
+    nudged by the season's fantasy adjustment (routed through the main
+    account for an alt). The one place this is decided, so every view of a
+    rating agrees. Shows results only: nothing about how they're computed."""
+    division = get_division(division_id)
+    if not division:
+        return {}
+    season_id = division.get("current_season_id")
+    adjustments = compute_fantasy_adjusted_ratings(season_id, division_id) if season_id else {}
+    with _conn() as conn:
+        overrides = {r[0]: r[1] for r in conn.execute(
+            "SELECT account_id, internal_rating_override FROM skill_overrides "
+            "WHERE internal_rating_override IS NOT NULL")}
+    out: dict[int, int] = {}
+    for r in get_division_cached_ratings(division_id, include_all=True):
+        aid = r["account_id"]
+        if aid in overrides:
+            out[aid] = int(overrides[aid])
+        elif r.get("internal_rating") is not None:
+            adj = adjustments.get(r.get("alt_account_for") or aid)
+            out[aid] = int(adj["adjusted_rating"] if adj else r["internal_rating"])
+    for aid, rating in overrides.items():
+        out.setdefault(aid, int(rating))
+    return out
 
 
 def exclude_from_division(division_id: int, account_id: int) -> None:
@@ -3424,6 +3490,38 @@ def match_exists(match_id: int) -> bool:
     with _conn() as conn:
         row = conn.execute("SELECT 1 FROM matches WHERE match_id = ?", (match_id,)).fetchone()
     return row is not None
+
+
+def save_match_draft(match_id: int, picks: list[tuple[int, int, int]]) -> None:
+    """Store a game's draft: (pick_order, account_id, ability_id) per pick,
+    replacing any stored before."""
+    with _conn() as conn:
+        conn.execute("DELETE FROM match_drafts WHERE match_id = ?", (match_id,))
+        conn.executemany("INSERT INTO match_drafts (match_id, pick_order, account_id, ability_id) VALUES (?, ?, ?, ?)",
+                         [(match_id, *p) for p in picks])
+
+
+def get_match_draft(match_id: int) -> dict[int, list[int]]:
+    """{account_id: [ability ids]} for a game: the hero model (negative id)
+    first, then abilities in the order they were picked. {} if none stored."""
+    with _conn() as conn:
+        rows = conn.execute("SELECT account_id, ability_id FROM match_drafts WHERE match_id = ? ORDER BY pick_order",
+                            (match_id,)).fetchall()
+    out: dict[int, list[int]] = {}
+    for r in rows:
+        out.setdefault(r["account_id"], []).append(r["ability_id"])
+    return {aid: sorted(ids, key=lambda i: i >= 0) for aid, ids in out.items()}  # model first, stable
+
+
+def games_missing_drafts(season_id: int) -> list[int]:
+    """Ability Draft games of a season with no stored draft."""
+    with _conn() as conn:
+        return [r[0] for r in conn.execute("""
+            SELECT m.match_id FROM matches m
+            WHERE m.league_id = ? AND m.game_mode = 18
+              AND NOT EXISTS (SELECT 1 FROM match_drafts d WHERE d.match_id = m.match_id)
+            ORDER BY m.start_time
+        """, (season_id,))]
 
 
 def match_is_complete(match_id: int) -> bool:

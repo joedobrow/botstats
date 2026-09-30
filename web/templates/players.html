@@ -2,23 +2,27 @@
 {% from "macros.html" import player_link %}
 {% block content %}
 <h1>Players</h1>
-<form method="get" class="search">
-  <input type="search" name="q" value="{{ q }}" placeholder="Search by name or account ID" aria-label="Search players">
-  <button>Search</button>
+<form method="get" class="search" data-live-filter="#players-table">
+  <input type="search" name="q" value="{{ q }}" placeholder="Search by name or account ID" aria-label="Search players" autocomplete="off">
+  <noscript><button>Search</button></noscript>
 </form>
-<table>
-  <thead><tr><th>Player</th><th>Badge</th><th class="num">League games</th><th class="num">Win rate</th></tr></thead>
+<table id="players-table" class="sortable">
+  <thead><tr>
+    <th data-sort-type="text">Player</th>
+    <th class="num" data-sort-type="num" data-sort-first="desc">Rating</th>
+    <th class="num" data-sort-type="num" data-sort-first="desc">League games</th>
+    <th class="num" data-sort-type="num" data-sort-first="desc">Win rate</th>
+  </tr></thead>
   <tbody>
   {% for p in players %}
-    <tr>
-      <td class="with-avatar">{% if p.avatar_url %}<img class="avatar" src="{{ p.avatar_url }}" alt="">{% endif %}{{ player_link(p.account_id, p.name) }}</td>
-      <td>{{ p.badge or "" }}</td>
-      <td class="num">{{ p.games }}</td>
-      <td class="num">{% if p.games %}{{ (100 * p.wins / p.games)|round|int }}%{% endif %}</td>
+    <tr data-search="{{ p.name|lower }} {{ p.account_id }}">
+      <td class="with-avatar" data-sort="{{ p.name|lower }}">{% if p.avatar_url %}<img class="avatar" src="{{ p.avatar_url }}" alt="">{% endif %}{{ player_link(p.account_id, p.name) }}</td>
+      <td class="num" data-sort="{{ p.rating if p.rating is not none else '' }}">{{ p.rating if p.rating is not none else "" }}</td>
+      <td class="num" data-sort="{{ p.games }}">{{ p.games }}</td>
+      <td class="num" data-sort="{{ (p.wins / p.games) if p.games else '' }}">{% if p.games %}{{ (100 * p.wins / p.games)|round|int }}%{% endif %}</td>
     </tr>
-  {% else %}
-    <tr><td colspan="4" class="muted">No players found.</td></tr>
   {% endfor %}
+    <tr class="no-results"{% if players %} hidden{% endif %}><td colspan="4" class="muted">No players found.</td></tr>
   </tbody>
 </table>
 {% endblock %}

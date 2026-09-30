@@ -6,6 +6,11 @@
 {% if h.slug %}<img class="hero" src="https://cdn.cloudflare.steamstatic.com/apps/dota2/images/dota_react/heroes/icons/{{ h.slug }}.png" alt="" title="{{ h.name }}">{% endif %}
 {%- endmacro %}
 
+{# A player's Ability Draft picks as icons: the hero model, then abilities. #}
+{% macro draft_icons(picks) -%}
+<span class="draft">{% for p in picks %}{% if p.kind == "hero" %}<img class="draft-model" src="https://cdn.cloudflare.steamstatic.com/apps/dota2/images/dota_react/heroes/icons/{{ p.slug }}.png" alt="{{ p.name }}" title="{{ p.name }}">{% elif p.img %}<img class="draft-ability" src="https://cdn.cloudflare.steamstatic.com{{ p.img }}" alt="{{ p.name }}" title="{{ p.name }}">{% else %}<span class="draft-ability draft-unknown" title="{{ p.name }}">?</span>{% endif %}{% endfor %}</span>
+{%- endmacro %}
+
 {% macro team_cell(season, captain, team_names) -%}
 {% if captain %}<a href="{{ team_url(season, captain) }}">{{ team_names.get(captain, captain) }}</a>{% else %}<span class="muted">Stand-ins</span>{% endif %}
 {%- endmacro %}

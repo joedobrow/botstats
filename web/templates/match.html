@@ -1,10 +1,11 @@
 {% extends "base.html" %}
-{% from "macros.html" import hero_icon %}
+{% from "macros.html" import hero_icon, draft_icons %}
 {% block content %}
 {% if m.season %}<p class="small"><a href="{{ season_url(m.season) }}?tab=matches">← {{ m.season.label }}</a></p>{% endif %}
 <h1>Match {{ m.match_id }}</h1>
 <p class="muted">
-  {{ m.start_time|date("%A, %b %-d, %Y · %-I:%M %p %Z") }} · {{ m.duration|duration }} ·
+  {{ m.start_time|date("%A, %b %-d, %Y · %-I:%M %p %Z") }} · {{ m.duration|duration }} · {{ m.server }} ·
+  <a href="https://windrun.io/matches/{{ m.match_id }}" rel="noopener">Windrun</a> ·
   <a href="https://www.dotabuff.com/matches/{{ m.match_id }}" rel="noopener">Dotabuff</a> ·
   <a href="https://www.opendota.com/matches/{{ m.match_id }}" rel="noopener">OpenDota</a>
 </p>
@@ -18,12 +19,12 @@
   </h2>
   <div class="scroll">
   <table>
-    <thead><tr><th>Player</th><th>Hero</th><th class="num">K</th><th class="num">D</th><th class="num">A</th><th class="num">LH/DN</th><th class="num">GPM</th><th class="num">XPM</th><th class="num">Hero dmg</th><th class="num">Fantasy</th></tr></thead>
+    <thead><tr><th>Player</th><th>{{ "Draft" if m[side][0].draft else "Hero" }}</th><th class="num">K</th><th class="num">D</th><th class="num">A</th><th class="num">LH/DN</th><th class="num">GPM</th><th class="num">XPM</th><th class="num">Hero dmg</th><th class="num">Fantasy</th></tr></thead>
     <tbody>
     {% for p in m[side] %}
       <tr>
         <td><a href="/player/{{ p.account_id }}">{{ p.display_name }}</a></td>
-        <td class="with-avatar">{{ hero_icon(p.hero) }}{{ p.hero.name }}</td>
+        <td class="with-avatar">{% if p.draft %}{{ draft_icons(p.draft) }}{% else %}{{ hero_icon(p.hero) }}{{ p.hero.name }}{% endif %}</td>
         <td class="num">{{ p.kills }}</td><td class="num">{{ p.deaths }}</td><td class="num">{{ p.assists }}</td>
         <td class="num">{{ p.last_hits }}/{{ p.denies }}</td>
         <td class="num">{{ p.gpm|round|int }}</td><td class="num">{{ p.xpm|round|int }}</td>
