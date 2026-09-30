@@ -576,6 +576,91 @@ def season_teams(season: dict, matches: list[dict] | None = None) -> list[dict]:
     return sorted(teams.values(), key=lambda t: (-t["wins"], t["losses"], t["name"].lower()))
 
 
+def season_matchups(season: dict) -> list[dict]:
+    """Who plays whom, week by week.
+
+    A week that has been played reports its real pairings, read from the
+    matches. The next one is a proposed Swiss pairing: teams are taken in
+    standings order and paired with the nearest team they haven't met yet, so
+    equal records meet and nobody plays the same side twice while there's
+    anyone left. Weeks after that depend on results nobody has yet, so they're
+    left empty rather than guessed at.
+
+    Returns [{week, label, dates, played, pairs: [{a, b, a_name, b_name,
+    a_record, b_record, winner, match_ids, rematch, bye}]}].
+    """
+    matches = season_matches(season)
+    teams = season_teams(season, matches)
+    by_captain = {t["captain"]: t for t in teams}
+    weeks = db.get_season_weeks(season["id"], season["division_id"])
+
+    def team_name(cap: str | None) -> str:
+        return by_captain[cap]["name"] if cap in by_captain else (cap or "Stand-ins")
+
+    def record(cap: str | None) -> str:
+        t = by_captain.get(cap)
+        return f"{t['wins']}–{t['losses']}" if t else ""
+
+    # Which pairs have met, and what each week's games were.
+    met: set[frozenset] = set()
+    per_week: dict[int, dict[frozenset, dict]] = {}
+    for m in matches:
+        rad, dire = m["radiant_team"], m["dire_team"]
+        if not rad or not dire or rad == dire:
+            continue
+        met.add(frozenset((rad, dire)))
+        week = next((w["week_number"] for w in weeks
+                     if w["start_ts"] <= m["start_time"] <= w["end_ts"]), None)
+        if week is None:
+            continue
+        pair = per_week.setdefault(week, {}).setdefault(
+            frozenset((rad, dire)), {"a": rad, "b": dire, "wins": {rad: 0, dire: 0}, "match_ids": []})
+        pair["match_ids"].append(m["match_id"])
+        pair["wins"][rad if m["radiant_win"] else dire] += 1
+
+    def swiss(order: list[str]) -> list[dict]:
+        """Pair down the standings, skipping anyone a team has already met."""
+        left, pairs = list(order), []
+        while len(left) > 1:
+            a = left.pop(0)
+            opponent = next((c for c in left if frozenset((a, c)) not in met), None)
+            rematch = opponent is None
+            if rematch:                      # everyone left has played them already
+                opponent = left[0]
+            left.remove(opponent)
+            pairs.append({"a": a, "b": opponent, "a_name": team_name(a), "b_name": team_name(opponent),
+                          "a_record": record(a), "b_record": record(opponent),
+                          "winner": None, "match_ids": [], "rematch": rematch, "bye": False})
+        if left:
+            a = left.pop()
+            pairs.append({"a": a, "b": None, "a_name": team_name(a), "b_name": None,
+                          "a_record": record(a), "b_record": "", "winner": None,
+                          "match_ids": [], "rematch": False, "bye": True})
+        return pairs
+
+    standings = [t["captain"] for t in teams]     # season_teams sorts by record already
+    out, proposed = [], False
+    for w in weeks:
+        played = per_week.get(w["week_number"], {})
+        if played:
+            pairs = []
+            for p in played.values():
+                a, b = p["a"], p["b"]
+                winner = a if p["wins"][a] > p["wins"][b] else (b if p["wins"][b] > p["wins"][a] else None)
+                pairs.append({"a": a, "b": b, "a_name": team_name(a), "b_name": team_name(b),
+                              "a_record": record(a), "b_record": record(b), "winner": winner,
+                              "match_ids": p["match_ids"], "rematch": False, "bye": False})
+            pairs.sort(key=lambda p: p["a_name"].lower())
+        elif not proposed and len(standings) > 1:
+            pairs, proposed = swiss(standings), True
+        else:
+            pairs = []
+        out.append({"week": w["week_number"], "label": f"Week {w['week_number']}",
+                    "dates": w, "played": bool(played), "proposed": bool(pairs) and not played,
+                    "pairs": pairs})
+    return out
+
+
 def team_of(season: dict, account_id: int) -> dict | None:
     """The team a player was on in a season: drafted onto it, or its captain."""
     for t in season_teams(season, matches=[]):

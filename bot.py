@@ -6,9 +6,10 @@ from discord.ext import tasks
 import logging
 from datetime import datetime, timezone, timedelta
 
-from config import DISCORD_TOKEN, ADMIN_USER_ID, REGION_CLUSTERS, GAME_MODE_FILTERS, LOOKUP_CHANNEL_IDS
+from config import (DISCORD_TOKEN, ADMIN_USER_ID, REGION_CLUSTERS, GAME_MODE_FILTERS,
+                    LOOKUP_CHANNEL_IDS, SITE_URL)
 from fetcher import fetch_and_store_matches_for_division, fetch_and_store_season
-from db import (init_db, get_division, get_guild_division, create_division, update_division,
+from db import (init_db, get_division, get_guild_division, update_division,
                 get_all_divisions, get_scold_channel, set_guild_settings, get_guild_settings,
                 get_season, upsert_season, set_current_season, season_label, ranked, qualified)
 from formatters import format_leaderboard, format_player_stats, format_team_stats
@@ -97,14 +98,14 @@ def _resolve_season(interaction: discord.Interaction, season: str | None) -> tup
 _REGION_NAMES = {"us_west": "US West", "us_east": "US East", "europe": "Europe", "any": "Any Region"}
 
 
-@tree.command(name="config", description="[Admin] Configure this server's division settings")
+@tree.command(name="config", description="[Admin] Point this server's division at a league (divisions are made on the site)")
 @app_commands.describe(
     league="Dota league ID of the current season (e.g. 20056 = RD2L Season 39)",
     region="Server region for filtering matches",
     mode="Game mode filter",
     season_start="That season's start date (YYYY-MM-DD format)",
     scold_channel="Channel where all messages get deleted with a scolding reply",
-    name="The division's name, e.g. NA (set when creating it, or to rename it)",
+    name="Rename the division, e.g. NA",
 )
 @app_commands.choices(
     region=[
@@ -158,26 +159,28 @@ async def config(
         else:
             await interaction.response.send_message(
                 "No division configured for this server.\n"
-                "Use `/config league:<id> region:<region> mode:<mode> season_start:<date> name:<name>` to set up.",
+                f"Create one at {SITE_URL}/admin (Divisions → New division), giving it this "
+                f"server's id `{guild_id}`, then run `/config` to point it at a league.",
                 ephemeral=True
             )
         return
 
-    # Creating or updating - need all fields for new config
+    # Divisions are created on the site now: a division is a name, a URL name,
+    # a region and a game mode, and the region and mode decide which of a
+    # league's games belong to it — worth seeing the existing divisions while
+    # you pick. This command configures one that already exists.
     if not current:
-        # New config - all fields required
-        if not all([league, region, mode, season_start]):
-            await interaction.response.send_message(
-                "⚠️ For initial setup, all fields are required:\n"
-                "`/config league:<id> region:<us_west|us_east|europe|any> mode:<cm|ad> season_start:<YYYY-MM-DD> name:<name>`",
-                ephemeral=True
-            )
-            return
-    else:
-        # Updating - use existing values for missing fields
-        league = league or current["current_season_id"]
-        region = region or current["region"]
-        mode = mode or current["game_mode"]
+        await interaction.response.send_message(
+            "⚠️ This server has no division yet. Create one at "
+            f"{SITE_URL}/admin (Divisions → New division) and put this server's id "
+            f"`{guild_id}` in it, then run `/config` again.",
+            ephemeral=True
+        )
+        return
+    # Updating - use existing values for missing fields
+    league = league or current["current_season_id"]
+    region = region or current["region"]
+    mode = mode or current["game_mode"]
 
     # A season is identified by its league id (several divisions can share
     # one): `league` picks or creates the season, `season_start` sets its
@@ -201,17 +204,11 @@ async def config(
 
     # Save config
     upsert_season(league, season_start)
-    if current:
-        fields = {"region": region, "game_mode": mode}
-        if name:
-            fields.update(name=name.strip(), slug=_slug(name))
-        update_division(current["id"], **fields)
-        division_id = current["id"]
-    else:
-        division_name = (name or " ".join(filter(None, [
-            _REGION_NAMES.get(region, "") if region != "any" else "",
-            "Captains Mode" if mode == "cm" else "Ability Draft"]))).strip()
-        division_id = create_division(division_name, _slug(division_name), region, mode, guild_id)
+    fields = {"region": region, "game_mode": mode}
+    if name:
+        fields.update(name=name.strip(), slug=_slug(name))
+    update_division(current["id"], **fields)
+    division_id = current["id"]
     set_current_season(division_id, league)
     if scold_channel:
         set_guild_settings(guild_id, scold_channel_id=scold_channel.id)
