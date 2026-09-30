@@ -180,6 +180,11 @@ ul.plain { list-style: none; padding: 0; margin: 0; }
 ul.plain li { padding: 4px 0; border-bottom: 1px solid var(--border); }
 ul.plain li:last-child { border-bottom: 0; }
 
+/* Matchups: two teams a row, the winner in the win colour. */
+.matchup-side { white-space: nowrap; }
+.matchup-side.win a { font-weight: 700; }
+.matchup-side.win { color: var(--win); }
+
 /* A heading with an admin action on it, e.g. Matches + */
 h2.with-action { display: flex; align-items: center; gap: 10px; }
 .add-button { line-height: 1; padding: 2px 10px; font-size: 1.1rem; font-weight: 700; }

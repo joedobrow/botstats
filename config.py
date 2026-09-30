@@ -43,6 +43,11 @@ PLAYER_API_NEW_LOOKUPS_PER_HOUR: int = int(os.environ.get("PLAYER_API_NEW_LOOKUP
 # caller doesn't pass guild_id — the same adjustment /player shows there.
 API_DEFAULT_GUILD_ID: int = int(os.environ.get("API_DEFAULT_GUILD_ID", "1481800158826991718"))
 
+# Where the league site lives, for the Discord commands that point at it now:
+# divisions and season setup are administered there rather than in chat. Same
+# variable the site itself uses to build its Steam return URL.
+SITE_URL: str = os.environ.get("SITE_BASE_URL", "https://dota-bot.fly.dev").rstrip("/")
+
 # Channels where /lookup is open to anyone who can post in them, admins
 # included — the command shows the whole rating breakdown, so the Discord
 # channel's own permissions are the gate. The owner can use it anywhere.

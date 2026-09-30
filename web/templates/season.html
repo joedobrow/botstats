@@ -11,12 +11,57 @@
 </div>
 
 <nav class="tabs">
-  {% for key, label in [("teams", "Teams"), ("matches", "Matches"), ("leaders", "Leaders"), ("signups", "Signups (" ~ season.signup_count ~ ")")] %}
+  {% for key, label in [("matchups", "Matchups"), ("teams", "Teams"), ("matches", "Matches"), ("leaders", "Leaders"), ("signups", "Signups (" ~ season.signup_count ~ ")")] %}
   <a href="?tab={{ key }}" {% if tab == key %}class="active"{% endif %}>{{ label }}</a>
   {% endfor %}
 </nav>
 
-{% if tab == "teams" %}
+{% if tab == "matchups" %}
+  {% if rounds %}
+  {% for r in rounds %}
+  <section class="panel">
+    <h2 class="with-action">{{ r.label }}
+      {% if r.played %}<span class="tag">Played</span>
+      {% elif r.proposed %}<span class="tag">Proposed</span>{% endif %}
+    </h2>
+    {% if r.pairs %}
+    <div class="scroll">
+    <table>
+      <tbody>
+      {% for p in r.pairs %}
+        <tr>
+          <td class="matchup-side {{ 'win' if p.winner == p.a else '' }}">
+            <a href="{{ team_url(season, p.a) }}">{{ p.a_name }}</a>
+            <span class="muted small">{{ p.a_record }}</span>
+          </td>
+          <td class="muted small">v</td>
+          <td class="matchup-side {{ 'win' if p.winner == p.b else '' }}">
+            {% if p.bye %}<span class="muted">Bye</span>
+            {% else %}<a href="{{ team_url(season, p.b) }}">{{ p.b_name }}</a>
+            <span class="muted small">{{ p.b_record }}</span>{% endif %}
+          </td>
+          <td class="num muted small">
+            {% if p.rematch %}rematch{% elif p.match_ids %}{{ p.match_ids|length }} game{{ "" if p.match_ids|length == 1 else "s" }}{% endif %}
+          </td>
+          <td>{% for mid in p.match_ids %}<a href="/match/{{ mid }}" class="small">Game {{ loop.index }}</a>{% if not loop.last %} · {% endif %}{% endfor %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}
+    <p class="muted small">Pairs once the earlier weeks are played.</p>
+    {% endif %}
+  </section>
+  {% endfor %}
+  <p class="muted small">Proposed pairings take the standings in order and pair each team with the
+    nearest one it hasn't met. They're a suggestion, not a schedule — results decide the weeks
+    after the next one, so those are left empty.</p>
+  {% else %}
+  <p class="muted">Matchups appear here once the season has weeks and teams.</p>
+  {% endif %}
+
+{% elif tab == "teams" %}
   {% if teams %}
   <div class="cards">
   {% for t in teams %}

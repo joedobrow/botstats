@@ -91,8 +91,9 @@
             <select name="captain" aria-label="Opponent">
               <option value="__auto__">Work it out from the rosters</option>
               <option value="__standins__"{% if not opp %} selected{% endif %}>Stand-ins</option>
+              {# People remember teams by their captain, so name both. #}
               {% for cap, name in opponents if cap != team.captain %}
-              <option value="{{ cap }}"{% if cap == opp %} selected{% endif %}>{{ name }}</option>
+              <option value="{{ cap }}"{% if cap == opp %} selected{% endif %}>{{ name }}{% if name != cap %} ({{ cap }}){% endif %}</option>
               {% endfor %}
             </select>
             <button class="primary">Save</button>

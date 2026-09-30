@@ -279,9 +279,11 @@ async def season_any_division(request: web.Request):
 @routes.get("/season/{season_id}/{division}")
 async def season_page(request: web.Request):
     season = _season_or_404(request)
-    tab = request.query.get("tab", "teams")
+    tab = request.query.get("tab", "matchups")
     ctx: dict = {"season": season, "tab": tab, "title": season["label"]}
-    if tab == "signups":
+    if tab == "matchups":
+        ctx["rounds"] = store.season_matchups(season)
+    elif tab == "signups":
         ctx["signups"] = store.list_signups(season)
     elif tab == "leaders":
         ctx["leaders"], ctx["min_games"], ctx["max_games"] = store.season_leaders(season)
@@ -290,13 +292,15 @@ async def season_page(request: web.Request):
         ctx["matches"] = [m for m in matches if m["radiant_team"] or m["dire_team"]]
         ctx["other_matches"] = [m for m in matches if not (m["radiant_team"] or m["dire_team"])]
         ctx["team_names"] = {t["captain"]: t["name"] for t in store.season_teams(season, matches)}
-    else:
-        ctx["tab"] = "teams"
+    elif tab == "teams":
         teams = store.season_teams(season)
         idents = store.player_identities(
             [p["account_id"] for t in teams for p in t["roster"]]
             + [t["captain_account_id"] for t in teams if t["captain_account_id"]])
         ctx["teams"], ctx["idents"] = teams, idents
+    else:
+        ctx["tab"] = "matchups"
+        ctx["rounds"] = store.season_matchups(season)
     if request.get("user"):
         ctx["my_signup"] = store.get_signup(season, request["user"]["account_id"])
     return render(request, "season.html", **ctx)
@@ -713,7 +717,24 @@ async def admin_division(request: web.Request):
             store.rename_division(division["id"], name, slug)
         except ValueError as e:
             return render(request, "message.html", status=400, title="Division not renamed", message=str(e))
-    raise web.HTTPFound("/admin")
+    # Region, mode and Discord server used to be /config's to set. They decide
+    # which of a league's games count as this division's, so they belong with
+    # the rest of the division.
+    fields = {}
+    region, mode = data.get("region"), data.get("game_mode")
+    if region in REGION_CLUSTERS and region != division["region"]:
+        fields["region"] = region
+    if mode in GAME_MODE_FILTERS and mode != division["game_mode"]:
+        fields["game_mode"] = mode
+    if "guild_id" in data:
+        guild_raw = re.sub(r"\D", "", data.get("guild_id") or "")
+        guild_id = int(guild_raw) if guild_raw else None
+        if guild_id != division["guild_id"]:
+            fields["guild_id"] = guild_id
+    if fields:
+        db.update_division(division["id"], **fields)
+        logger.info("Division %s updated: %s", division["id"], fields)
+    raise web.HTTPFound("/admin#divisions")
 
 
 @routes.post("/admin/text")

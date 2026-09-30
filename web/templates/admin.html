@@ -94,23 +94,31 @@
 
 <section class="panel" id="divisions">
   <h2>Divisions</h2>
-  <p class="muted small">The URL name appears in season links, e.g. /season/20056/<em>na</em>.</p>
+  <p class="muted small">The URL name appears in season links, e.g. /season/20056/<em>na</em>. Region
+    and mode decide which of a league's games count as this division's — a league is filtered by
+    server cluster and game mode. Which season a division is on is set by Season setup above.</p>
   <div class="scroll">
   <table>
-    <thead><tr><th>Name and URL name</th><th>Current season</th><th>Region</th><th>Mode</th><th>Discord server</th></tr></thead>
+    <thead><tr><th>Name</th><th>URL name</th><th>Region</th><th>Mode</th><th>Discord server</th><th>Season</th><th></th></tr></thead>
     <tbody>
     {% for d in divisions %}
       <tr>
-        <td>
-          <form method="post" action="/admin/division" class="inline">
-            <input type="hidden" name="csrf" value="{{ csrf }}">
-            <input type="hidden" name="division_id" value="{{ d.id }}">
-            <input type="text" name="name" value="{{ d.name }}" maxlength="80" aria-label="Division name">
-            <input type="text" name="slug" value="{{ d.slug }}" maxlength="40" aria-label="URL name" class="short">
-            <button>Save</button>
-          </form>
-        </td>
-        <td>{{ d.current_season_id or "" }}</td><td>{{ d.region }}</td><td>{{ d.game_mode|upper }}</td><td class="muted small">{{ d.guild_id or "" }}</td>
+        <form method="post" action="/admin/division" id="division-{{ d.id }}">
+          <input type="hidden" name="csrf" value="{{ csrf }}">
+          <input type="hidden" name="division_id" value="{{ d.id }}">
+        </form>
+        <td><input form="division-{{ d.id }}" type="text" name="name" value="{{ d.name }}" maxlength="80" aria-label="Division name"></td>
+        <td><input form="division-{{ d.id }}" type="text" name="slug" value="{{ d.slug }}" maxlength="40" aria-label="URL name" class="short"></td>
+        <td><select form="division-{{ d.id }}" name="region" aria-label="Region">
+          {% for r in regions %}<option value="{{ r }}"{% if r == d.region %} selected{% endif %}>{{ r }}</option>{% endfor %}
+        </select></td>
+        <td><select form="division-{{ d.id }}" name="game_mode" aria-label="Game mode">
+          {% for m in game_modes %}<option value="{{ m }}"{% if m == d.game_mode %} selected{% endif %}>{{ m|upper }}</option>{% endfor %}
+        </select></td>
+        <td><input form="division-{{ d.id }}" type="text" name="guild_id" value="{{ d.guild_id or "" }}"
+              inputmode="numeric" class="short" aria-label="Discord server id"></td>
+        <td class="muted">{{ d.current_season_id or "" }}</td>
+        <td><button form="division-{{ d.id }}">Save</button></td>
       </tr>
     {% endfor %}
     </tbody>
