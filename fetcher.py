@@ -1,12 +1,12 @@
 """
 Fetcher — talks to the OpenDota API.
 
-Flow:
-  1. Load division config from DB (current season = league id, region, game_mode)
-  2. GET /leagues/{league_id}/matches  →  list of recent matches for the league
-  3. Filter by region clusters and game mode
-  4. For each surviving match_id, GET /matches/{match_id}  →  full player data
-  5. Persist everything to SQLite via db.py
+Flow, per season (a season is one Dota league; several divisions may play
+in it):
+  1. GET /leagues/{league_id}/matchIds  →  every game played in the league
+  2. For each game not stored yet, GET /matches/{match_id}  →  full data
+  3. Work out which of the season's divisions it belongs to (pick_division)
+  4. Persist it under that division via db.py
 """
 
 import aiohttp
@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 from config import OPENDOTA_API_KEY, REGION_CLUSTERS, GAME_MODE_FILTERS
 from db import (
     upsert_match, upsert_players, upsert_chat_messages, match_exists, get_division,
+    get_season_divisions, get_player_costs, get_captain_account_ids,
 )
 
 logger = logging.getLogger(__name__)
@@ -143,32 +144,50 @@ def _assign_team_roles(team_players: list[dict]) -> dict[int, int]:
     return assigned
 
 
-async def fetch_and_store_matches_for_division(guild_id: int) -> int:
-    """
-    Fetch matches for a specific division (Discord server).
+def _division_accepts(division: dict, game_mode: int, cluster: int) -> bool:
+    """Whether a game's mode and server fit a division's settings."""
+    mode_filter = GAME_MODE_FILTERS.get(division["game_mode"], {"include": None, "exclude": set()})
+    include, exclude = mode_filter.get("include"), mode_filter.get("exclude") or set()
+    if include is not None and game_mode not in include:
+        return False
+    if game_mode in exclude:
+        return False
+    clusters = REGION_CLUSTERS.get(division["region"], set())
+    return clusters is None or cluster == 0 or cluster in clusters
 
-    Loads division config from DB and fetches/filters accordingly.
-    Returns the number of NEW matches stored.
-    """
-    division = get_division(guild_id)
-    if not division:
-        logger.warning("No division configured for guild %d", guild_id)
+
+def pick_division(season_id: int, divisions: list[dict], full: dict) -> dict | None:
+    """Which of a season's divisions a game belongs to.
+
+    Only divisions whose game mode and server region fit the game qualify.
+    One left: that one. Several (divisions sharing a league and servers):
+    the one whose drafted rosters (players + captains) include the most of
+    the game's players. None when nothing fits or that's a tie."""
+    candidates = [d for d in divisions
+                  if _division_accepts(d, full.get("game_mode", 0), full.get("cluster", 0))]
+    if len(candidates) <= 1:
+        return candidates[0] if candidates else None
+    players = {p.get("account_id") for p in full.get("players", []) if p.get("account_id")}
+    votes = []
+    for d in candidates:
+        roster = set(get_player_costs(season_id, d["id"]))
+        roster |= {aid for aid in get_captain_account_ids(season_id, d["id"]).values() if aid}
+        votes.append((len(roster & players), d))
+    votes.sort(key=lambda v: -v[0])
+    if votes[0][0] == 0 or (len(votes) > 1 and votes[0][0] == votes[1][0]):
+        return None
+    return votes[0][1]
+
+
+async def fetch_and_store_season(season_id: int) -> int:
+    """Fetch every new game of a season (its Dota league) and store each
+    under the division it belongs to. Returns the number of games stored."""
+    divisions = get_season_divisions(season_id)
+    if not divisions:
+        logger.warning("Season %d has no divisions; nothing to fetch", season_id)
         return 0
-
-    league_id = division["current_season_id"]  # a season's id is its Dota league id
-    region = division["region"]
-    game_mode_key = division["game_mode"]
-
-    # Get cluster and game mode filters
-    allowed_clusters = REGION_CLUSTERS.get(region, set())
-    mode_filter = GAME_MODE_FILTERS.get(game_mode_key, {"include": None, "exclude": set()})
-    include_modes = mode_filter.get("include")
-    exclude_modes = mode_filter.get("exclude") or set()
-
-    logger.info(
-        "Fetching for guild %d: league=%d, region=%s, mode=%s",
-        guild_id, league_id, region, game_mode_key
-    )
+    league_id = season_id  # a season's id is its Dota league id
+    logger.info("Fetching league %d for divisions %s", league_id, [d["name"] for d in divisions])
 
     stored = 0
 
@@ -181,13 +200,12 @@ async def fetch_and_store_matches_for_division(guild_id: int) -> int:
 
         logger.info("Fetched %d match IDs for league %d", len(match_ids), league_id)
 
-        # --- Step 2: fetch full details for each match ID and filter ---
+        # --- Step 2: fetch full details for each new match ID ---
         for match_id_str in match_ids:
             mid = int(match_id_str)
 
-            # Skip if we already have this match stored for this guild
-            if match_exists(guild_id, mid):
-                logger.debug("Match %d already in DB for guild %d, skipping", mid, guild_id)
+            # A game is stored once, in one division.
+            if match_exists(mid):
                 continue
 
             # Don't use API key - causes 400s for amateur league matches
@@ -200,21 +218,12 @@ async def fetch_and_store_matches_for_division(guild_id: int) -> int:
                 logger.warning("Failed to fetch full data for match %d", mid)
                 continue
 
-            # --- Apply filters now that we have full match data ---
             game_mode = full.get("game_mode", 0)
             cluster = full.get("cluster", 0)
-
-            # Check game mode filter
-            if include_modes is not None and game_mode not in include_modes:
-                logger.info("FILTERED OUT: Match %d — game_mode=%d (not in include list)", mid, game_mode)
-                continue
-            if game_mode in exclude_modes:
-                logger.info("FILTERED OUT: Match %d — game_mode=%d (excluded)", mid, game_mode)
-                continue
-
-            # Check cluster/region filter (None means "any region", skip filter)
-            if allowed_clusters is not None and cluster != 0 and cluster not in allowed_clusters:
-                logger.info("FILTERED OUT: Match %d — cluster=%d (not in %s)", mid, cluster, region)
+            division = pick_division(season_id, divisions, full)
+            if division is None:
+                logger.info("FILTERED OUT: Match %d — game_mode=%d cluster=%d fits no single division",
+                            mid, game_mode, cluster)
                 continue
 
             # Skip remakes / bugged matches — no kills on either team means the game didn't really happen
@@ -225,13 +234,13 @@ async def fetch_and_store_matches_for_division(guild_id: int) -> int:
                 continue
 
             # Log matches that PASS the filter
-            logger.info("STORING: Match %d for guild %d — cluster=%d, game_mode=%d", mid, guild_id, cluster, game_mode)
+            logger.info("STORING: Match %d for %s — cluster=%d, game_mode=%d", mid, division["name"], cluster, game_mode)
 
             # --- Persist match row ---
             radiant_win = 1 if full.get("radiant_win") else 0
             match_row = {
                 "match_id":     full["match_id"],
-                "guild_id":     guild_id,
+                "division_id":  division["id"],
                 "league_id":    full.get("leagueid", league_id),
                 "start_time":   full.get("start_time", 0),
                 "duration":     full.get("duration", 0),
@@ -342,92 +351,13 @@ async def fetch_and_store_matches_for_division(guild_id: int) -> int:
     return stored
 
 
-async def import_match(match_id: int, guild_id: int = 0) -> bool:
-    """
-    Fetch a single match by ID from OpenDota and store its row + players.
-    Used by on-demand /draftorder so we can render the draft image even for
-    matches outside the periodic league refresh.
-
-    Returns True if the match was stored (or already exists), False on failure.
-    """
-    if match_exists(guild_id, match_id):
-        return True
-
-    async with aiohttp.ClientSession() as session:
-        full = await _get(session, f"/matches/{match_id}", use_auth=False)
-    if not full:
-        return False
-
-    radiant_win = 1 if full.get("radiant_win") else 0
-    match_row = {
-        "match_id":     full.get("match_id", match_id),
-        "guild_id":     guild_id,
-        "league_id":    full.get("leagueid", 0),
-        "start_time":   full.get("start_time", 0),
-        "duration":     full.get("duration", 0),
-        "game_mode":    full.get("game_mode", 0),
-        "cluster":      full.get("cluster", 0),
-        "radiant_win":  radiant_win,
-        "radiant_score": full.get("radiant_score", 0),
-        "dire_score":   full.get("dire_score", 0),
-        "fetched_at":   datetime.now(timezone.utc).isoformat(),
-        "replay_salt":  full.get("replay_salt", 0) or 0,
-    }
-    upsert_match(match_row)
-
-    # Minimal player rows so /draftorder rendering has names + KDA.
-    duration = full.get("duration", 0)
-    all_players = full.get("players", [])
-    radiant_team = [p for p in all_players if p.get("player_slot", 0) < 128]
-    dire_team = [p for p in all_players if p.get("player_slot", 0) >= 128]
-    role_map = {}
-    role_map.update(_assign_team_roles(radiant_team))
-    role_map.update(_assign_team_roles(dire_team))
-
-    players = []
-    for p in all_players:
-        slot = p.get("player_slot", 0)
-        is_radiant = slot < 128
-        won = 1 if (is_radiant and radiant_win) or (not is_radiant and not radiant_win) else 0
-        players.append({
-            "match_id":     match_id,
-            "account_id":   p.get("account_id", 0),
-            "name":         p.get("personaname") or p.get("name") or f"Player_{p.get('account_id', '?')}",
-            "hero_id":      p.get("hero_id", 0),
-            "player_slot":  slot,
-            "team_side":    "radiant" if is_radiant else "dire",
-            "role_position": role_map.get(slot),
-            "kills":        p.get("kills", 0),
-            "deaths":       p.get("deaths", 0),
-            "assists":      p.get("assists", 0),
-            "gpm":          p.get("gold_per_min", 0),
-            "xpm":          p.get("xp_per_min", 0),
-            "last_hits":    p.get("last_hits", 0),
-            "denies":       p.get("denies", 0),
-            "hero_damage":  p.get("hero_damage", 0),
-            "hero_healing": p.get("hero_healing", 0),
-            "gold_spent":   p.get("gold_spent", 0),
-            "duration":     duration,
-            "won":          won,
-            "obs_placed":             p.get("obs_placed", 0) or 0,
-            "sen_placed":             p.get("sen_placed", 0) or 0,
-            "observer_kills":         p.get("observer_kills", 0) or 0,
-            "sentry_kills":           p.get("sentry_kills", 0) or 0,
-            "tower_kills":            p.get("towers_killed", 0) or 0,
-            "roshans_killed":         p.get("roshans_killed", 0) or 0,
-            "firstblood_claimed":     1 if p.get("firstblood_claimed") else 0,
-            "teamfight_participation": p.get("teamfight_participation", 0) or 0,
-            "stuns":                  p.get("stuns", 0) or 0,
-            "camps_stacked":          p.get("camps_stacked", 0) or 0,
-            "rune_pickups":           p.get("rune_pickups", 0) or 0,
-            "tormentor_kills":        (p.get("killed") or {}).get("npc_dota_miniboss", 0),
-            "watcher_captures":       (p.get("ability_uses") or {}).get("ability_lamp_use", 0),
-            "team_first_tormentor_time": -1,
-            "defensive_item_uses":    _sum_defensive_item_uses(p),
-            "building_damage":        p.get("tower_damage", 0) or 0,
-        })
-    if players:
-        upsert_players(players)
-    return True
+async def fetch_and_store_matches_for_division(division_id: int) -> int:
+    """Fetch the division's current season. Every division playing in that
+    season gets its new games, not just this one."""
+    division = get_division(division_id)
+    if not division or not division.get("current_season_id"):
+        logger.warning("Division %s has no current season", division_id)
+        return 0
+    return await fetch_and_store_season(division["current_season_id"])
 
 

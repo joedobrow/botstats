@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% from "macros.html" import season_status %}
+{% block content %}
+<h1>{{ entries[0].label }}</h1>
+<p class="muted">This season has several divisions. Pick one.</p>
+<div class="tiles">
+  {% for s in entries %}
+  <a class="tile" href="{{ season_url(s) }}"><span class="tile-label">{{ s.division }}</span><span class="tile-sub">{{ season_status(s) }}</span></a>
+  {% endfor %}
+</div>
+{% endblock %}

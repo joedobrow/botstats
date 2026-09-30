@@ -193,3 +193,4 @@ a.tag.status-signups:hover { text-decoration: underline; }
 .tag.status-active { background: var(--accent); color: var(--accent-text); }
 td select { width: auto; padding: 3px 6px; }
 .edit-form input[type=date] { width: auto; }
+td input.short { max-width: 110px; }

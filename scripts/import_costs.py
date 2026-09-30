@@ -16,11 +16,12 @@ Only rows with both Winner and Cost filled in are drafted picks; blank rows
     name       ← "Name" (logged only; identity lives in account_id)
 
 Usage:
-    python import_costs.py --csv drafted-players.csv --league 20056
+    python import_costs.py --csv drafted-players.csv --league 20056 --division na
 
 --league is the season's Dota league id, which is also its id in the seasons
-table; the season must already exist (/start_new_season or /config creates
-it). Uses the same DB_PATH as the bot (default /data/dota_stats.db on fly,
+table; --division is the division's slug (optional when the season has only
+one division). The season must already exist (/start_new_season or /config
+creates it). Uses the same DB_PATH as the bot (default /data/dota_stats.db on fly,
 else dota_stats.db). Re-running for the same league overwrites that
 season's rows.
 
@@ -38,7 +39,7 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # repo root
 
-from db import upsert_player_costs, init_db, get_season, season_label
+from db import upsert_player_costs, init_db, get_season, get_season_divisions, season_label
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -89,6 +90,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--csv", required=True, help="Path to the Drafted Players sheet export (CSV)")
     ap.add_argument("--league", type=int, required=True, help="The season's Dota league id, e.g. 20056")
+    ap.add_argument("--division", help="The division's slug, e.g. na (optional if the season has one division)")
     args = ap.parse_args()
 
     init_db()  # safe to call; ensures the table exists
@@ -96,6 +98,11 @@ def main():
     if not season:
         logger.error("No season with league id %d. Create it with /start_new_season or /config first.", args.league)
         sys.exit(1)
+    divisions = [d for d in get_season_divisions(args.league) if not args.division or d["slug"] == args.division]
+    if len(divisions) != 1:
+        logger.error("Pass --division: one of %s", [d["slug"] for d in get_season_divisions(args.league)])
+        sys.exit(1)
+    division = divisions[0]
 
     rows = load_rows(args.csv)
     if not rows:
@@ -106,10 +113,10 @@ def main():
 
     # Strip the local-only _name field before persisting
     payload = [{k: v for k, v in r.items() if k != "_name"} for r in rows]
-    upsert_player_costs(args.league, payload)
+    upsert_player_costs(args.league, division["id"], payload)
 
-    logger.info("Upserted %d player costs for %s (league %d)",
-                len(payload), season_label(season), args.league)
+    logger.info("Upserted %d player costs for %s, %s (league %d)",
+                len(payload), season_label(season), division["name"], args.league)
 
     # Preview a few rows
     for r in sorted(rows, key=lambda r: -(r["cost"] or 0))[:5]:

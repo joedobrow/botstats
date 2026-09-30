@@ -122,9 +122,9 @@ async def player_card_handler(request: web.Request) -> web.Response:
     season = get_active_draft_season()
     if not season:
         return web.Response(text="No division configured", status=503)
-    guild_id, season_id = season["guild_id"], season["id"]
+    division_id, season_id = season["division_id"], season["id"]
 
-    stats = get_all_time_stats(guild_id, season_id)
+    stats = get_all_time_stats(division_id, season_id)
     target = next((s for s in stats if s.get("account_id") == account_id), None)
     if target is None:
         return web.Response(text=f"Account {account_id} has no league matches", status=404)
@@ -137,7 +137,7 @@ async def player_card_handler(request: web.Request) -> web.Response:
     cache_row = get_rating_cache_row(account_id)
     if cache_row and cache_row.get("internal_rating") is not None:
         rating = cache_row["internal_rating"]
-        adjustments = compute_fantasy_adjusted_ratings(season_id)
+        adjustments = compute_fantasy_adjusted_ratings(season_id, division_id)
         adj = adjustments.get(account_id)
         if adj:
             rating = adj["adjusted_rating"]
@@ -187,24 +187,24 @@ async def team_card_handler(request: web.Request) -> web.Response:
     season = get_active_draft_season()
     if not season:
         return web.Response(text="No division configured", status=503)
-    guild_id, season_id = season["guild_id"], season["id"]
+    division_id, season_id = season["division_id"], season["id"]
 
-    costs = get_player_costs(season_id)
+    costs = get_player_costs(season_id, division_id)
     if not any(c.get("captain") == captain for c in costs.values()):
         return web.Response(text=f"Unknown team captain: {captain}", status=404)
 
-    team_aggs = get_team_match_aggregates(season_id)
+    team_aggs = get_team_match_aggregates(season_id, division_id)
     target_agg = team_aggs.get(captain)
     if not target_agg:
         return web.Response(text=f"Team {captain} has no data yet", status=404)
 
-    cap_aids = get_captain_account_ids(season_id)
+    cap_aids = get_captain_account_ids(season_id, division_id)
     captain_aid = cap_aids.get(captain)
     drafted_aids = [aid for aid, c in costs.items() if c.get("captain") == captain]
     roster_aids = drafted_aids + ([captain_aid] if captain_aid else [])
 
     stats_by_aid = {
-        s["account_id"]: s for s in get_all_time_stats(guild_id, season_id)
+        s["account_id"]: s for s in get_all_time_stats(division_id, season_id)
     }
 
     members = []
@@ -301,21 +301,32 @@ async def _account_ids_from_draft_sheet(draft_sheet_url: str) -> list[int]:
     return ids
 
 
-def _season_from_query(request: web.Request) -> dict | None:
-    """The season an API call names: ?season_id=N, or the older
-    ?guild_id=...&season_start=YYYY-MM-DD form the Google Sheets use.
-    None if neither names a known season."""
-    from db import get_season, get_season_by_start
+def _season_from_query(request: web.Request) -> tuple[dict, dict] | None:
+    """The (season, division) an API call names, or None:
+      ?season_id=N[&division=<slug>] — the division may be left out when
+          the season has only one;
+      ?guild_id=...&season_start=YYYY-MM-DD — the older form the Google
+          Sheets use: that Discord server's division, and its season
+          starting that day."""
+    from db import get_season, get_season_by_start, get_season_divisions, get_guild_division
     q = request.query
     if (q.get("season_id") or "").isdigit():
-        return get_season(int(q["season_id"]))
+        season = get_season(int(q["season_id"]))
+        if not season:
+            return None
+        divisions = get_season_divisions(season["id"])
+        if q.get("division"):
+            divisions = [d for d in divisions if d["slug"] == q["division"]]
+        return (season, divisions[0]) if len(divisions) == 1 else None
     if (q.get("guild_id") or "").isdigit() and q.get("season_start"):
-        return get_season_by_start(int(q["guild_id"]), q["season_start"])
+        division = get_guild_division(int(q["guild_id"]))
+        season = get_season_by_start(division["id"], q["season_start"]) if division else None
+        return (season, division) if season else None
     return None
 
 
 async def ratings_api_handler(request: web.Request) -> web.Response:
-    """GET /api/ratings[?draft_sheet_url=...][&season_id=... | &guild_id=...&season_start=...] ->
+    """GET /api/ratings[?draft_sheet_url=...][&season_id=...[&division=...] | &guild_id=...[&season_start=...]] ->
         {"account_id": {"internal_rating": int, "name": str}}
 
     Requires the X-Api-Key header to match RATINGS_API_KEY. Returns every
@@ -327,7 +338,7 @@ async def ratings_api_handler(request: web.Request) -> web.Response:
     cached yet, so newly-signed-up players get a rating without anyone
     needing to run /player or /refresh_ratings by hand.
 
-    When a season is given (season_id, or guild_id + season_start), internal_rating is the same
+    When a season is given (see _season_from_query), internal_rating is the same
     fantasy-adjusted number /player displays (base rating nudged up to
     ±6% by how much someone over/underperformed expectations across every
     season the guild has recorded),
@@ -361,15 +372,18 @@ async def ratings_api_handler(request: web.Request) -> web.Response:
     rows = get_all_rating_cache_rows()
 
     adjustments = {}
-    season = _season_from_query(request)
-    if season is None and (request.query.get("guild_id") or "").isdigit():
-        # The adjustment spans every season the guild has played, so a
+    named = _season_from_query(request)
+    if named is None and (request.query.get("guild_id") or "").isdigit():
+        # The adjustment spans every season the division has played, so a
         # season that doesn't exist (yet) still has a meaningful answer.
-        from db import get_current_season
-        season = get_current_season(int(request.query["guild_id"]))
-    if season:
+        from db import get_guild_division
+        division = get_guild_division(int(request.query["guild_id"]))
+        if division and division.get("current_season_id"):
+            named = ({"id": division["current_season_id"]}, division)
+    if named:
         from db import compute_fantasy_adjusted_ratings
-        adjustments = compute_fantasy_adjusted_ratings(season["id"])
+        season, division = named
+        adjustments = compute_fantasy_adjusted_ratings(season["id"], division["id"])
 
     data = {}
     for r in rows:
@@ -383,7 +397,7 @@ async def ratings_api_handler(request: web.Request) -> web.Response:
 
 
 async def costs_api_handler(request: web.Request) -> web.Response:
-    """GET /api/costs?season_id=N  (or ?guild_id=...&season_start=YYYY-MM-DD) ->
+    """GET /api/costs?season_id=N[&division=<slug>]  (or ?guild_id=...&season_start=YYYY-MM-DD) ->
         {"account_id": {"cost": int, "captain": str|None}}
 
     Requires the same X-Api-Key as /api/ratings. Read-only wrapper around
@@ -399,12 +413,13 @@ async def costs_api_handler(request: web.Request) -> web.Response:
 
     season = _season_from_query(request)
     if season is None:
-        return web.Response(text="Pass season_id, or guild_id and season_start, naming a known season",
+        return web.Response(text="Pass season_id (plus division when the season has several), or guild_id and season_start",
                             status=400)
 
     from db import get_player_costs
 
-    costs = get_player_costs(season["id"])
+    season, division = season
+    costs = get_player_costs(season["id"], division["id"])
     data = {
         str(aid): {"cost": c["cost"], "captain": c["captain"]}
         for aid, c in costs.items()
@@ -413,7 +428,7 @@ async def costs_api_handler(request: web.Request) -> web.Response:
 
 
 async def season_stats_api_handler(request: web.Request) -> web.Response:
-    """GET /api/season_stats?season_id=N  (or ?guild_id=...&season_start=YYYY-MM-DD) ->
+    """GET /api/season_stats?season_id=N[&division=<slug>]  (or ?guild_id=...&season_start=YYYY-MM-DD) ->
         {"account_id": {games_played, wins, attendance, fantasy_points,
                          cost, deserved_cost, value}}
 
@@ -432,12 +447,13 @@ async def season_stats_api_handler(request: web.Request) -> web.Response:
 
     season = _season_from_query(request)
     if season is None:
-        return web.Response(text="Pass season_id, or guild_id and season_start, naming a known season",
+        return web.Response(text="Pass season_id (plus division when the season has several), or guild_id and season_start",
                             status=400)
 
     from db import get_all_time_stats
 
-    rows = get_all_time_stats(season["guild_id"], season["id"])
+    season, division = season
+    rows = get_all_time_stats(division["id"], season["id"])
     data = {
         str(r["account_id"]): {
             "games_played":   r.get("games_played"),

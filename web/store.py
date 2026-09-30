@@ -46,7 +46,8 @@ def _now() -> str:
 
 
 def init_site_tables() -> None:
-    _migrate_site_tables_to_season_ids()
+    """Create the website's tables. Changes to existing ones are numbered
+    migrations in db.py, which run first (db.init_db)."""
     with _conn() as conn:
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS site_users (
@@ -65,20 +66,17 @@ def init_site_tables() -> None:
                 expires_at  TEXT NOT NULL
             );
 
-            -- Display name for each bot division (a Discord guild).
-            CREATE TABLE IF NOT EXISTS site_divisions (
-                guild_id  INTEGER PRIMARY KEY,
-                name      TEXT NOT NULL
-            );
-
-            -- Site-only settings for a season in the bot's seasons table.
+            -- Site-only settings for a season in one division.
             CREATE TABLE IF NOT EXISTS site_season_settings (
-                season_id     INTEGER PRIMARY KEY REFERENCES seasons(id),
-                status        TEXT                -- a SEASON_STATUSES key; NULL = default
+                season_id     INTEGER NOT NULL REFERENCES seasons(id),
+                division_id   INTEGER NOT NULL REFERENCES divisions(id),
+                status        TEXT,                -- a SEASON_STATUSES key; NULL = default
+                PRIMARY KEY (season_id, division_id)
             );
 
             CREATE TABLE IF NOT EXISTS site_signups (
                 season_id     INTEGER NOT NULL REFERENCES seasons(id),
+                division_id   INTEGER NOT NULL REFERENCES divisions(id),
                 account_id    INTEGER NOT NULL,
                 mmr           INTEGER,
                 positions     TEXT NOT NULL,        -- e.g. "1,3"
@@ -87,7 +85,7 @@ def init_site_tables() -> None:
                 statement     TEXT,
                 created_at    TEXT NOT NULL,
                 updated_at    TEXT NOT NULL,
-                PRIMARY KEY (season_id, account_id)
+                PRIMARY KEY (season_id, division_id, account_id)
             );
 
             -- Site admins. Uberadmins come from SITE_UBERADMIN_STEAM_IDS
@@ -105,51 +103,6 @@ def init_site_tables() -> None:
             );
         """)
 
-
-
-def _migrate_site_tables_to_season_ids() -> None:
-    """Databases from before seasons had ids keyed site_season_settings and
-    site_signups by (guild_id, season_start). Rebuild them keyed by the
-    season's id (db.init_db has already migrated the bot's seasons table).
-    One transaction; no-op when there's nothing to migrate."""
-    with _conn() as conn:
-        cols = lambda t: {r[1] for r in conn.execute(f"PRAGMA table_info({t})")}
-        if "season_start" not in cols("site_signups") | cols("site_season_settings"):
-            return
-    conn = sqlite3.connect(db.DB_PATH, isolation_level=None)
-    try:
-        conn.execute("BEGIN IMMEDIATE")
-        has_status = "status" in {r[1] for r in conn.execute("PRAGMA table_info(site_season_settings)")}
-        for stmt in [
-            "ALTER TABLE site_season_settings RENAME TO site_season_settings_old",
-            "ALTER TABLE site_signups RENAME TO site_signups_old",
-            """CREATE TABLE site_season_settings (
-                   season_id INTEGER PRIMARY KEY REFERENCES seasons(id), status TEXT)""",
-            "INSERT INTO site_season_settings SELECT s.id, "
-            + ("o.status" if has_status else "NULL")
-            + " FROM site_season_settings_old o JOIN seasons s USING (guild_id, season_start)",
-            """CREATE TABLE site_signups (
-                   season_id INTEGER NOT NULL REFERENCES seasons(id), account_id INTEGER NOT NULL,
-                   mmr INTEGER, positions TEXT NOT NULL, captain TEXT NOT NULL, discord TEXT,
-                   statement TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
-                   PRIMARY KEY (season_id, account_id))""",
-            """INSERT INTO site_signups SELECT s.id, o.account_id, o.mmr, o.positions, o.captain,
-                   o.discord, o.statement, o.created_at, o.updated_at
-               FROM site_signups_old o JOIN seasons s USING (guild_id, season_start)""",
-        ]:
-            conn.execute(stmt)
-        lost = conn.execute("SELECT (SELECT COUNT(*) FROM site_signups_old) - (SELECT COUNT(*) FROM site_signups)").fetchone()[0]
-        if lost:
-            raise RuntimeError(f"site signup migration would drop {lost} signups for unknown seasons")
-        conn.execute("DROP TABLE site_season_settings_old")
-        conn.execute("DROP TABLE site_signups_old")
-        conn.execute("COMMIT")
-    except Exception:
-        if conn.in_transaction:
-            conn.execute("ROLLBACK")
-        raise
-    finally:
-        conn.close()
 
 
 # ---------------------------------------------------------------------------
@@ -230,56 +183,55 @@ def remove_admin(account_id: int) -> None:
 # Divisions and seasons
 # ---------------------------------------------------------------------------
 
-def division_names() -> dict[int, str]:
-    """{guild_id: display name} for every division the bot knows."""
-    with _conn() as conn:
-        named = {r["guild_id"]: r["name"] for r in conn.execute("SELECT * FROM site_divisions")}
-        divs = conn.execute("SELECT guild_id, region, game_mode FROM divisions").fetchall()
-    out = {}
-    for d in divs:
-        mode = "Ability Draft" if d["game_mode"] == "ad" else "Captains Mode"
-        region = {"us_west": "US West", "us_east": "US East"}.get(d["region"], "")
-        out[d["guild_id"]] = named.get(d["guild_id"]) or " ".join(filter(None, [region, mode]))
-    return out
+def divisions() -> list[dict]:
+    """Every division, oldest first."""
+    return sorted(db.get_all_divisions(), key=lambda d: d["id"])
 
 
-def set_division_name(guild_id: int, name: str) -> None:
-    with _conn() as conn:
-        conn.execute("""
-            INSERT INTO site_divisions (guild_id, name) VALUES (?, ?)
-            ON CONFLICT(guild_id) DO UPDATE SET name = excluded.name
-        """, (guild_id, name))
+def rename_division(division_id: int, name: str, slug: str) -> None:
+    """Rename a division; slug is its URL name. Raises ValueError if the
+    slug is taken."""
+    taken = db.get_division_by_slug(slug)
+    if taken and taken["id"] != division_id:
+        raise ValueError(f"Another division already uses the URL name {slug!r}.")
+    db.update_division(division_id, name=name, slug=slug)
 
 
 def all_seasons() -> list[dict]:
-    """Every season of every division, newest first, with its status and
-    signup count. A season's id is its Dota league id, and its matches are
-    the ones played in that league (db.season_scope)."""
-    names = division_names()
+    """Every season of every division, newest first: one entry per season
+    per division playing in it, with the season's id (its Dota league id),
+    the division's id, name and slug, status and signup count. A season's
+    games in a division are that division's games in its league
+    (db.season_scope)."""
     with _conn() as conn:
-        statuses = {r["season_id"]: r["status"] for r in conn.execute("SELECT * FROM site_season_settings")}
+        statuses = {(r["season_id"], r["division_id"]): r["status"]
+                    for r in conn.execute("SELECT * FROM site_season_settings")}
         signup_counts = {
-            r["season_id"]: r["n"]
-            for r in conn.execute("SELECT season_id, COUNT(*) AS n FROM site_signups GROUP BY 1")
+            (r["season_id"], r["division_id"]): r["n"]
+            for r in conn.execute("SELECT season_id, division_id, COUNT(*) AS n FROM site_signups GROUP BY 1, 2")
         }
-    by_guild: dict[int, list[dict]] = {}
-    for s in db.get_all_seasons():
-        if s["guild_id"] in names:
-            by_guild.setdefault(s["guild_id"], []).append(s)
+        pairs = [tuple(r) for r in conn.execute("SELECT season_id, division_id FROM season_divisions")]
+    seasons = {s["id"]: s for s in db.get_all_seasons()}
+    divs = {d["id"]: d for d in divisions()}
+    many_divisions = len(divs) > 1
     out = []
-    for guild_id, seasons in by_guild.items():
-        seasons.sort(key=lambda s: s["season_start"])
-        for s in seasons:
-            out.append({
-                "id": s["id"],
-                "guild_id": guild_id,
-                "season_start": s["season_start"],
-                "label": db.season_label(s),
-                "division": names[guild_id],
-                "status": statuses.get(s["id"]),
-                "signup_count": signup_counts.get(s["id"], 0),
-            })
-    out.sort(key=lambda s: s["season_start"], reverse=True)
+    for season_id, division_id in pairs:
+        s, d = seasons.get(season_id), divs.get(division_id)
+        if not s or not d:
+            continue
+        key = (season_id, division_id)
+        out.append({
+            "id": season_id,
+            "season_start": s["season_start"],
+            "label": db.season_label(s),
+            "division_id": division_id,
+            "division": d["name"],
+            "division_slug": d["slug"],
+            "show_division": many_divisions,
+            "status": statuses.get(key),
+            "signup_count": signup_counts.get(key, 0),
+        })
+    out.sort(key=lambda s: (s["season_start"], -s["division_id"]), reverse=True)
     _fill_default_statuses(out)
     for s in out:
         s["status_label"] = SEASON_STATUSES[s["status"]]
@@ -288,30 +240,45 @@ def all_seasons() -> list[dict]:
 
 
 def _fill_default_statuses(seasons: list[dict]) -> None:
-    """Seasons no admin has set a status for: the newest season that has
-    started is active, earlier ones completed, future ones upcoming."""
+    """Seasons no admin has set a status for, per division: the newest
+    season that has started is active, earlier ones completed, future ones
+    upcoming."""
     today = datetime.now(timezone.utc).date().isoformat()
-    started = [s for s in seasons if s["season_start"] <= today]  # newest first
-    newest = started[0] if started else None
+    newest: dict[int, dict] = {}
+    for s in seasons:  # newest first
+        if s["season_start"] <= today:
+            newest.setdefault(s["division_id"], s)
     for s in seasons:
         if s["status"] in SEASON_STATUSES:
             continue
         if s["season_start"] > today:
             s["status"] = "upcoming"
         else:
-            s["status"] = "active" if s is newest else "completed"
+            s["status"] = "active" if newest.get(s["division_id"]) is s else "completed"
 
 
-def get_season(season_id: int) -> dict | None:
-    return next((s for s in all_seasons() if s["id"] == season_id), None)
+def get_season(season_id: int, division_slug: str | None = None) -> dict | None:
+    """A season in one division. The division may be left out when the
+    season has only one."""
+    found = [s for s in all_seasons() if s["id"] == season_id
+             and (division_slug is None or s["division_slug"] == division_slug)]
+    return found[0] if len(found) == 1 else None
 
 
-def create_season(season_id: int, guild_id: int, season_start: str, label: str | None) -> None:
-    """Create a season in the bot's seasons table. season_id is its Dota
-    league id. Raises ValueError if it exists or its start date clashes."""
-    if db.get_season(season_id):
-        raise ValueError(f"League {season_id} is already a season.")
-    db.upsert_season(season_id, guild_id, season_start, label=label)
+def season_divisions(season_id: int) -> list[dict]:
+    """The site's entries for each division playing in a season."""
+    return [s for s in all_seasons() if s["id"] == season_id]
+
+
+def create_season(season_id: int, division_id: int, season_start: str, label: str | None) -> None:
+    """Add a division to a season (creating the season — season_id is its
+    Dota league id — if it's new). Raises ValueError if the division is
+    already in it."""
+    if any(d["id"] == division_id for d in db.get_season_divisions(season_id)):
+        raise ValueError(f"That division already plays in league {season_id}.")
+    if not db.get_season(season_id):
+        db.upsert_season(season_id, season_start, label=label)
+    db.add_season_division(season_id, division_id)
 
 
 def rename_season(season_id: int, label: str) -> None:
@@ -321,65 +288,67 @@ def rename_season(season_id: int, label: str) -> None:
 
 
 def set_season_start(season_id: int, season_start: str) -> None:
-    """Move a season's start date (ValueError on a bad or clashing date)."""
+    """Move a season's start date (ValueError on a bad date)."""
     db.update_season(season_id, season_start=season_start)
 
 
-def set_status(season_id: int, status: str) -> None:
+def set_status(season_id: int, division_id: int, status: str) -> None:
     with _conn() as conn:
         conn.execute("""
-            INSERT INTO site_season_settings (season_id, status) VALUES (?, ?)
-            ON CONFLICT(season_id) DO UPDATE SET status = excluded.status
-        """, (season_id, status))
+            INSERT INTO site_season_settings (season_id, division_id, status) VALUES (?, ?, ?)
+            ON CONFLICT(season_id, division_id) DO UPDATE SET status = excluded.status
+        """, (season_id, division_id, status))
 
 
 def season_of_match(seasons: list[dict], match: dict) -> dict | None:
-    """The season a match was played in: the one whose league it's in."""
+    """The season (in its division) a match was played in."""
     return next((s for s in seasons
-                 if s["id"] == match["league_id"] and s["guild_id"] == match["guild_id"]), None)
+                 if s["id"] == match["league_id"] and s["division_id"] == match["division_id"]), None)
 
 
 # ---------------------------------------------------------------------------
 # Signups
 # ---------------------------------------------------------------------------
 
-def get_signup(season_id: int, account_id: int) -> dict | None:
+def get_signup(season: dict, account_id: int) -> dict | None:
     with _conn() as conn:
-        row = conn.execute("SELECT * FROM site_signups WHERE season_id = ? AND account_id = ?",
-                           (season_id, account_id)).fetchone()
+        row = conn.execute(
+            "SELECT * FROM site_signups WHERE season_id = ? AND division_id = ? AND account_id = ?",
+            (season["id"], season["division_id"], account_id)).fetchone()
     return dict(row) if row else None
 
 
-def save_signup(season_id: int, account_id: int, *, mmr: int | None, positions: list[int],
+def save_signup(season: dict, account_id: int, *, mmr: int | None, positions: list[int],
                 captain: str, discord: str | None, statement: str | None) -> None:
     now = _now()
     with _conn() as conn:
         conn.execute("""
-            INSERT INTO site_signups (season_id, account_id, mmr, positions,
+            INSERT INTO site_signups (season_id, division_id, account_id, mmr, positions,
                                       captain, discord, statement, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(season_id, account_id) DO UPDATE SET
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(season_id, division_id, account_id) DO UPDATE SET
                 mmr = excluded.mmr, positions = excluded.positions, captain = excluded.captain,
                 discord = excluded.discord, statement = excluded.statement,
                 updated_at = excluded.updated_at
-        """, (season_id, account_id, mmr, ",".join(map(str, positions)),
+        """, (season["id"], season["division_id"], account_id, mmr, ",".join(map(str, positions)),
               captain, discord, statement, now, now))
 
 
-def delete_signup(season_id: int, account_id: int) -> None:
+def delete_signup(season: dict, account_id: int) -> None:
     with _conn() as conn:
-        conn.execute("DELETE FROM site_signups WHERE season_id = ? AND account_id = ?", (season_id, account_id))
+        conn.execute("DELETE FROM site_signups WHERE season_id = ? AND division_id = ? AND account_id = ?",
+                     (season["id"], season["division_id"], account_id))
 
 
-def list_signups(season_id: int) -> list[dict]:
+def list_signups(season: dict) -> list[dict]:
     """Signups in signup order, with each player's display name and badge."""
     with _conn() as conn:
         rows = conn.execute("""
             SELECT s.*, u.steam_name, u.avatar_url
             FROM site_signups s LEFT JOIN site_users u ON u.account_id = s.account_id
-            WHERE s.season_id = ?
+            WHERE s.season_id = ? AND s.division_id = ?
             ORDER BY s.created_at
-        """, (season_id,)).fetchall()
+        """, (season["id"], season["division_id"])).fetchall()
     out = [dict(r) for r in rows]
     idents = player_identities([r["account_id"] for r in out])
     for r in out:
@@ -390,10 +359,11 @@ def list_signups(season_id: int) -> list[dict]:
     return out
 
 
-def signup_season_ids(account_id: int) -> list[int]:
-    """Seasons this player has signed up for."""
+def signed_up_seasons(account_id: int) -> list[tuple[int, int]]:
+    """(season_id, division_id) for every season this player signed up for."""
     with _conn() as conn:
-        return [r[0] for r in conn.execute("SELECT season_id FROM site_signups WHERE account_id = ?", (account_id,))]
+        return [tuple(r) for r in conn.execute(
+            "SELECT season_id, division_id FROM site_signups WHERE account_id = ?", (account_id,))]
 
 
 # ---------------------------------------------------------------------------
@@ -443,7 +413,8 @@ def search_players(q: str, limit: int = 200) -> list[dict]:
     with _conn() as conn:
         rows = conn.execute("""
             SELECT account_id, COUNT(*) AS games, SUM(won) AS wins, MAX(match_id) AS last_match
-            FROM players GROUP BY account_id
+            FROM players WHERE account_id > 0   -- 0 is every private-profile player at once
+            GROUP BY account_id
         """).fetchall()
         users = [r["account_id"] for r in conn.execute("SELECT account_id FROM site_users")]
     stats = {r["account_id"]: dict(r) for r in rows}
@@ -466,7 +437,7 @@ def search_players(q: str, limit: int = 200) -> list[dict]:
 def player_matches(account_id: int) -> list[dict]:
     with _conn() as conn:
         rows = conn.execute("""
-            SELECT p.*, m.start_time, m.guild_id, m.league_id, m.duration AS match_duration,
+            SELECT p.*, m.start_time, m.division_id, m.league_id, m.duration AS match_duration,
                    m.radiant_score, m.dire_score
             FROM players p JOIN matches m ON m.match_id = p.match_id
             WHERE p.account_id = ?
@@ -510,17 +481,17 @@ def aggregate(rows: list[dict]) -> dict:
 def season_leaders(season: dict) -> list[dict]:
     """Per-player stats for the season, best fantasy points first — the same
     rows the bot's season-scoped stats come from."""
-    rows = db.ranked(db.get_all_time_stats(season["guild_id"], season["id"]))
+    rows = db.ranked(db.get_all_time_stats(season["division_id"], season["id"]))
     return sorted(rows, key=lambda r: -r["fantasy_points"])
 
 
 def season_matches(season: dict) -> list[dict]:
     """Matches in the season, newest first, with each side's team (by captain)."""
-    where, params = db.season_scope(season["id"]).where("m")
+    where, params = db.season_scope(season["id"], season["division_id"]).where("m")
     with _conn() as conn:
         matches = [dict(r) for r in conn.execute(
             f"SELECT m.* FROM matches m WHERE {where} ORDER BY m.start_time DESC", params)]
-    caps = db.get_match_team_captains(season["id"],
+    caps = db.get_match_team_captains(season["id"], season["division_id"],
                                       [m["match_id"] for m in matches])
     for m in matches:
         m["radiant_team"] = caps.get(m["match_id"], {}).get("radiant")
@@ -531,10 +502,10 @@ def season_matches(season: dict) -> list[dict]:
 def season_teams(season: dict, matches: list[dict] | None = None) -> list[dict]:
     """Teams from the season's draft (player_costs), with identity and a
     win/loss record counted from matches both sides can be attributed in."""
-    sid = season["id"]
-    costs = db.get_player_costs(sid)
-    identity = db.get_season_teams(sid)
-    cap_aids = db.get_captain_account_ids(sid)
+    sid, did = season["id"], season["division_id"]
+    costs = db.get_player_costs(sid, did)
+    identity = db.get_season_teams(sid, did)
+    cap_aids = db.get_captain_account_ids(sid, did)
     teams: dict[str, dict] = {}
     for aid, c in costs.items():
         cap = c.get("captain")
@@ -580,7 +551,7 @@ def match_detail(match_id: int) -> dict | None:
     season = season_of_match(all_seasons(), m)
     m["season"] = season
     if season:
-        caps = db.get_match_team_captains(season["id"], [match_id])
+        caps = db.get_match_team_captains(season["id"], season["division_id"], [match_id])
         teams = {t["captain"]: t for t in season_teams(season, matches=[])}
         for side in ("radiant", "dire"):
             cap = caps.get(match_id, {}).get(side)

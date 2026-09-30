@@ -13,19 +13,20 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def get_team_info(captain: str | None, season_id: int | None = None) -> dict:
+def get_team_info(captain: str | None, season_id: int | None = None,
+                  division_id: int | None = None) -> dict:
     """Return {team_name, logo_url} for a captain.
 
-    Reads season_teams for the given season. Falls back to the captain
+    Reads season_teams for the given season and division. Falls back to the captain
     string as the team name (and no logo) when we have no identity on file —
     which is the correct display for an un-branded team, not an error.
     """
     if not captain:
         return {"team_name": captain or "", "logo_url": None}
-    if season_id:
+    if season_id and division_id:
         try:
             from db import get_season_teams
-            info = get_season_teams(season_id).get(captain.strip().lower())
+            info = get_season_teams(season_id, division_id).get(captain.strip().lower())
             if info:
                 return info
         except Exception:

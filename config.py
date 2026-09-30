@@ -77,6 +77,9 @@ except Exception:  # pragma: no cover - bad tz name shouldn't take the bot down
 REGION_CLUSTERS: dict[str, set[int] | None] = {
     "us_west": {111, 112, 113, 114, 117, 118},
     "us_east": {121, 122, 123, 124},
+    # OpenDota regions 3 (Europe West), 8 (Stockholm) and 9 (Austria).
+    "europe": {131, 132, 133, 134, 135, 136, 137, 138, 271, 272, 273, 274,
+               181, 182, 183, 184, 185, 186, 187, 188, 191, 192},
     "any": None,
 }
 

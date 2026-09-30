@@ -3,11 +3,12 @@
 {% block content %}
 <h1>Seasons</h1>
 <table>
-  <thead><tr><th>Season</th><th>Starts</th><th>Status</th></tr></thead>
+  <thead><tr><th>Season</th>{% if seasons and seasons[0].show_division %}<th>Division</th>{% endif %}<th>Starts</th><th>Status</th></tr></thead>
   <tbody>
   {% for s in seasons %}
     <tr>
       <td><a href="{{ season_url(s) }}">{{ s.label }}</a></td>
+      {% if s.show_division %}<td>{{ s.division }}</td>{% endif %}
       <td>{{ s.season_start }}</td>
       <td>{{ season_status(s) }}</td>
     </tr>
