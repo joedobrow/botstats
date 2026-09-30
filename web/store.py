@@ -576,6 +576,14 @@ def season_teams(season: dict, matches: list[dict] | None = None) -> list[dict]:
     return sorted(teams.values(), key=lambda t: (-t["wins"], t["losses"], t["name"].lower()))
 
 
+def team_of(season: dict, account_id: int) -> dict | None:
+    """The team a player was on in a season: drafted onto it, or its captain."""
+    for t in season_teams(season, matches=[]):
+        if t.get("captain_account_id") == account_id or any(p["account_id"] == account_id for p in t["roster"]):
+            return t
+    return None
+
+
 def set_team_identity(season: dict, team: dict, *, name: str | None = None,
                       logo_url: str | None = None) -> None:
     """Rename a team and/or give it a new logo. It's the bot's season_teams
