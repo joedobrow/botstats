@@ -3,14 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{% if title %}{{ title }} · {% endif %}RD2L</title>
-<link rel="icon" href="/assets/rd2l_logo.png">
+<title>{% if title %}{{ title }} · {% endif %}CADL</title>
 <link rel="stylesheet" href="/static/style.css?v={{ css_version }}">
 </head>
 <body>
 <header class="topbar">
   <nav class="wrap">
-    <a class="brand" href="/"><img src="/assets/rd2l_logo.png" alt=""> RD2L</a>
+    <a class="brand" href="/">CADL</a>
     <span class="spacer"></span>
     <a href="/admin" {% if path.startswith('/admin') %}class="active"{% endif %}>Admin</a>
     <a href="/settings" {% if path == '/settings' %}class="active"{% endif %}>Settings</a>
