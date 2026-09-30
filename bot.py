@@ -514,6 +514,14 @@ async def player(interaction: discord.Interaction, name: str, week: int = None, 
         # accounts, use the main's account_id for the adjustment lookup so
         # the displayed rating matches the main's exactly.
         from db import get_rating_cache_row, compute_fantasy_adjusted_ratings
+        # A rating nobody refreshes is a rating that quietly rots: the weekly
+        # job only covers people who play in a division, and most of the cache
+        # is people looked up once. Reading one is what keeps it current.
+        import rating_compute
+        try:
+            await rating_compute.refresh_if_stale(account_id)
+        except Exception:
+            logger.exception("stale-rating refresh failed for %d in /player", account_id)
         rating: int | None = None
         cache_row = get_rating_cache_row(account_id)
         if cache_row and cache_row.get("internal_rating") is not None:
@@ -2467,21 +2475,24 @@ async def weekly_fetch():
     # them, and ratings are on the team pages now, so a stale number is a
     # number a captain reads. Nothing else did this on a schedule: it waited
     # on someone running /refresh_ratings.
-    import rating_compute
-    from db import get_guild_player_account_ids
-    for division_id in sorted({d["id"] for d in divisions}):
-        aids = get_guild_player_account_ids(division_id)
-        done = 0
-        for aid in aids:
-            if await rating_compute.compute_and_cache_rating(aid) is not None:
-                done += 1
-        logger.info("Weekly rating refresh for division %s: %d of %d rated",
-                    division_id, done, len(aids))
+    # Wrapped: a rating refresh that throws must not take the match fetch's
+    # loop down with it, since the fetch is the part that can't be done by
+    # hand afterwards.
     try:
+        import rating_compute
         import rating_group
+        from db import get_division_player_account_ids
+        for division_id in sorted({d["id"] for d in divisions}):
+            aids = get_division_player_account_ids(division_id)
+            done = 0
+            for aid in aids:
+                if await rating_compute.compute_and_cache_rating(aid) is not None:
+                    done += 1
+            logger.info("Weekly rating refresh for division %s: %d of %d rated",
+                        division_id, done, len(aids))
         rating_group.recompute_all()
     except Exception:
-        logger.exception("Group rating recompute failed after the weekly refresh")
+        logger.exception("Weekly rating refresh failed")
 
 
 # ---------------------------------------------------------------------------
