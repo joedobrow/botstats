@@ -102,19 +102,31 @@ async def fetch_inputs(account_id: int) -> dict:
     # to it; those fields aren't authoritative here, so the cache keeps them.
     counts_reached = od_counts is not None
     od_counts = sanitize_od_counts(od, od_counts)
-    if not counts_reached:
+    cached = {}
+    if not counts_reached or od is None:
         from db import get_rating_cache_row
         cached = get_rating_cache_row(account_id) or {}
-        if any(cached.get(k) is not None for k in
-               ("ad_last_year", "ranked_last_year", "ranked_all_time")):
-            logger.warning("OpenDota counts unavailable for %d; using the last ones we saw",
-                           account_id)
-            od_counts = {
-                "last_year_ad": cached.get("ad_last_year"),
-                "all_time_ad": cached.get("ad_all_time"),
-                "last_year_ranked": cached.get("ranked_last_year"),
-                "all_time_ranked": cached.get("ranked_all_time"),
-            }
+    if not counts_reached and any(cached.get(k) is not None for k in
+                                  ("ad_last_year", "ranked_last_year", "ranked_all_time")):
+        logger.warning("OpenDota counts unavailable for %d; using the last ones we saw",
+                       account_id)
+        od_counts = {
+            "last_year_ad": cached.get("ad_last_year"),
+            "all_time_ad": cached.get("ad_all_time"),
+            "last_year_ranked": cached.get("ranked_last_year"),
+            "all_time_ranked": cached.get("ranked_all_time"),
+        }
+    # The profile carries the ranked badge, and it fails the same way — an
+    # OpenDota timeout would otherwise rate a player as though they have no
+    # badge at all, which for anyone the badge carries weight for is the same
+    # 135-point kind of swing from the other direction.
+    rank_tier, lb_rank = (od or {}).get("rank_tier"), (od or {}).get("leaderboard_rank")
+    badge_from_cache = False
+    if od is None and cached.get("rank_tier") is not None:
+        logger.warning("OpenDota profile unavailable for %d; using the last badge we saw",
+                       account_id)
+        rank_tier, lb_rank = cached.get("rank_tier"), cached.get("leaderboard_rank")
+        badge_from_cache = True
     od_last = (od_counts or {}).get("last_year_ad")
     od_all = (od_counts or {}).get("all_time_ad")
 
@@ -138,8 +150,8 @@ async def fetch_inputs(account_id: int) -> dict:
         "raw_windrun": (wr or {}).get("rating"),
         "windrun_for_formula": trusted_windrun((wr or {}).get("rating"), wr_lifetime),
         "windrun_games": wr_lifetime,
-        "rank_tier": (od or {}).get("rank_tier"),
-        "leaderboard_rank": (od or {}).get("leaderboard_rank"),
+        "rank_tier": rank_tier,
+        "leaderboard_rank": lb_rank,
         "ad_last_year": ad_last_year,
         "ad_all_time": ad_all_time,
         "ranked_last_year": (od_counts or {}).get("last_year_ranked"),
@@ -151,9 +163,10 @@ async def fetch_inputs(account_id: int) -> dict:
         "fh_unavailable": (bool((od.get("profile") or {}).get("fh_unavailable"))
                            if od else None),
         "reached_any_api": wr is not None or od is not None or od_counts is not None,
-        # True when the counts above are what we last saw rather than what
+        # True when the numbers above are what we last saw rather than what
         # OpenDota just said, so a caller can say so.
         "counts_from_cache": not counts_reached and od_counts is not None,
+        "badge_from_cache": badge_from_cache,
         # Which fields we actually reached the source for, so "unknown" can be
         # written as unknown instead of leaving a stale number behind (see
         # db.upsert_rating_cache_row). A source that was down leaves its
