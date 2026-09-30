@@ -396,13 +396,12 @@ async def player_page(request: web.Request):
         rows = by_season.get((s["id"], s["division_id"]))
         if rows:
             costs = db.get_player_costs(s["id"], s["division_id"]).get(account_id) or {}
-            cap = costs.get("captain")
-            team = db.get_season_teams(s["id"], s["division_id"]).get((cap or "").lower(), {})
+            team = store.team_of(s, account_id) or {}   # drafted onto it, or its captain
             # The bot's season stats for this player, so the two agree.
             stats = next((r for r in db.get_all_time_stats(s["division_id"], s["id"])
                           if r["account_id"] == account_id), None) or store.aggregate(rows)
-            season_rows.append({"season": s, "stats": stats, "captain": cap,
-                                "team_name": team.get("team_name") or cap, "cost": costs.get("cost")})
+            season_rows.append({"season": s, "stats": stats, "captain": team.get("captain"),
+                                "team_name": team.get("name"), "cost": costs.get("cost")})
     return render(request, "player.html", title=ident["name"] or str(account_id),
                   account_id=account_id, ident=ident, overall=store.aggregate(matches),
                   season_rows=season_rows, matches=matches[:50],
