@@ -179,6 +179,122 @@ def pick_division(season_id: int, divisions: list[dict], full: dict) -> dict | N
     return votes[0][1]
 
 
+def _store_full_match(full: dict, division_id: int | None) -> int:
+    """Persist one OpenDota /matches/{id} response under a division: the
+    match row, player rows (updated in place if already there) and typed
+    chat. Returns the number of player rows."""
+    # --- Persist match row ---
+    radiant_win = 1 if full.get("radiant_win") else 0
+    match_row = {
+        "match_id":     full["match_id"],
+        "division_id":  division_id,
+        "league_id":    full.get("leagueid", 0),
+        "start_time":   full.get("start_time", 0),
+        "duration":     full.get("duration", 0),
+        "game_mode":    full.get("game_mode", 0),
+        "cluster":      full.get("cluster", 0),
+        "radiant_win":  radiant_win,
+        "radiant_score": full.get("radiant_score", 0),
+        "dire_score":   full.get("dire_score", 0),
+        "fetched_at":   datetime.now(timezone.utc).isoformat(),
+        "replay_salt":  full.get("replay_salt", 0) or 0,
+    }
+    upsert_match(match_row)
+
+    # --- Persist player rows ---
+    duration = full.get("duration", 0)
+    all_players = full.get("players", [])
+
+    # Assign roles per team (need full team context for GPM heuristic)
+    radiant_team = [p for p in all_players if p.get("player_slot", 0) < 128]
+    dire_team = [p for p in all_players if p.get("player_slot", 0) >= 128]
+    role_map = {}
+    role_map.update(_assign_team_roles(radiant_team))
+    role_map.update(_assign_team_roles(dire_team))
+
+    # --- Compute team's first tormentor kill time from objectives ---
+    # team 2 = radiant, team 3 = dire; -1 = tormentor never taken by that team
+    team_first_tormentor: dict[int, int] = {}
+    for obj in full.get("objectives", []):
+        if obj.get("type") == "CHAT_MESSAGE_MINIBOSS_KILL":
+            team = obj.get("team")
+            t = obj.get("time", 0)
+            if team and (team not in team_first_tormentor or t < team_first_tormentor[team]):
+                team_first_tormentor[team] = t
+
+    players = []
+    for p in all_players:
+        slot = p.get("player_slot", 0)
+        is_radiant = slot < 128
+        won = 1 if (is_radiant and radiant_win) or (not is_radiant and not radiant_win) else 0
+        team_num = 2 if is_radiant else 3
+        killed_dict    = p.get("killed") or {}
+        ability_uses   = p.get("ability_uses") or {}
+
+        players.append({
+            "match_id":       full["match_id"],
+            "account_id":     p.get("account_id", 0),
+            "name":           p.get("personaname") or p.get("name") or f"Player_{p.get('account_id', '?')}",
+            "hero_id":        p.get("hero_id", 0),
+            "player_slot":    slot,
+            "team_side":      "radiant" if is_radiant else "dire",
+            "role_position":  role_map.get(slot),
+            "kills":          p.get("kills", 0),
+            "deaths":         p.get("deaths", 0),
+            "assists":        p.get("assists", 0),
+            "gpm":            p.get("gold_per_min", 0),
+            "xpm":            p.get("xp_per_min", 0),
+            "last_hits":      p.get("last_hits", 0),
+            "denies":         p.get("denies", 0),
+            "hero_damage":    p.get("hero_damage", 0),
+            "hero_healing":   p.get("hero_healing", 0),
+            "gold_spent":     p.get("gold_spent", 0),
+            "duration":       duration,
+            "won":            won,
+            "obs_placed":              p.get("obs_placed", 0) or 0,
+            "sen_placed":              p.get("sen_placed", 0) or 0,
+            "observer_kills":          p.get("observer_kills", 0) or 0,
+            "sentry_kills":            p.get("sentry_kills", 0) or 0,
+            "tower_kills":             p.get("towers_killed", 0) or 0,
+            "roshans_killed":          p.get("roshans_killed", 0) or 0,
+            "firstblood_claimed":      1 if p.get("firstblood_claimed") else 0,
+            "teamfight_participation": p.get("teamfight_participation", 0) or 0,
+            "stuns":                   p.get("stuns", 0) or 0,
+            "camps_stacked":           p.get("camps_stacked", 0) or 0,
+            "rune_pickups":            p.get("rune_pickups", 0) or 0,
+            "tormentor_kills":         killed_dict.get("npc_dota_miniboss", 0),
+            "watcher_captures":        ability_uses.get("ability_lamp_use", 0),
+            "team_first_tormentor_time": team_first_tormentor.get(team_num, -1),
+            "defensive_item_uses":     _sum_defensive_item_uses(p),
+            "building_damage":         p.get("tower_damage", 0) or 0,
+        })
+
+    upsert_players(players)
+
+    # --- Persist chat messages (typed only, not chatwheel) ---
+    chat_data = full.get("chat", [])
+    # Build a map of player_slot -> player_name for this match
+    slot_to_name = {p.get("player_slot", 0): p.get("personaname") or p.get("name") or "Unknown" for p in all_players}
+
+    chat_messages = []
+    for msg in chat_data:
+        if msg.get("type") == "chat":  # Only typed messages, not chatwheel
+            slot = msg.get("player_slot", msg.get("slot", 0))
+            chat_messages.append({
+                "match_id": full["match_id"],
+                "player_slot": slot,
+                "player_name": slot_to_name.get(slot, "Unknown"),
+                "time": msg.get("time", 0),
+                "message": msg.get("key", ""),
+            })
+
+    if chat_messages:
+        upsert_chat_messages(chat_messages)
+        logger.info("Stored %d chat messages for match %d", len(chat_messages), full["match_id"])
+
+    return len(players)
+
+
 async def fetch_and_store_season(season_id: int) -> int:
     """Fetch every new game of a season (its Dota league) and store each
     under the division it belongs to. Returns the number of games stored."""
@@ -237,117 +353,10 @@ async def fetch_and_store_season(season_id: int) -> int:
             # Log matches that PASS the filter
             logger.info("STORING: Match %d for %s — cluster=%d, game_mode=%d", mid, division["name"], cluster, game_mode)
 
-            # --- Persist match row ---
-            radiant_win = 1 if full.get("radiant_win") else 0
-            match_row = {
-                "match_id":     full["match_id"],
-                "division_id":  division["id"],
-                "league_id":    full.get("leagueid", league_id),
-                "start_time":   full.get("start_time", 0),
-                "duration":     full.get("duration", 0),
-                "game_mode":    full.get("game_mode", 0),
-                "cluster":      full.get("cluster", 0),
-                "radiant_win":  radiant_win,
-                "radiant_score": full.get("radiant_score", 0),
-                "dire_score":   full.get("dire_score", 0),
-                "fetched_at":   datetime.now(timezone.utc).isoformat(),
-                "replay_salt":  full.get("replay_salt", 0) or 0,
-            }
-            upsert_match(match_row)
-
-            # --- Persist player rows ---
-            duration = full.get("duration", 0)
-            all_players = full.get("players", [])
-
-            # Assign roles per team (need full team context for GPM heuristic)
-            radiant_team = [p for p in all_players if p.get("player_slot", 0) < 128]
-            dire_team = [p for p in all_players if p.get("player_slot", 0) >= 128]
-            role_map = {}
-            role_map.update(_assign_team_roles(radiant_team))
-            role_map.update(_assign_team_roles(dire_team))
-
-            # --- Compute team's first tormentor kill time from objectives ---
-            # team 2 = radiant, team 3 = dire; -1 = tormentor never taken by that team
-            team_first_tormentor: dict[int, int] = {}
-            for obj in full.get("objectives", []):
-                if obj.get("type") == "CHAT_MESSAGE_MINIBOSS_KILL":
-                    team = obj.get("team")
-                    t = obj.get("time", 0)
-                    if team and (team not in team_first_tormentor or t < team_first_tormentor[team]):
-                        team_first_tormentor[team] = t
-
-            players = []
-            for p in all_players:
-                slot = p.get("player_slot", 0)
-                is_radiant = slot < 128
-                won = 1 if (is_radiant and radiant_win) or (not is_radiant and not radiant_win) else 0
-                team_num = 2 if is_radiant else 3
-                killed_dict    = p.get("killed") or {}
-                ability_uses   = p.get("ability_uses") or {}
-
-                players.append({
-                    "match_id":       mid,
-                    "account_id":     p.get("account_id", 0),
-                    "name":           p.get("personaname") or p.get("name") or f"Player_{p.get('account_id', '?')}",
-                    "hero_id":        p.get("hero_id", 0),
-                    "player_slot":    slot,
-                    "team_side":      "radiant" if is_radiant else "dire",
-                    "role_position":  role_map.get(slot),
-                    "kills":          p.get("kills", 0),
-                    "deaths":         p.get("deaths", 0),
-                    "assists":        p.get("assists", 0),
-                    "gpm":            p.get("gold_per_min", 0),
-                    "xpm":            p.get("xp_per_min", 0),
-                    "last_hits":      p.get("last_hits", 0),
-                    "denies":         p.get("denies", 0),
-                    "hero_damage":    p.get("hero_damage", 0),
-                    "hero_healing":   p.get("hero_healing", 0),
-                    "gold_spent":     p.get("gold_spent", 0),
-                    "duration":       duration,
-                    "won":            won,
-                    "obs_placed":              p.get("obs_placed", 0) or 0,
-                    "sen_placed":              p.get("sen_placed", 0) or 0,
-                    "observer_kills":          p.get("observer_kills", 0) or 0,
-                    "sentry_kills":            p.get("sentry_kills", 0) or 0,
-                    "tower_kills":             p.get("towers_killed", 0) or 0,
-                    "roshans_killed":          p.get("roshans_killed", 0) or 0,
-                    "firstblood_claimed":      1 if p.get("firstblood_claimed") else 0,
-                    "teamfight_participation": p.get("teamfight_participation", 0) or 0,
-                    "stuns":                   p.get("stuns", 0) or 0,
-                    "camps_stacked":           p.get("camps_stacked", 0) or 0,
-                    "rune_pickups":            p.get("rune_pickups", 0) or 0,
-                    "tormentor_kills":         killed_dict.get("npc_dota_miniboss", 0),
-                    "watcher_captures":        ability_uses.get("ability_lamp_use", 0),
-                    "team_first_tormentor_time": team_first_tormentor.get(team_num, -1),
-                    "defensive_item_uses":     _sum_defensive_item_uses(p),
-                    "building_damage":         p.get("tower_damage", 0) or 0,
-                })
-
-            upsert_players(players)
-
-            # --- Persist chat messages (typed only, not chatwheel) ---
-            chat_data = full.get("chat", [])
-            # Build a map of player_slot -> player_name for this match
-            slot_to_name = {p.get("player_slot", 0): p.get("personaname") or p.get("name") or "Unknown" for p in all_players}
-
-            chat_messages = []
-            for msg in chat_data:
-                if msg.get("type") == "chat":  # Only typed messages, not chatwheel
-                    slot = msg.get("player_slot", msg.get("slot", 0))
-                    chat_messages.append({
-                        "match_id": mid,
-                        "player_slot": slot,
-                        "player_name": slot_to_name.get(slot, "Unknown"),
-                        "time": msg.get("time", 0),
-                        "message": msg.get("key", ""),
-                    })
-
-            if chat_messages:
-                upsert_chat_messages(chat_messages)
-                logger.info("Stored %d chat messages for match %d", len(chat_messages), mid)
-
+            full.setdefault("leagueid", league_id)
+            n_players = _store_full_match(full, division["id"])
             stored += 1
-            logger.info("Stored match %d (%d players)", mid, len(players))
+            logger.info("Stored match %d (%d players)", mid, n_players)
 
     return stored
 
@@ -362,3 +371,26 @@ async def fetch_and_store_matches_for_division(division_id: int) -> int:
     return await fetch_and_store_season(division["current_season_id"])
 
 
+async def refetch_incomplete_games(season_id: int) -> int:
+    """Fetch player data for games of a season that are stored without any
+    (an interrupted fetch, say), keeping each game in its division. Unlike
+    fetch_and_store_season it never adds games. Returns how many it filled."""
+    from db import _conn, match_is_complete
+    with _conn() as conn:
+        games = [tuple(r) for r in conn.execute(
+            "SELECT match_id, division_id FROM matches WHERE league_id = ?", (season_id,))]
+    missing = [(mid, did) for mid, did in games if not match_is_complete(mid)]
+    logger.info("League %d: %d of %d stored games have no player rows", season_id, len(missing), len(games))
+    filled = 0
+    async with aiohttp.ClientSession() as session:
+        import asyncio
+        for mid, division_id in missing:
+            await asyncio.sleep(1.1)  # OpenDota's free tier: 60 requests a minute
+            full = await _get(session, f"/matches/{mid}", use_auth=False)
+            if not full:
+                logger.warning("Failed to fetch full data for match %d", mid)
+                continue
+            n = _store_full_match(full, division_id)
+            filled += 1 if n else 0
+            logger.info("Filled match %d (%d players)", mid, n)
+    return filled
