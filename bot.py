@@ -2647,11 +2647,11 @@ async def weekly_fetch():
 # Bot startup
 # ---------------------------------------------------------------------------
 
-@bot.event
-async def on_ready():
-    logger.info(f"Logged in as {bot.user} (ID: {bot.user.id})")
-
-    # Initialize database
+async def _setup_once():
+    """Runs once, before the bot connects to Discord: database, weekly
+    fetch schedule, slash commands, and the web server. Kept out of on_ready,
+    which fires again on every reconnect — and so the website comes up even
+    if Discord is unreachable."""
     init_db()
 
     # Re-pool multi-account players from what's already cached, so a formula
@@ -2664,19 +2664,28 @@ async def on_ready():
     except Exception:
         logger.exception("Group rating recompute failed at startup")
 
+    # The web server: stream cards, the Sheets API and the league website.
+    try:
+        from botstats.server import start_web_server
+        await start_web_server()
+    except Exception:
+        logger.exception("Failed to start the web server")
+
+    weekly_fetch.start()
+
     try:
         synced = await tree.sync()
         logger.info(f"Synced {len(synced)} slash command(s).")
     except Exception:
         logger.exception("Failed to sync commands")
-    weekly_fetch.start()
 
-    # Start the AD helper web server
-    try:
-        from botstats.server import start_web_server
-        await start_web_server()
-    except Exception:
-        logger.exception("Failed to start AD helper web server")
+
+bot.setup_hook = _setup_once
+
+
+@bot.event
+async def on_ready():
+    logger.info(f"Logged in as {bot.user} (ID: {bot.user.id})")
 
 
 if __name__ == "__main__":

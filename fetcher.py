@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 
 from config import OPENDOTA_API_KEY, REGION_CLUSTERS, GAME_MODE_FILTERS
 from db import (
-    upsert_match, upsert_players, upsert_chat_messages, match_exists, get_division,
+    upsert_match, upsert_players, upsert_chat_messages, match_is_complete, get_division,
     get_season_divisions, get_player_costs, get_captain_account_ids,
 )
 
@@ -204,8 +204,9 @@ async def fetch_and_store_season(season_id: int) -> int:
         for match_id_str in match_ids:
             mid = int(match_id_str)
 
-            # A game is stored once, in one division.
-            if match_exists(mid):
+            # A game is stored once, in one division. One stored without its
+            # player rows is fetched again (player rows update in place).
+            if match_is_complete(mid):
                 continue
 
             # Don't use API key - causes 400s for amateur league matches

@@ -3426,6 +3426,14 @@ def match_exists(match_id: int) -> bool:
     return row is not None
 
 
+def match_is_complete(match_id: int) -> bool:
+    """Whether a game is stored with its player rows. A game row without
+    them (an interrupted fetch, say) should be fetched again."""
+    with _conn() as conn:
+        row = conn.execute("SELECT 1 FROM players WHERE match_id = ? LIMIT 1", (match_id,)).fetchone()
+    return row is not None
+
+
 def set_match_division(match_id: int, division_id: int | None) -> None:
     with _conn() as conn:
         conn.execute("UPDATE matches SET division_id = ? WHERE match_id = ?", (division_id, match_id))
