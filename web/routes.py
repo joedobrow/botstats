@@ -15,7 +15,7 @@ import jinja2
 from aiohttp import web
 
 import db
-from config import LEAGUE_TZ, STEAM_API_KEY
+from config import GAME_MODE_FILTERS, LEAGUE_TZ, REGION_CLUSTERS, STEAM_API_KEY
 from player_api import account_id_from
 from web import steam, store, uploads
 
@@ -559,6 +559,7 @@ async def admin_page(request: web.Request):
                    "added_at": (added_by.get(aid) or {}).get("added_at")} for aid in ids]
     return render(request, "admin.html", title="Admin", seasons=store.all_seasons(),
                   divisions=store.divisions(), admins=admins,
+                  regions=sorted(REGION_CLUSTERS), game_modes=sorted(GAME_MODE_FILTERS),
                   about=store.get_text("about"), rules=store.get_text("rules"))
 
 
@@ -618,6 +619,73 @@ async def admin_new_season(request: web.Request):
     except ValueError as e:
         return render(request, "message.html", status=400, title="Season not created", message=str(e))
     raise web.HTTPFound("/admin")
+
+
+@routes.post("/admin/season/rollover")
+async def admin_roll_over_season(request: web.Request):
+    """Point a division at a new season and load its weeks, rosters and teams.
+    This was /start_new_season in Discord; league setup belongs where its
+    results are read."""
+    import season_setup
+
+    _require_admin(request)
+    data = await request.post()
+    try:
+        division = db.get_division(int(data["division_id"]))
+        league_id = int(data["league_id"])
+        weeks = int(data.get("weeks") or 9)
+        first_week = int(data.get("first_week") or 0)
+    except (KeyError, TypeError, ValueError):
+        raise web.HTTPBadRequest(text="Pick a division and enter a league id.")
+    if not division:
+        raise web.HTTPBadRequest(text="Unknown division.")
+
+    costs_csv = None
+    upload = data.get("costs_file")
+    if isinstance(upload, web.FileField):
+        raw = upload.file.read()
+        if raw:
+            costs_csv = raw.decode("utf-8-sig", errors="replace")
+    result = await season_setup.roll_over(
+        division=division,
+        league_id=league_id,
+        season_start=(data.get("season_start") or "").strip(),
+        weeks=weeks,
+        first_week=first_week,
+        label=(data.get("label") or "").strip() or None,
+        costs_csv=costs_csv,
+        costs_url=(data.get("costs_url") or "").strip() or None,
+        teams_url=(data.get("teams_url") or "").strip() or None,
+        dry_run=bool(data.get("dry_run")),
+    )
+    return render(request, "season_rollover.html",
+                  status=400 if result["problems"] else 200,
+                  title="Season setup", division=division, league_id=league_id,
+                  result=result, dry_run=bool(data.get("dry_run")))
+
+
+@routes.post("/admin/division/create")
+async def admin_create_division(request: web.Request):
+    _require_uberadmin(request)
+    data = await request.post()
+    name = (data.get("name") or "").strip()[:80]
+    slug = re.sub(r"[^a-z0-9-]", "", (data.get("slug") or "").strip().lower())[:40]
+    region = data.get("region") or "any"
+    game_mode = data.get("game_mode") or "ad"
+    if not name or not slug:
+        raise web.HTTPBadRequest(text="A division needs a name and a URL name.")
+    if region not in REGION_CLUSTERS:
+        raise web.HTTPBadRequest(text=f"Unknown region {region!r}.")
+    if game_mode not in GAME_MODE_FILTERS:
+        raise web.HTTPBadRequest(text=f"Unknown game mode {game_mode!r}.")
+    if any(d["slug"] == slug for d in store.divisions()):
+        return render(request, "message.html", status=400, title="Division not created",
+                      message=f"A division already uses the URL name “{slug}”.")
+    guild_raw = re.sub(r"\D", "", data.get("guild_id") or "")
+    division_id = db.create_division(name=name, slug=slug, region=region, game_mode=game_mode,
+                                     guild_id=int(guild_raw) if guild_raw else None)
+    logger.info("Division %s (%s) created by %s", division_id, slug, request["user"]["account_id"])
+    raise web.HTTPFound("/admin#divisions")
 
 
 @routes.post("/admin/status")

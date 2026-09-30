@@ -105,8 +105,11 @@ records its league id — rather than a date range. Weeks are date ranges
 within that.
 
 `/config league:<id>` makes that league the current season (`season_start`
-is required the first time a league is seen), and `/start_new_season` rolls a
-division over to a new league. Every `season:` option in Discord accepts the
+is required the first time a league is seen). Rolling a division over to a new
+league — its weeks, drafted rosters, and team names and logos — is **Admin →
+Season setup** on the site, which previews everything before it writes
+(`season_setup.roll_over`). It was the `/start_new_season` command until that
+setup grew past what a slash command with a CSV attachment could show you. Every `season:` option in Discord accepts the
 league id, the start date, or the season's name. The stats API endpoints take
 `?season_id=<league_id>` (plus `&division=<slug>` when several divisions play
 in it), or the older `?guild_id=...&season_start=YYYY-MM-DD`.
@@ -182,7 +185,7 @@ DISCORD_TOKEN=dev DB_PATH=/path/to/copy.db SITE_UBERADMIN_STEAM_IDS=<your id> py
 | `/refresh` | *(Admin)* Manually trigger a data fetch right now. |
 | `/nuke` | *(Admin)* Wipe all data for this server and re-fetch from scratch. |
 
-Stat, match and quote commands post their result in the channel. Pass `public:False` to any of them (`/leaderboard`, `/player`, `/players`, `/matches`, `/summary`, `/team_stats`, `/hi_vs_low`, `/quote`, `/lookup`) to get the reply as a whisper only you can see. Image cards (`/player_card`, `/team_card`, `/h2h_card`, `/h2h_player`) and `/draftorder` always post in the channel. Owner-only commands (`/set_player`, `/start_new_season`, `/sync_roles_channels`, `/nuke`) always reply privately.
+Stat, match and quote commands post their result in the channel. Pass `public:False` to any of them (`/leaderboard`, `/player`, `/players`, `/matches`, `/summary`, `/team_stats`, `/hi_vs_low`, `/quote`, `/lookup`) to get the reply as a whisper only you can see. Image cards (`/player_card`, `/team_card`, `/h2h_card`, `/h2h_player`) and `/draftorder` always post in the channel. Owner-only commands (`/set_player`, `/sync_roles_channels`, `/nuke`) always reply privately.
 
 ---
 

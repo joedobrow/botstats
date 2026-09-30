@@ -20,7 +20,7 @@ Usage:
 
 --league is the season's Dota league id, which is also its id in the seasons
 table; --division is the division's slug (optional when the season has only
-one division). The season must already exist (/start_new_season or /config
+one division). The season must already exist (Admin → Season setup, or /config
 creates it). Uses the same DB_PATH as the bot (default /data/dota_stats.db on fly,
 else dota_stats.db). Re-running for the same league overwrites that
 season's rows.
@@ -96,7 +96,7 @@ def main():
     init_db()  # safe to call; ensures the table exists
     season = get_season(args.league)
     if not season:
-        logger.error("No season with league id %d. Create it with /start_new_season or /config first.", args.league)
+        logger.error("No season with league id %d. Create it in Admin \u2192 Season setup first.", args.league)
         sys.exit(1)
     divisions = [d for d in get_season_divisions(args.league) if not args.division or d["slug"] == args.division]
     if len(divisions) != 1:

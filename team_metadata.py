@@ -1,7 +1,7 @@
 """
 Team identity (real team name + logo) for a captain, per season.
 
-Backed by the `season_teams` DB table — populated by /start_new_season from
+Backed by the `season_teams` DB table — populated by Admin → Season setup from
 the RD2L teams page, so rolling a new season is a data change, not a code
 change.
 """

@@ -2,113 +2,186 @@
 {% from "macros.html" import season_name, season_start %}
 {% block content %}
 <h1>Admin</h1>
+<nav class="admin-nav">
+  <a href="#seasons">Seasons</a>
+  <a href="#rollover">Season setup</a>
+  <a href="#divisions">Divisions</a>
+  {% if is_uberadmin %}<a href="#admins">Admins</a>{% endif %}
+  <a href="#text">Site text</a>
+</nav>
 
-<h2>Seasons</h2>
-<div class="scroll">
-<table>
-  <thead><tr><th>Season <span class="muted small">(click to rename)</span></th><th>League</th><th>Division</th><th>Starts{% if is_uberadmin %} <span class="muted small">(click to change)</span>{% endif %}</th><th class="num">Signups</th><th>Status</th><th></th></tr></thead>
-  <tbody>
-  {% for s in seasons %}
-    <tr>
-      <td>{{ season_name(s, csrf, is_admin, "/admin") }}</td>
-      <td class="muted">{{ s.id }}</td>
-      <td>{{ s.division }}</td>
-      <td>{{ season_start(s, csrf, is_uberadmin, "/admin") }}</td>
-      <td class="num"><a href="{{ season_url(s) }}?tab=signups">{{ s.signup_count }}</a></td>
-      <td>
-        <form method="post" action="/admin/status" class="inline">
-          <input type="hidden" name="csrf" value="{{ csrf }}">
-          <input type="hidden" name="season_id" value="{{ s.id }}">
-    <input type="hidden" name="division_id" value="{{ s.division_id }}">
-          <select name="status" aria-label="Status of {{ s.label }}" onchange="this.form.submit()">
-            {% for key, label in SEASON_STATUSES.items() %}<option value="{{ key }}" {% if s.status == key %}selected{% endif %}>{{ label }}</option>{% endfor %}
-          </select>
-          <noscript><button>Save</button></noscript>
-        </form>
-      </td>
-      <td><a href="{{ season_url(s) }}">View</a></td>
-    </tr>
-  {% endfor %}
-  </tbody>
-</table>
-</div>
+<section class="panel" id="seasons">
+  <h2>Seasons</h2>
+  <p class="muted small">Click a season's name to rename it{% if is_uberadmin %}, or its start date to move it{% endif %}.</p>
+  <div class="scroll">
+  <table>
+    <thead><tr><th>Season</th><th>League</th><th>Division</th><th>Starts</th><th class="num">Signups</th><th>Status</th><th></th></tr></thead>
+    <tbody>
+    {% for s in seasons %}
+      <tr>
+        <td>{{ season_name(s, csrf, is_admin, "/admin") }}</td>
+        <td class="muted">{{ s.id }}</td>
+        <td>{{ s.division }}</td>
+        <td>{{ season_start(s, csrf, is_uberadmin, "/admin") }}</td>
+        <td class="num"><a href="{{ season_url(s) }}?tab=signups">{{ s.signup_count }}</a></td>
+        <td>
+          <form method="post" action="/admin/status" class="inline">
+            <input type="hidden" name="csrf" value="{{ csrf }}">
+            <input type="hidden" name="season_id" value="{{ s.id }}">
+            <input type="hidden" name="division_id" value="{{ s.division_id }}">
+            <select name="status" aria-label="Status of {{ s.label }}" onchange="this.form.submit()">
+              {% for key, label in SEASON_STATUSES.items() %}<option value="{{ key }}" {% if s.status == key %}selected{% endif %}>{{ label }}</option>{% endfor %}
+            </select>
+            <noscript><button>Save</button></noscript>
+          </form>
+        </td>
+        <td><a href="{{ season_url(s) }}">View</a></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
 
-<h3>New season</h3>
-<p class="muted small">A season is identified by its Dota league ID, so it can't be changed later. Several divisions can share one league: add each division to it here. To make it the season the bot fetches and defaults to, run <code>/start_new_season</code> in Discord (which also loads rosters and teams).</p>
-<form method="post" action="/admin/season" class="form grid">
-  <input type="hidden" name="csrf" value="{{ csrf }}">
-  <label>Division
-    <select name="division_id" required>
-      {% for d in divisions %}<option value="{{ d.id }}">{{ d.name }}</option>{% endfor %}
-    </select>
-  </label>
-  <label>League ID <span class="muted small">(the Dota league id, e.g. 20056)</span> <input type="number" name="league_id" required min="1"></label>
-  <label>Start date <input type="date" name="season_start" required></label>
-  <label>Name <input type="text" name="label" placeholder="CADL Season 1" required></label>
-  <div class="actions"><button class="primary">Create season</button></div>
-</form>
+<section class="panel" id="rollover">
+  <h2>Season setup</h2>
+  <p class="muted small">Points a division at a season and loads everything it needs: week
+    boundaries, the drafted rosters, and team names and logos. A season <em>is</em> its Dota league
+    id, so several divisions can share one — run this once for each. Running it again on the same
+    league tops up whatever didn't load the first time and leaves matches and weeks alone.</p>
+  <form method="post" action="/admin/season/rollover" class="form grid" enctype="multipart/form-data">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label>Division
+      <select name="division_id" required>
+        {% for d in divisions %}<option value="{{ d.id }}">{{ d.name }}{% if d.current_season_id %} — now on {{ d.current_season_id }}{% endif %}</option>{% endfor %}
+      </select>
+    </label>
+    <label>League id <input type="number" name="league_id" required min="1" placeholder="20056"></label>
+    <label>First match day <input type="date" name="season_start" required></label>
+    <label>Name <span class="muted small">(taken from the league if blank)</span>
+      <input type="text" name="label" placeholder="CADL Season 1"></label>
+    <label>Weeks <input type="number" name="weeks" value="9" min="1" max="30"></label>
+    <label>First week is
+      <select name="first_week">
+        <option value="0">0 — a scrim week first</option>
+        <option value="1">1</option>
+      </select>
+    </label>
+    <label>Drafted rosters <span class="muted small">(the Drafted Players tab: File → Download → .csv)</span>
+      <input type="file" name="costs_file" accept=".csv,text/csv"></label>
+    <label>…or its published CSV link <input type="url" name="costs_url" placeholder="https://docs.google.com/…/pub?output=csv"></label>
+    <label>Team names and logos <span class="muted small">(the RD2L division teams page)</span>
+      <input type="url" name="teams_url" placeholder="https://rd2l.gg/…"></label>
+    <label class="check"><input type="checkbox" name="dry_run" value="1" checked> Preview first, write nothing</label>
+    <div class="actions"><button class="primary">Run season setup</button></div>
+  </form>
+  <details>
+    <summary class="muted small">Just record a season without rolling a division onto it</summary>
+    <form method="post" action="/admin/season" class="form grid">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <label>Division
+        <select name="division_id" required>
+          {% for d in divisions %}<option value="{{ d.id }}">{{ d.name }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>League id <input type="number" name="league_id" required min="1"></label>
+      <label>Start date <input type="date" name="season_start" required></label>
+      <label>Name <input type="text" name="label" placeholder="CADL Season 1" required></label>
+      <div class="actions"><button>Create season row</button></div>
+    </form>
+  </details>
+</section>
 
-<h2>Divisions</h2>
-<p class="muted small">The URL name appears in season links, e.g. /season/20056/<em>na</em>. New divisions are created with <code>/config</code> in Discord.</p>
-<div class="scroll">
-<table>
-  <thead><tr><th>Name and URL name</th><th>Current season</th><th>Region</th><th>Mode</th><th>Discord server</th></tr></thead>
-  <tbody>
-  {% for d in divisions %}
-    <tr>
-      <td>
-        <form method="post" action="/admin/division" class="inline">
-          <input type="hidden" name="csrf" value="{{ csrf }}">
-          <input type="hidden" name="division_id" value="{{ d.id }}">
-          <input type="text" name="name" value="{{ d.name }}" maxlength="80" aria-label="Division name">
-          <input type="text" name="slug" value="{{ d.slug }}" maxlength="40" aria-label="URL name" class="short">
-          <button>Save</button>
-        </form>
-      </td>
-      <td>{{ d.current_season_id or "" }}</td><td>{{ d.region }}</td><td>{{ d.game_mode|upper }}</td><td class="muted small">{{ d.guild_id or "" }}</td>
-    </tr>
-  {% endfor %}
-  </tbody>
-</table>
-</div>
+<section class="panel" id="divisions">
+  <h2>Divisions</h2>
+  <p class="muted small">The URL name appears in season links, e.g. /season/20056/<em>na</em>.</p>
+  <div class="scroll">
+  <table>
+    <thead><tr><th>Name and URL name</th><th>Current season</th><th>Region</th><th>Mode</th><th>Discord server</th></tr></thead>
+    <tbody>
+    {% for d in divisions %}
+      <tr>
+        <td>
+          <form method="post" action="/admin/division" class="inline">
+            <input type="hidden" name="csrf" value="{{ csrf }}">
+            <input type="hidden" name="division_id" value="{{ d.id }}">
+            <input type="text" name="name" value="{{ d.name }}" maxlength="80" aria-label="Division name">
+            <input type="text" name="slug" value="{{ d.slug }}" maxlength="40" aria-label="URL name" class="short">
+            <button>Save</button>
+          </form>
+        </td>
+        <td>{{ d.current_season_id or "" }}</td><td>{{ d.region }}</td><td>{{ d.game_mode|upper }}</td><td class="muted small">{{ d.guild_id or "" }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% if is_uberadmin %}
+  <h3>New division</h3>
+  <p class="muted small">Only uberadmins. The region and mode decide which matches count as this
+    division's: a league's games are filtered by server cluster and game mode.</p>
+  <form method="post" action="/admin/division/create" class="form grid">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label>Name <input type="text" name="name" required maxlength="80" placeholder="North America"></label>
+    <label>URL name <input type="text" name="slug" required maxlength="40" placeholder="na"
+      pattern="[a-z0-9-]+" title="Lower-case letters, digits and hyphens"></label>
+    <label>Region
+      <select name="region">{% for r in regions %}<option value="{{ r }}"{% if r == "any" %} selected{% endif %}>{{ r }}</option>{% endfor %}</select>
+    </label>
+    <label>Game mode
+      <select name="game_mode">{% for m in game_modes %}<option value="{{ m }}"{% if m == "ad" %} selected{% endif %}>{{ m|upper }}</option>{% endfor %}</select>
+    </label>
+    <label>Discord server id <span class="muted small">(optional)</span>
+      <input type="text" name="guild_id" inputmode="numeric" placeholder="1481800158826991718"></label>
+    <div class="actions"><button class="primary">Create division</button></div>
+  </form>
+  {% endif %}
+</section>
 
 {% if is_uberadmin %}
-<h2 id="admins">Admins</h2>
-<p class="muted small">Only uberadmins see this. Uberadmins are set on the server and can't be removed here.</p>
-<table>
-  <thead><tr><th>Player</th><th>Role</th><th>Added</th><th></th></tr></thead>
-  <tbody>
-  {% for a in admins %}
-    <tr>
-      <td><a href="/player/{{ a.account_id }}">{{ a.name or a.account_id }}</a> <span class="muted small">{{ a.account_id }}</span></td>
-      <td>{{ "Uberadmin" if a.uberadmin else "Admin" }}</td>
-      <td class="small muted">{{ (a.added_at or "")[:10] }}</td>
-      <td>{% if not a.uberadmin %}
-        <form method="post" action="/admin/admins" class="inline" onsubmit="return confirm('Remove {{ (a.name or a.account_id)|e }} as an admin?')">
-          <input type="hidden" name="csrf" value="{{ csrf }}">
-          <input type="hidden" name="account_id" value="{{ a.account_id }}">
-          <input type="hidden" name="action" value="remove">
-          <button class="linklike danger">Remove</button>
-        </form>{% endif %}</td>
-    </tr>
-  {% endfor %}
-  </tbody>
-</table>
-<form method="post" action="/admin/admins" class="form grid">
-  <input type="hidden" name="csrf" value="{{ csrf }}">
-  <label>Add an admin <input type="text" name="account_id" required placeholder="Dota account ID or Steam64 ID" inputmode="numeric"></label>
-  <div class="actions"><button class="primary">Add admin</button></div>
-</form>
+<section class="panel" id="admins">
+  <h2>Admins</h2>
+  <p class="muted small">Only uberadmins see this. Uberadmins are set on the server and can't be removed here.</p>
+  <div class="scroll">
+  <table>
+    <thead><tr><th>Player</th><th>Role</th><th>Added</th><th></th></tr></thead>
+    <tbody>
+    {% for a in admins %}
+      <tr>
+        <td><a href="/player/{{ a.account_id }}">{{ a.name or a.account_id }}</a> <span class="muted small">{{ a.account_id }}</span></td>
+        <td>{{ "Uberadmin" if a.uberadmin else "Admin" }}</td>
+        <td class="small muted">{{ (a.added_at or "")[:10] }}</td>
+        <td>{% if not a.uberadmin %}
+          <form method="post" action="/admin/admins" class="inline" onsubmit="return confirm('Remove {{ (a.name or a.account_id)|e }} as an admin?')">
+            <input type="hidden" name="csrf" value="{{ csrf }}">
+            <input type="hidden" name="account_id" value="{{ a.account_id }}">
+            <input type="hidden" name="action" value="remove">
+            <button class="linklike danger">Remove</button>
+          </form>{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <h3>New admin</h3>
+  <form method="post" action="/admin/admins" class="form grid">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label>Dota account id or Steam64 id <input type="text" name="account_id" required inputmode="numeric"></label>
+    <div class="actions"><button class="primary">Add admin</button></div>
+  </form>
+</section>
 {% endif %}
 
-<h2>Site text</h2>
-<p class="muted small">Plain text. Leave a blank line between paragraphs.</p>
-{% for key, label, value in [("about", "About page", about), ("rules", "Rules page", rules)] %}
-<form method="post" action="/admin/text" class="form">
-  <input type="hidden" name="csrf" value="{{ csrf }}">
-  <input type="hidden" name="key" value="{{ key }}">
-  <label>{{ label }}<textarea name="value" rows="{{ 12 if key == 'rules' else 5 }}">{{ value }}</textarea></label>
-  <div class="actions"><button>Save {{ label|lower }}</button></div>
-</form>
-{% endfor %}
+<section class="panel" id="text">
+  <h2>Site text</h2>
+  <p class="muted small">Plain text. Leave a blank line between paragraphs.</p>
+  {% for key, label, value in [("about", "About page", about), ("rules", "Rules page", rules)] %}
+  <form method="post" action="/admin/text" class="form">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="hidden" name="key" value="{{ key }}">
+    <label>{{ label }}<textarea name="value" rows="{{ 12 if key == 'rules' else 5 }}">{{ value }}</textarea></label>
+    <div class="actions"><button>Save {{ label|lower }}</button></div>
+  </form>
+  {% endfor %}
+</section>
 {% endblock %}
