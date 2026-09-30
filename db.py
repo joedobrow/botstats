@@ -388,6 +388,24 @@ def init_db():
                 PRIMARY KEY (season_id, division_id, captain)
             );
 
+            -- Which team each side of a match belongs to, when the roster
+            -- count can't say. A side is attributed automatically once three
+            -- of a team's five played on it (get_match_team_captains), which
+            -- a night of stand-ins defeats — three of Actor's five missing
+            -- left their Sep 23 win credited to nobody and uncounted. An
+            -- admin sets it here instead, and every reader honours it: the
+            -- site, the Discord cards, the standings.
+            -- captain NULL means "really was stand-ins"; no row means "work
+            -- it out from the rosters".
+            CREATE TABLE IF NOT EXISTS match_team_overrides (
+                match_id   INTEGER NOT NULL,
+                side       TEXT NOT NULL CHECK (side IN ('radiant', 'dire')),
+                captain    TEXT,
+                set_by     INTEGER,
+                set_at     TEXT NOT NULL,
+                PRIMARY KEY (match_id, side)
+            );
+
             -- Per-division roster of "tracked" players. Lets /set_player add
             -- a player to a division even if they haven't appeared in a match
             -- yet, so /players will surface them.
@@ -2584,6 +2602,41 @@ def get_head_to_head_matches(
     return results
 
 
+def set_match_team_override(match_id: int, side: str, captain: str | None,
+                           *, automatic: bool = False, set_by: int | None = None) -> None:
+    """Say which team played one side of a match. `automatic` removes the
+    override and goes back to counting rosters; captain=None records that the
+    side really was stand-ins."""
+    if side not in ("radiant", "dire"):
+        raise ValueError(f"side must be radiant or dire, not {side!r}")
+    with _conn() as conn:
+        if automatic:
+            conn.execute("DELETE FROM match_team_overrides WHERE match_id = ? AND side = ?",
+                         (match_id, side))
+            return
+        conn.execute("""
+            INSERT INTO match_team_overrides (match_id, side, captain, set_by, set_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(match_id, side) DO UPDATE SET
+                captain = excluded.captain, set_by = excluded.set_by, set_at = excluded.set_at
+        """, (match_id, side, captain, set_by, datetime.now(timezone.utc).isoformat()))
+
+
+def get_match_team_overrides(match_ids: list[int]) -> dict[int, dict[str, str | None]]:
+    """{match_id: {side: captain_or_None}} for the sides an admin has set."""
+    if not match_ids:
+        return {}
+    out: dict[int, dict[str, str | None]] = {}
+    with _conn() as conn:
+        for i in range(0, len(match_ids), 500):
+            chunk = match_ids[i:i + 500]
+            for r in conn.execute(
+                f"SELECT match_id, side, captain FROM match_team_overrides "
+                f"WHERE match_id IN ({','.join('?' * len(chunk))})", chunk):
+                out.setdefault(r["match_id"], {})[r["side"]] = r["captain"]
+    return out
+
+
 def get_match_team_captains(
     season_id: int, division_id: int, match_ids: list[int],
 ) -> dict[int, dict[str, str | None]]:
@@ -2625,10 +2678,14 @@ def get_match_team_captains(
                     if side is not None:
                         side.add(r["account_id"])
 
+    overrides = get_match_team_overrides(list(sides))
     result: dict[int, dict[str, str | None]] = {}
     for mid, by_side in sides.items():
         result[mid] = {}
         for side, aids in by_side.items():
+            if side in overrides.get(mid, {}):
+                result[mid][side] = overrides[mid][side]   # an admin said so
+                continue
             cap = max(rosters, key=lambda c: len(rosters[c] & aids), default=None)
             result[mid][side] = cap if cap and len(rosters[cap] & aids) >= 3 else None
     return result

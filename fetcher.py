@@ -180,16 +180,22 @@ def pick_division(season_id: int, divisions: list[dict], full: dict) -> dict | N
     return votes[0][1]
 
 
-def _store_full_match(full: dict, division_id: int | None) -> int:
+def _store_full_match(full: dict, division_id: int | None,
+                      league_id: int | None = None) -> int:
     """Persist one OpenDota /matches/{id} response under a division: the
     match row, player rows (updated in place if already there) and typed
-    chat. Returns the number of player rows."""
+    chat. Returns the number of player rows.
+
+    league_id overrides the one OpenDota reports, for a league game that was
+    played without a ticket — it has no league of its own, and a season's
+    matches are scoped by (division, league), so without this it would be
+    stored and then never seen (see fetch_and_store_match)."""
     # --- Persist match row ---
     radiant_win = 1 if full.get("radiant_win") else 0
     match_row = {
         "match_id":     full["match_id"],
         "division_id":  division_id,
-        "league_id":    full.get("leagueid", 0),
+        "league_id":    league_id if league_id is not None else full.get("leagueid", 0),
         "start_time":   full.get("start_time", 0),
         "duration":     full.get("duration", 0),
         "game_mode":    full.get("game_mode", 0),
@@ -294,6 +300,35 @@ def _store_full_match(full: dict, division_id: int | None) -> int:
         logger.info("Stored %d chat messages for match %d", len(chat_messages), full["match_id"])
 
     return len(players)
+
+
+async def fetch_and_store_match(match_id: int, division_id: int,
+                                league_id: int | None = None) -> dict:
+    """Fetch one match by id and store it under a division, whatever league
+    OpenDota thinks it belongs to. For the game somebody forgot to ticket.
+
+    Returns {match_id, players, game_mode, start_time, already}. Raises
+    ValueError with a message meant for whoever asked, since this runs from
+    an admin pressing a button rather than from a scheduled job.
+    """
+    from db import _conn
+
+    with _conn() as conn:
+        already = conn.execute("SELECT 1 FROM matches WHERE match_id = ?",
+                               (match_id,)).fetchone() is not None
+    async with aiohttp.ClientSession() as session:
+        full = await _get(session, f"/matches/{match_id}")
+    if not full or not full.get("match_id"):
+        raise ValueError(f"OpenDota has no match {match_id}. "
+                         f"A game can take a few minutes to appear after it ends.")
+    if not full.get("players"):
+        raise ValueError(f"Match {match_id} came back without its players — "
+                         f"OpenDota may still be parsing it. Try again shortly.")
+    rows = _store_full_match(full, division_id, league_id=league_id)
+    logger.info("Manually added match %d to division %s (%d player rows)",
+                match_id, division_id, rows)
+    return {"match_id": match_id, "players": rows, "game_mode": full.get("game_mode"),
+            "start_time": full.get("start_time"), "already": already}
 
 
 async def fetch_and_store_season(season_id: int) -> int:
