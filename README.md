@@ -89,7 +89,8 @@ run, and several may share one (commands then use the server's default
 division). Every game belongs to one division, assigned when it's fetched
 (`fetcher.pick_division`: the division whose mode and region fit, and if
 several do, whose drafted rosters include most of the game's players).
-`/config name:` names or renames a division.
+`/config name:` names or renames a division. `scripts/merge_divisions.py` merges one division
+into another.
 
 ### Seasons
 
