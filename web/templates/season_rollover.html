@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block content %}
+<p class="small"><a href="/admin">← Admin</a></p>
+<h1>
+  {% if result.problems %}Nothing written
+  {% elif dry_run %}Preview
+  {% elif result.same_season %}Season topped up
+  {% else %}Season rolled over{% endif %}
+</h1>
+<p class="muted">{{ division.name }} · league {{ league_id }}{% if result.label %} · {{ result.label }}{% endif %}</p>
+
+{% if result.problems %}
+<div class="errors">
+  <p>Every source has to parse before anything is written, so nothing was:</p>
+  <ul>{% for p in result.problems %}<li>{{ p }}</li>{% endfor %}</ul>
+</div>
+{% endif %}
+
+{% if result.summary %}
+<section class="panel">
+  <h2>{% if result.applied %}What changed{% else %}What would change{% endif %}</h2>
+  <ul class="plain">{% for line in result.summary %}<li>{{ line }}</li>{% endfor %}</ul>
+</section>
+
+<section class="panel">
+  <h2>Week boundaries</h2>
+  <div class="scroll">
+  <table>
+    <thead><tr><th>Week</th><th>From</th><th>To</th></tr></thead>
+    <tbody>
+    {% for w in result.weeks %}
+      <tr><td>{{ w.number }}</td><td>{{ w.start }}</td><td>{{ w.end }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <p class="muted small">Weeks run Monday to Sunday, UTC.</p>
+</section>
+{% endif %}
+
+<div class="actions">
+  <a class="button" href="/admin">Back to admin</a>
+  {% if result.applied %}<a class="button primary" href="/season/{{ league_id }}/{{ division.slug }}">View the season</a>{% endif %}
+</div>
+{% if result.applied %}
+<p class="muted small">Matches are pulled in by the Thursday morning job, or now with
+  <code>/refresh_leaderboard</code> in Discord. Discord roles still come from
+  <code>/sync_roles_channels</code>.</p>
+{% endif %}
+{% endblock %}

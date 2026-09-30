@@ -38,7 +38,7 @@ def _require_division(interaction: discord.Interaction):
 
 # Stat/match/quote commands post to the channel by default; pass public:False
 # to get the reply as a whisper only you can see. Owner-only commands
-# (set_player, start_new_season, sync_roles_channels, nuke) are always private
+# (set_player, sync_roles_channels, nuke) are always private
 # and take no public param.
 PUBLIC_BY_DEFAULT_PARAM_DESCRIPTION = "Post the result in the channel; set False to only show it to you (default: True)"
 
@@ -2049,182 +2049,11 @@ async def tipjar(interaction: discord.Interaction):
     )
 
 
-@tree.command(name="start_new_season",
-              description="[Owner] Roll this division over to a new season: league, dates, weeks, rosters, teams")
-@app_commands.describe(
-    league="Dota league ID for the new season — also its id (e.g. 20056 = RD2L Season 39)",
-    season_start="First match day of the new season, YYYY-MM-DD",
-    weeks="How many weeks to generate",
-    first_week="Number the first week 0 (scrim week) or 1. Default 0.",
-    costs_url="Published CSV of the Drafted Players tab (Account ID / Name / Winner / Cost)",
-    costs_file="Upload the Drafted Players tab as CSV (File \u2192 Download \u2192 .csv). Use instead of costs_url.",
-    label="Display name for this season, e.g. \"Season 39\" (auto-detected from the league if omitted)",
-    teams_url="RD2L division teams page, for team names + logos",
-    dry_run="Preview everything without writing anything",
-)
-async def start_new_season(
-    interaction: discord.Interaction,
-    league: int,
-    season_start: str,
-    weeks: int = 9,
-    first_week: int = 0,
-    costs_url: str = None,
-    costs_file: discord.Attachment = None,
-    label: str = None,
-    teams_url: str = None,
-    dry_run: bool = False,
-):
-    if not (ADMIN_USER_ID and interaction.user.id == ADMIN_USER_ID):
-        await interaction.response.send_message("\u26a0\ufe0f Bot owner only.", ephemeral=True)
-        return
-    await interaction.response.defer(ephemeral=True)
+# /start_new_season used to live here: a rollover driven by a slash command with
+# a CSV attachment, setting up a league nobody could see the result of until
+# they loaded the site. It's the admin pages' job now — Admin → Season setup,
+# which previews before it writes (season_setup.roll_over).
 
-    try:
-        datetime.strptime(season_start, "%Y-%m-%d")
-    except ValueError:
-        await interaction.followup.send("\u26a0\ufe0f `season_start` must be YYYY-MM-DD.", ephemeral=True)
-        return
-    if first_week not in (0, 1):
-        await interaction.followup.send("\u26a0\ufe0f `first_week` must be 0 or 1.", ephemeral=True)
-        return
-    if not 1 <= weeks <= 30:
-        await interaction.followup.send("\u26a0\ufe0f `weeks` must be between 1 and 30.", ephemeral=True)
-        return
-
-    current = _require_division(interaction)
-    if not current:
-        await interaction.followup.send(
-            "\u26a0\ufe0f No division configured here yet \u2014 run `/config` first.", ephemeral=True)
-        return
-    # A season's id is its league id. Re-running against the season that's
-    # already active is a legitimate repair: every write below is an upsert,
-    # so it tops up whatever didn't land the first time (a costs CSV that
-    # failed to parse, say). Only refuse when there's genuinely nothing to
-    # do — same season AND no data sources.
-    season_id = league
-    previous = get_season(current["current_season_id"]) or {}
-    same_season = current["current_season_id"] == season_id
-    has_sources = bool(costs_url or costs_file or teams_url)
-    if same_season and not has_sources and not dry_run:
-        await interaction.followup.send(
-            f"\u26a0\ufe0f League `{league}` is already the active season and you "
-            "didn't pass `costs_file`/`costs_url`/`teams_url`, so there's nothing "
-            "to do. Attach a roster CSV to top up an incomplete rollover.",
-            ephemeral=True)
-        return
-
-    from db import (generate_season_weeks, _season_week_start,
-                    upsert_player_costs, upsert_season_teams, get_player_costs)
-    from rd2l import (fetch_drafted_players_csv, parse_drafted_players_csv,
-                      fetch_team_identities)
-
-    # ---- gather remote data first; nothing is written until all of it parses
-    drafted, identities, problems = [], [], []
-    if costs_url and costs_file:
-        await interaction.followup.send(
-            "\u26a0\ufe0f Give either `costs_url` or `costs_file`, not both.", ephemeral=True)
-        return
-    if costs_file:
-        try:
-            raw = (await costs_file.read()).decode("utf-8-sig", errors="replace")
-            drafted = parse_drafted_players_csv(raw)
-            if not drafted:
-                problems.append("costs file parsed but contained no drafted rows "
-                                "(every row missing Winner or Cost)")
-        except Exception as e:
-            problems.append(f"costs file failed: {e}")
-    elif costs_url:
-        try:
-            drafted = await fetch_drafted_players_csv(costs_url)
-            if not drafted:
-                problems.append("costs CSV parsed but contained no drafted rows "
-                                "(every row missing Winner or Cost)")
-        except Exception as e:
-            problems.append(f"costs CSV failed: {e}")
-    if teams_url:
-        try:
-            identities = await fetch_team_identities(teams_url)
-            if not identities:
-                problems.append("teams page parsed but yielded no teams")
-        except Exception as e:
-            problems.append(f"teams page failed: {e}")
-
-    season_label_val = label
-    if not season_label_val:
-        try:
-            import aiohttp as _aio
-            async with _aio.ClientSession(timeout=_aio.ClientTimeout(total=10)) as _s:
-                async with _s.get(f"https://api.opendota.com/api/leagues/{league}") as _r:
-                    if _r.status == 200:
-                        season_label_val = ((await _r.json()) or {}).get("name") or None
-        except Exception:
-            logger.info("league name lookup failed for %d", league, exc_info=False)
-
-    weeks_preview = []
-    for n in range(first_week, first_week + weeks):
-        st, en = _season_week_start(n - first_week + 1, season_start)  # pure date math, no writes
-        weeks_preview.append((n, st, en))
-
-    def _d(ts):
-        # UTC: these are week-boundary constructs, not moments — see /list_weeks.
-        return datetime.fromtimestamp(ts, timezone.utc).strftime("%b %d")
-
-    teams_in_costs = len({d["captain"].strip().lower() for d in drafted})
-    lines = [
-        f"**League** `{current['current_season_id']}` \u2192 `{league}`"
-        + (f"  ({season_label_val})" if season_label_val else ""),
-        f"**Season start** `{previous.get('season_start', '?')}` \u2192 `{season_start}`",
-        f"**Weeks** {first_week}\u2013{first_week + weeks - 1} "
-        f"({_d(weeks_preview[0][1])} \u2192 {_d(weeks_preview[-1][2])})",
-        f"**Rosters** {len(drafted)} drafted players across {teams_in_costs} teams"
-        + ("" if (costs_url or costs_file) else "  _(no costs source given \u2014 skipped)_")
-        + ("  \u2014 captains are added separately, so this is 4/team" if drafted else ""),
-        f"**Team identities** {len(identities)} teams"
-        + ("" if teams_url else "  _(no teams_url \u2014 skipped, existing kept)_"),
-    ]
-    if problems:
-        lines.append("")
-        lines += [f"\u26a0\ufe0f {p}" for p in problems]
-
-    if dry_run or problems:
-        head = "\U0001f50d **Dry run** \u2014 nothing written." if dry_run \
-               else "\u274c **Aborted** \u2014 nothing written (fix the errors below and re-run)."
-        wk = "\n".join(f"\u2022 Week {n}: {_d(st)} \u2192 {_d(en)}" for n, st, en in weeks_preview[:4])
-        more = f"\n\u2022 \u2026 through Week {weeks_preview[-1][0]}" if len(weeks_preview) > 4 else ""
-        await interaction.followup.send(
-            head + "\n\n" + "\n".join(lines) + "\n\n**Week boundaries**\n" + wk + more,
-            ephemeral=True)
-        return
-
-    # ---- writes (the season row first: everything else points at it)
-    # (A season can span several divisions — e.g. NA and EU in one league —
-    # so this may be a season another division already plays in.)
-    upsert_season(season_id, season_start, label=season_label_val)
-    set_current_season(current["id"], season_id)
-    generate_season_weeks(season_id, current["id"], weeks, first_week=first_week)
-    if drafted:
-        upsert_player_costs(season_id, current["id"], [
-            {"account_id": d["account_id"], "cost": d["cost"], "captain": d["captain"]}
-            for d in drafted
-        ])
-    if identities:
-        upsert_season_teams(season_id, current["id"], identities)
-
-    if same_season:
-        # Repair run: report what the season now holds, not what a previous one kept.
-        now_costs = len(get_player_costs(season_id, current["id"]))
-        tail = (f"\n\nLeague `{league}` now has **{now_costs}** roster rows. "
-                "Existing matches and weeks were left alone.")
-    else:
-        prev_costs = len(get_player_costs(current["current_season_id"], current["id"]))
-        tail = (f"\n\nPrevious season `{season_label(previous) if previous else current['current_season_id']}` kept its {prev_costs} "
-                "roster rows and all its matches \u2014 nothing was deleted.")
-    await interaction.followup.send(
-        ("\u2705 **Season topped up.**\n\n" if same_season
-         else "\u2705 **Season rolled over.**\n\n") + "\n".join(lines) + tail +
-        "\nNext: run `/refresh_leaderboard` to pull matches under the league ID, "
-        "then `/sync_roles_channels` for Discord roles.",
-        ephemeral=True)
 
 
 @tree.command(name="sync_roles_channels",
@@ -2635,6 +2464,27 @@ async def weekly_fetch():
             logger.exception(f"Weekly fetch failed for league {season_id}")
 
     logger.info(f"Weekly fetch complete: {total_count} total match(es) across {len(divisions)} division(s)")
+
+    # Then re-rate everyone who has played, while the new results are the
+    # freshest thing in the database — the fantasy adjustment is fitted from
+    # them, and ratings are on the team pages now, so a stale number is a
+    # number a captain reads. Nothing else did this on a schedule: it waited
+    # on someone running /refresh_ratings.
+    import rating_compute
+    from db import get_guild_player_account_ids
+    for division_id in sorted({d["id"] for d in divisions}):
+        aids = get_guild_player_account_ids(division_id)
+        done = 0
+        for aid in aids:
+            if await rating_compute.compute_and_cache_rating(aid) is not None:
+                done += 1
+        logger.info("Weekly rating refresh for division %s: %d of %d rated",
+                    division_id, done, len(aids))
+    try:
+        import rating_group
+        rating_group.recompute_all()
+    except Exception:
+        logger.exception("Group rating recompute failed after the weekly refresh")
 
 
 # ---------------------------------------------------------------------------
