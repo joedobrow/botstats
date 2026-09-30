@@ -87,9 +87,34 @@ async def fetch_inputs(account_id: int) -> dict:
             logger.warning("%s fetch failed for %d: %s", label, account_id, r)
     wr, od, od_counts = (None if isinstance(r, Exception) else r for r in results)
 
-    # Private match history makes OpenDota report 0 for every count, which
-    # means "can't see", not "hasn't played".
+    # Two different reasons a count can be missing, and they mean opposite
+    # things to the formula.
+    #
+    # Private match history: OpenDota reports 0 for everything, which means
+    # "can't see", not "hasn't played", and unknown is the honest answer.
+    #
+    # A failed request: fetch_player_game_counts fires five /wl queries and
+    # returns None if any one of them fails, so a single flaky sub-request
+    # made a player's whole activity unknown. For a pure Ability Draft player
+    # that flips the weighting from all-windrun to mostly-badge — Konjiki
+    # read 3371 one day and 3506 the next on nothing but an API blink. What
+    # we knew last time is a far better answer than "unknown", so fall back
+    # to it; those fields aren't authoritative here, so the cache keeps them.
+    counts_reached = od_counts is not None
     od_counts = sanitize_od_counts(od, od_counts)
+    if not counts_reached:
+        from db import get_rating_cache_row
+        cached = get_rating_cache_row(account_id) or {}
+        if any(cached.get(k) is not None for k in
+               ("ad_last_year", "ranked_last_year", "ranked_all_time")):
+            logger.warning("OpenDota counts unavailable for %d; using the last ones we saw",
+                           account_id)
+            od_counts = {
+                "last_year_ad": cached.get("ad_last_year"),
+                "all_time_ad": cached.get("ad_all_time"),
+                "last_year_ranked": cached.get("ranked_last_year"),
+                "all_time_ranked": cached.get("ranked_all_time"),
+            }
     od_last = (od_counts or {}).get("last_year_ad")
     od_all = (od_counts or {}).get("all_time_ad")
 
@@ -126,6 +151,9 @@ async def fetch_inputs(account_id: int) -> dict:
         "fh_unavailable": (bool((od.get("profile") or {}).get("fh_unavailable"))
                            if od else None),
         "reached_any_api": wr is not None or od is not None or od_counts is not None,
+        # True when the counts above are what we last saw rather than what
+        # OpenDota just said, so a caller can say so.
+        "counts_from_cache": not counts_reached and od_counts is not None,
         # Which fields we actually reached the source for, so "unknown" can be
         # written as unknown instead of leaving a stale number behind (see
         # db.upsert_rating_cache_row). A source that was down leaves its
@@ -134,7 +162,7 @@ async def fetch_inputs(account_id: int) -> dict:
             (("raw_windrun", "windrun_games") if wr is not None else ())
             + (("rank_tier", "leaderboard_rank", "fh_unavailable") if od is not None else ())
             + (("ad_last_year", "ad_all_time", "ranked_last_year", "ranked_all_time")
-               if od_counts is not None else ())
+               if counts_reached else ())
         ),
     }
 

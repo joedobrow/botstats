@@ -1241,6 +1241,10 @@ async def lookup(interaction: discord.Interaction, query: str, force_refresh: bo
 
     # Build a fetch-error message when we couldn't get fresh data.
     fetch_error: str | None = None
+    if inputs.get("counts_from_cache"):
+        fetch_error = ("OpenDota didn't answer for game counts, so the counts below are the last "
+                       "ones we saw. The rating uses them rather than treating this player's "
+                       "activity as unknown, which would swing it toward their badge.")
     if not have_any_signal:
         failed_apis = [label for label, got in (("windrun", wr), ("OpenDota profile", od),
                                                 ("OpenDota game counts", od_counts)) if got is None]
