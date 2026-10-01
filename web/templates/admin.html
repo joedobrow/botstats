@@ -182,7 +182,10 @@
 
 <section class="panel" id="text">
   <h2>Site text</h2>
-  <p class="muted small">Plain text. Leave a blank line between paragraphs.</p>
+  <p class="muted small">Markdown: <code>## Heading</code>, <code>- bullet</code>,
+    <code>1. numbered</code>, <code>**bold**</code>, <code>*italic*</code>,
+    <code>[text](https://link)</code>, <code>---</code> for a divider, and a blank line between
+    paragraphs. Google Docs will export it: File → Download → Markdown, then paste it here.</p>
   {% for key, label, value in [("about", "About page", about), ("rules", "Rules page", rules)] %}
   <form method="post" action="/admin/text" class="form">
     <input type="hidden" name="csrf" value="{{ csrf }}">

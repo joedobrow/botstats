@@ -3,6 +3,6 @@
 <p class="small"><a href="/info">← Info</a></p>
 <h1>{{ title }}</h1>
 <div class="prose">
-{% for p in text|paragraphs %}<p>{{ p }}</p>{% endfor %}
+{% if text.strip() %}{{ text|markdown }}{% else %}<p class="muted">Nothing here yet.</p>{% endif %}
 </div>
 {% endblock %}
