@@ -242,6 +242,9 @@ ul.plain li:last-child { border-bottom: 0; }
 /* A cell holding a link and an action next to it: tags collapse to a single
    space, which isn't enough to tell them apart. */
 .row-actions > form.inline { margin-left: 14px; }
+/* Whatever sits before Remove — a Details link or a "By hand" tag — takes the
+   same width, so the Remove buttons line up down the column. */
+.row-actions > .action-slot { display: inline-block; min-width: 4.8em; }
 
 /* A total row is the answer the table was adding up to, so it reads as one. */
 tfoot tr.total th, tfoot tr.total td {
@@ -263,6 +266,8 @@ tfoot tr.total th, tfoot tr.total td {
 .matchups { table-layout: fixed; }
 .matchups td.matchup-side { width: 40%; }
 .matchups td.matchup-games { width: 16%; white-space: nowrap; }
+.matchups td.matchup-vs { width: 4%; text-align: center; color: var(--muted);
+  font-size: 0.68rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.65; }
 
 /* A heading with an admin action on it, e.g. Matches + */
 h2.with-action { display: flex; align-items: center; gap: 10px; }

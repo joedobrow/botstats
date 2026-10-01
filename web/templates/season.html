@@ -110,7 +110,7 @@
             {% else %}<span class="muted small">{{ p.a_record }}{% if p.a_tiebreak is not none %}
               <span title="Tiebreaker: the combined wins of everyone they've played">· {{ p.a_tiebreak }}</span>{% endif %}</span>{% endif %}
           </td>
-          <td class="muted small">v</td>
+          <td class="matchup-vs">vs</td>
           <td class="matchup-side">
             {% if p.bye %}<span class="muted">Bye</span>
             {% else %}<a href="{{ team_url(season, p.b) }}">{{ p.b_name }}</a>
