@@ -15,6 +15,7 @@
       <a href="https://windrun.io/players/{{ account_id }}" rel="noopener">Windrun</a> ·
       <a href="https://www.dotabuff.com/players/{{ account_id }}" rel="noopener">Dotabuff</a> ·
       <a href="https://www.opendota.com/players/{{ account_id }}" rel="noopener">OpenDota</a>
+      {% if overall.games_played %} · <a href="/fantasy/{{ account_id }}">Fantasy</a>{% endif %}
     </div>
   </div>
 </div>
