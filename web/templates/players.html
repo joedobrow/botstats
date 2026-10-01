@@ -2,10 +2,13 @@
 {% from "macros.html" import player_link %}
 {% block content %}
 <h1>Players</h1>
+{% if notice %}<div class="errors"><p>{{ notice }}</p></div>{% endif %}
 <form method="get" class="search" data-live-filter="#players-table">
   <input type="search" name="q" value="{{ q }}" placeholder="Search by name or account ID" aria-label="Search players" autocomplete="off">
-  <noscript><button>Search</button></noscript>
+  <button name="lookup" value="1" title="Go straight to this player's page, by account id, Steam64 id, or an exact name">Look up</button>
 </form>
+<p class="muted small">Typing filters the list. <strong>Look up</strong> goes straight to a player's
+  page — by Dota account id or Steam64 id, even someone who has never played here.</p>
 <table id="players-table" class="sortable">
   <thead><tr>
     <th data-sort-type="text">Player</th>
