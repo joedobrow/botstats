@@ -30,8 +30,8 @@ _LINK = re.compile(r"\[([^\]]+)\]\(([^)\s]+)\)")
 _BOLD = re.compile(r"\*\*(\S(?:[^*]*\S)?)\*\*")
 _ITALIC = re.compile(r"(?<![\*\w])\*(\S(?:[^*]*\S)?)\*(?!\w)")
 _CODE = re.compile(r"`([^`]+)`")
-_BULLET = re.compile(r"^\s*[-*+]\s+(.*)$")
-_NUMBERED = re.compile(r"^\s*\d+[.)]\s+(.*)$")
+_BULLET = re.compile(r"^(\s*)[-*+]\s+(.*)$")
+_NUMBERED = re.compile(r"^(\s*)(?:\d+|[a-z]|[ivx]+)[.)]\s+(.*)$", re.I)
 _HEADING = re.compile(r"^(#{1,4})\s+(.*)$")
 _RULE = re.compile(r"^\s*([-*_])\s*(?:\1\s*){2,}$")
 
@@ -53,12 +53,37 @@ def _inline(text: str) -> str:
     return out
 
 
+def _render_items(items: list[tuple[int, str, str]], start: int = 0) -> tuple[str, int]:
+    """Render one list and everything nested under it.
+
+    items are (indent, "ul"|"ol", text) in document order. A deeper indent
+    belongs inside the item above it, which is what a Google Docs export means
+    by indenting — losing that turned a numbered outline with a, b, c beneath
+    each heading into one flat list renumbered 1 to 12.
+    """
+    indent, tag, _ = items[start]
+    parts = [f"<{tag}>"]
+    i = start
+    while i < len(items):
+        here, here_tag, text = items[i]
+        if here < indent or (here == indent and here_tag != tag):
+            break                     # belongs to an outer list, or a new one
+        if here > indent:
+            nested, i = _render_items(items, i)
+            parts[-1] = parts[-1][:-len("</li>")] + nested + "</li>"
+            continue
+        parts.append(f"<li>{_inline(text)}</li>")
+        i += 1
+    parts.append(f"</{tag}>")
+    return "\n".join(parts), i
+
+
 def render(text: str) -> str:
     """Markdown -> HTML, for the rules and about pages."""
-    lines = html.escape(text or "").replace("\r\n", "\n").split("\n")
+    lines = html.escape(text or "").replace("\r\n", "\n").replace("\r", "\n").split("\n")
     out: list[str] = []
-    list_tag: str | None = None
     paragraph: list[str] = []
+    items: list[tuple[int, str, str]] = []
 
     def close_paragraph() -> None:
         if paragraph:
@@ -66,10 +91,10 @@ def render(text: str) -> str:
             paragraph.clear()
 
     def close_list() -> None:
-        nonlocal list_tag
-        if list_tag:
-            out.append(f"</{list_tag}>")
-            list_tag = None
+        while items:
+            rendered, used = _render_items(items)
+            out.append(rendered)
+            del items[:used]
 
     for raw in lines:
         line = raw.rstrip()
@@ -89,12 +114,15 @@ def render(text: str) -> str:
         bullet, numbered = _BULLET.match(line), _NUMBERED.match(line)
         if bullet or numbered:
             close_paragraph()
-            want = "ul" if bullet else "ol"
-            if list_tag != want:
-                close_list()
-                out.append(f"<{want}>")
-                list_tag = want
-            out.append(f"<li>{_inline((bullet or numbered).group(1).strip())}</li>")
+            m = bullet or numbered
+            # Tabs are indentation too, and a lettered marker is only a list
+            # marker when something above it opened a list — otherwise a line
+            # starting "a. " is just a sentence.
+            depth = len(m.group(1).expandtabs(4))
+            if numbered and not bullet and not m.group(0).lstrip()[0].isdigit() and not items:
+                paragraph.append(line.strip())
+                continue
+            items.append((depth, "ul" if bullet else "ol", m.group(2).strip()))
             continue
         close_list()
         paragraph.append(line.strip())
