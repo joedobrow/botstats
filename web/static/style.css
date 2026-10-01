@@ -7,6 +7,7 @@
     linear-gradient(115deg, rgba(255, 228, 236, 0.22), rgba(222, 238, 255, 0.18) 45%, rgba(232, 255, 238, 0.14)),
     radial-gradient(110% 80% at 15% 0%, rgba(255, 252, 244, 0.38), rgba(255, 252, 244, 0) 60%),
     linear-gradient(165deg, var(--pearl-hi), var(--pearl-lo));
+  --control-h: 36px;
   --ink: #1f1b15;
   --ink-soft: #5c5446;
 
@@ -102,6 +103,16 @@ input[type=text], input[type=number], input[type=date], input[type=search], sele
   font: inherit; line-height: 1.35; padding: 7px 9px; border-radius: 6px;
   border: 1px solid var(--border); background: var(--surface); color: var(--text); width: 100%;
 }
+/* Each of these draws its own internal furniture — a date field's picker, a
+   select's arrow — and sizes itself around it, so matching padding still left
+   them 2px apart in a row. One height for all of them, so a filter bar lines
+   up by construction rather than by coincidence. Compact controls inside a
+   table keep their own size. */
+input[type=text], input[type=number], input[type=date], input[type=search], select {
+  height: var(--control-h);
+}
+td input[type=text], td select, h1 .edit-form input[type=text] { height: auto; }
+.form .actions button, .form .actions .button, .search button { height: var(--control-h); }
 /* A select sizes itself by the browser's own metrics and draws the browser's
    own arrow, so beside an input of identical padding it still came out a
    different height and a different style. Dropping the native appearance
