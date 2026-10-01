@@ -547,25 +547,61 @@ async def fantasy_page(request: web.Request):
     week = re.sub(r"\D", "", q.get("week", ""))
     position = re.sub(r"\D", "", q.get("position", ""))
     weeks = db.get_season_weeks(season["id"], season["division_id"]) if season else []
+    min_games = re.sub(r"\D", "", q.get("min_games", ""))
     table = store.fantasy_table(season, stat=stat,
                                 week=int(week) if week and season else None,
                                 position=int(position) if position else None,
-                                everyone=q.get("everyone") is not None)
+                                min_games=int(min_games) if min_games else None)
+    # Naming a player is a way of getting to their page, not a filter on this
+    # one — the working is its own page.
     selected = None
     if q.get("player"):
         account_id = account_id_from(q["player"])
         selected = next((r for r in table["everyone"]
                          if r["account_id"] == account_id
                          or q["player"].lower() in (r["name"] or "").lower()), None)
+        if selected:
+            keep = {k: v for k, v in q.items() if k in ("season", "week", "position", "stat")}
+            raise web.HTTPFound(f"/fantasy/{selected['account_id']}"
+                                + ("?" + urlencode(keep) if keep else ""))
     # The bot's labels carry an emoji each, which belongs in a Discord embed
     # rather than in a dropdown.
     stats = sorted(((key, re.sub(r"^[^\w(]+", "", label).strip())
                     for key, label in STAT_LABELS.items()), key=lambda kv: kv[1].lower())
     return render(request, "fantasy.html", title="Fantasy", table=table, seasons=seasons,
-                  season=season, selected=selected, q=q, stats=stats, stat=stat,
+                  season=season, q=q, stats=stats, stat=stat,
                   stat_label=dict(stats).get(stat, stat), weeks=weeks,
-                  not_found=bool(q.get("player")) and selected is None,
+                  not_found=bool(q.get("player")),
                   labels=fantasy.LABELS, duration_mean=fantasy.DURATION_MEAN_MIN)
+
+
+@routes.get("/fantasy/{account_id}")
+async def fantasy_player_page(request: web.Request):
+    """One player's fantasy score, taken apart. Its own page: the filters and
+    the league-wide tables are for choosing someone, and once you have, they
+    are in the way."""
+    import fantasy
+
+    try:
+        account_id = int(request.match_info["account_id"])
+    except ValueError:
+        return not_found(request, "Player")
+    q = request.query
+    seasons = store.all_seasons()
+    season = next((s for s in seasons if str(s["id"]) == q.get("season", "")), None)
+    week = re.sub(r"\D", "", q.get("week", ""))
+    position = re.sub(r"\D", "", q.get("position", ""))
+    table = store.fantasy_table(season, week=int(week) if week and season else None,
+                                position=int(position) if position else None, min_games=0)
+    player = next((r for r in table["everyone"] if r["account_id"] == account_id), None)
+    if not player:
+        return not_found(request, "Player")
+    back = "/fantasy" + ("?" + urlencode({k: v for k, v in q.items()
+                                          if k in ("season", "week", "position", "stat")}) if q else "")
+    return render(request, "fantasy_player.html", title=player["name"], player=player,
+                  season=season, back=back, field=table["field"],
+                  rating=store.player_ratings().get(account_id),
+                  duration_mean=fantasy.DURATION_MEAN_MIN)
 
 
 @routes.get("/matches")

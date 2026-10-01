@@ -518,16 +518,16 @@ DRAFT_RELATIVE = {"value", "attendance"}
 
 
 def fantasy_table(season: dict | None, stat: str = "fantasy_points", week: int | None = None,
-                  position: int | None = None, everyone: bool = False) -> dict:
+                  position: int | None = None, min_games: int | None = None) -> dict:
     """The leaderboard the bot's /leaderboard shows, with every player's
     fantasy score broken into the components that made it and each component
     set against the field's average — the part that answers "why is she top?".
 
     season=None pools every season; week picks one of that season's weeks.
-    Players are qualified the way /leaderboard qualifies — at least half as
-    many games as the most active player, so a stand-in's one good night
-    doesn't lead the table — unless `everyone`, or the stat is draft-relative,
-    where the draft itself is the qualification.
+    min_games defaults the way /leaderboard qualifies — at least half as many
+    games as the most active player, so a stand-in's one good night doesn't
+    lead the table — and 0 shows everyone. A draft-relative stat ignores it:
+    being drafted is the qualification there.
     """
     import fantasy
 
@@ -546,7 +546,10 @@ def fantasy_table(season: dict | None, stat: str = "fantasy_points", week: int |
         rows = [r for r in rows if r.get("cost") is not None]
 
     max_games = max((r.get("games_played") or 0 for r in rows), default=0)
-    threshold = 0 if (everyone or stat in DRAFT_RELATIVE) else max_games // 2
+    if stat in DRAFT_RELATIVE:
+        threshold = 0
+    else:
+        threshold = max_games // 2 if min_games is None else min_games
     qualified = [r for r in rows if (r.get("games_played") or 0) >= threshold]
 
     for r in rows:

@@ -41,47 +41,14 @@
     </select>
   </label>
   <label>Player <input type="search" name="player" value="{{ q.get('player', '') }}" autocomplete="off"></label>
-  <label class="check"><input type="checkbox" name="everyone" value="1"{% if q.get('everyone') is not none %} checked{% endif %}>
-    Everyone, not just those with enough games</label>
+  <label>Minimum games <input type="number" name="min_games" min="0" max="200" value="{{ q.get('min_games', '') }}"></label>
   <div class="actions"><button class="primary">Show</button>
     {% if q %}<a class="button" href="/fantasy">Clear</a>{% endif %}</div>
 </form>
 
 {% if not_found %}
-<div class="errors"><p>No games recorded for “{{ q.get('player') }}” in this season, so there's
-  nothing to break down. Try another season, or a Dota account id.</p></div>
-{% endif %}
-{% if selected %}
-<section class="panel">
-  <h2>{{ selected.name }} · {{ "%.1f"|format(selected.fantasy_points) }} points a game</h2>
-  {% if not selected.qualifies %}
-  <p class="muted small">⚠️ {{ selected.games_played }} game{{ "" if selected.games_played == 1 else "s" }} —
-    below the {{ table.threshold }} needed to rank, so they're not on the leaderboard below. The
-    working is the same either way.</p>
-  {% endif %}
-  <p class="muted small">Each component is what they average, what it's worth, and how that
-    compares with everyone else qualifying here. Green is where they earn more than the field.</p>
-  <div class="scroll">
-  <table>
-    <thead><tr><th></th><th class="num">Their average</th><th class="num">Worth</th>
-      <th class="num">Points</th><th class="num">vs the field</th></tr></thead>
-    <tbody>
-    {% for c in selected.breakdown|sort(attribute="vs_field", reverse=true) %}
-      <tr>
-        <td>{{ c.label }}{% if c.unit %} <span class="muted small">{{ c.unit }}</span>{% endif %}</td>
-        <td class="num">{{ "%.2f"|format(c.value) }}</td>
-        <td class="num muted">{{ "%+.3f"|format(c.weight) }}</td>
-        <td class="num">{{ "%+.2f"|format(c.points) }}</td>
-        <td class="num {{ 'win' if c.vs_field > 0.05 else ('loss' if c.vs_field < -0.05 else '') }}">
-          {{ "%+.2f"|format(c.vs_field) }}</td>
-      </tr>
-    {% endfor %}
-    </tbody>
-    <tfoot><tr><th>Total</th><td></td><td></td>
-      <td class="num"><strong>{{ "%.1f"|format(selected.fantasy_points) }}</strong></td><td></td></tr></tfoot>
-  </table>
-  </div>
-</section>
+<div class="errors"><p>No games recorded for “{{ q.get('player') }}”, so there's nothing to break
+  down. Try another season, or a Dota account id.</p></div>
 {% endif %}
 
 <h2>{{ stat_label }}</h2>
@@ -105,7 +72,7 @@
       <td class="muted">{{ loop.index }}</td>
       <td class="with-avatar" data-sort="{{ r.name|lower }}">
         {% if r.avatar_url %}<img class="avatar" src="{{ r.avatar_url }}" alt="">{% endif %}
-        <a href="/fantasy?{% for k, v in q.items() if k != 'player' %}{{ k }}={{ v }}&{% endfor %}player={{ r.account_id }}">{{ r.name }}</a>
+        <a href="/fantasy/{{ r.account_id }}{% if q.get('season') %}?season={{ q.get('season') }}{% endif %}">{{ r.name }}</a>
       </td>
       <td class="num" data-sort="{{ r.get(stat) or 0 }}"><strong>{{ r.stat_text }}</strong></td>
       <td class="num" data-sort="{{ r.games_played }}">{{ r.games_played }}</td>
@@ -122,30 +89,4 @@
 </table>
 </div>
 
-<h2>How a score is built</h2>
-<p class="muted small">Every component, what it's worth, and what the qualifying players average.
-  A game is worth <strong>+3 to start</strong> and each death eats 0.2 of it, so fifteen deaths
-  cancels it out. Longer games earn more of everything, so a score is corrected for the length of
-  the games it came from — the average is {{ duration_mean }} minutes, and a player whose games ran
-  longer gives some back.</p>
-<div class="scroll">
-<table class="sortable">
-  <thead><tr>
-    <th data-sort-type="text">Component</th>
-    <th class="num" data-sort-type="num">Worth</th>
-    <th class="num" data-sort-type="num" data-sort-first="desc">Field average</th>
-    <th class="num" data-sort-type="num" data-sort-first="desc">Points from it</th>
-  </tr></thead>
-  <tbody>
-  {% for key, f in table.field.items() %}
-    <tr>
-      <td>{{ f.label }}{% if f.unit %} <span class="muted small">{{ f.unit }}</span>{% endif %}</td>
-      <td class="num muted">{{ "%+.3f"|format(f.weight) }}</td>
-      <td class="num">{{ "%.2f"|format(f.value) }}</td>
-      <td class="num">{{ "%+.2f"|format(f.points) }}</td>
-    </tr>
-  {% endfor %}
-  </tbody>
-</table>
-</div>
 {% endblock %}
