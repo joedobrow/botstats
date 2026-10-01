@@ -14,11 +14,12 @@ from urllib.parse import quote, urlencode
 
 import jinja2
 from aiohttp import web
+from markupsafe import Markup
 
 import db
 from config import GAME_MODE_FILTERS, LEAGUE_TZ, REGION_CLUSTERS, STEAM_API_KEY
 from player_api import account_id_from
-from web import steam, store, uploads
+from web import markup, steam, store, uploads
 
 TEMPLATE_DIR = Path(__file__).parent / "templates"
 STATIC_DIR = Path(__file__).parent / "static"
@@ -54,10 +55,6 @@ def _fmt_duration(seconds: int | float | None) -> str:
     return f"{s // 60}:{s % 60:02d}"
 
 
-def _paragraphs(text: str) -> list[str]:
-    return [p.strip() for p in (text or "").split("\n\n") if p.strip()]
-
-
 def season_url(season: dict) -> str:
     """A season's page in one division: /season/<league id>/<division slug>."""
     return f"/season/{season['id']}/{season['division_slug']}"
@@ -73,7 +70,8 @@ env = jinja2.Environment(
     trim_blocks=True,
     lstrip_blocks=True,
 )
-env.filters.update(date=_fmt_date, duration=_fmt_duration, paragraphs=_paragraphs)
+env.filters.update(date=_fmt_date, duration=_fmt_duration,
+                   markdown=lambda text: Markup(markup.render(text)))
 env.globals.update(season_url=season_url, team_url=team_url, hero=store.hero,
                    POSITION_NAMES=POSITION_NAMES, SEASON_STATUSES=store.SEASON_STATUSES)
 
