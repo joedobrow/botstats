@@ -3,7 +3,7 @@
 {% block content %}
 <h1>Fantasy</h1>
 <form method="get" class="form grid filters">
-  <label>Season{% if draft_relative %} <span class="muted small">(measured against one draft)</span>{% endif %}
+  <label>Season
     <select name="season">
       {% if not draft_relative %}<option value=""{% if not season %} selected{% endif %}>Every season</option>{% endif %}
       {% for s in seasons %}
