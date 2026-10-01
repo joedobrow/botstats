@@ -558,6 +558,13 @@ def fantasy_table(season: dict | None, stat: str = "fantasy_points", week: int |
     else:
         threshold = DEFAULT_MIN_GAMES if min_games is None else min_games
     qualified = [r for r in rows if (r.get("games_played") or 0) >= threshold]
+    # Early in a season nobody has ten games yet, and a leaderboard that shows
+    # nothing is worse than one that shows everyone. Only the default gives
+    # way — a number somebody typed is a number they meant.
+    relaxed = bool(rows) and not qualified and min_games is None
+    if relaxed:
+        threshold = 0
+        qualified = list(rows)
 
     for r in rows:
         r["breakdown"] = fantasy.breakdown(r)
@@ -591,7 +598,8 @@ def fantasy_table(season: dict | None, stat: str = "fantasy_points", week: int |
         r["stat_text"] = format_stat_value(r, stat)
     qualified = [r for r in qualified if r["stat_text"] is not None]
     return {"rows": qualified, "everyone": rows, "field": field, "threshold": threshold,
-            "max_games": max_games, "weights": fantasy.WEIGHTS, "stat": stat}
+            "max_games": max_games, "weights": fantasy.WEIGHTS, "stat": stat,
+            "relaxed": relaxed, "default_min_games": DEFAULT_MIN_GAMES}
 
 
 def player_ratings() -> dict[int, int]:
