@@ -81,6 +81,9 @@
   {% endif %}
 
 {% elif tab == "matches" %}
+  {% if more_matches %}
+  <p><a class="button" href="/matches?season={{ season.id }}&division={{ season.division_id }}">Every match, with filters →</a></p>
+  {% endif %}
   {% macro match_table(rows, with_teams) %}
   <div class="scroll">
   <table>

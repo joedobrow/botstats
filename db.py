@@ -2680,6 +2680,20 @@ def get_match_team_overrides(match_ids: list[int]) -> dict[int, dict[str, str | 
     return out
 
 
+def get_match_team_captains_for_matches(matches: list[dict]) -> dict[int, dict[str, str | None]]:
+    """Attribute both sides of each match, where the matches may come from
+    different seasons and divisions — get_match_team_captains works a season
+    at a time, because a roster only means anything within one."""
+    out: dict[int, dict[str, str | None]] = {}
+    by_season: dict[tuple[int, int], list[int]] = {}
+    for m in matches:
+        if m.get("league_id") and m.get("division_id"):
+            by_season.setdefault((m["league_id"], m["division_id"]), []).append(m["match_id"])
+    for (season_id, division_id), ids in by_season.items():
+        out.update(get_match_team_captains(season_id, division_id, ids))
+    return out
+
+
 def get_match_team_captains(
     season_id: int, division_id: int, match_ids: list[int],
 ) -> dict[int, dict[str, str | None]]:

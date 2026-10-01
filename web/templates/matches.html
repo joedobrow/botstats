@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% from "macros.html" import hero_icon %}
+{% block content %}
+<h1>Matches</h1>
+
+<form method="get" class="form grid filters">
+  <label>Player <span class="muted small">(name or account id)</span>
+    <input type="search" name="player" value="{{ q.get('player', '') }}" autocomplete="off"></label>
+  <label>Season
+    <select name="season">
+      <option value="">Any</option>
+      {% for s in seasons %}
+      <option value="{{ s.id }}"{% if q.get('season') == s.id|string %} selected{% endif %}>{{ s.label }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Division
+    <select name="division">
+      <option value="">Any</option>
+      {% for d in divisions %}
+      <option value="{{ d.id }}"{% if q.get('division') == d.id|string %} selected{% endif %}>{{ d.name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Kind
+    <select name="kind">
+      {% for key, label in [("", "Any"), ("league", "League games"), ("other", "Outside a season"), ("manual", "Entered by hand")] %}
+      <option value="{{ key }}"{% if q.get('kind', '') == key %} selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Played from <input type="date" name="from" value="{{ q.get('from', '') }}"></label>
+  <label>to <input type="date" name="to" value="{{ q.get('to', '') }}"></label>
+  <label>Shortest <span class="muted small">(minutes)</span>
+    <input type="number" name="min_minutes" min="0" max="200" value="{{ q.get('min_minutes', '') }}"></label>
+  <label>Longest <span class="muted small">(minutes)</span>
+    <input type="number" name="max_minutes" min="0" max="200" value="{{ q.get('max_minutes', '') }}"></label>
+  <div class="actions">
+    <button class="primary">Filter</button>
+    {% if filters %}<a class="button" href="/matches">Clear</a>{% endif %}
+  </div>
+</form>
+
+{% if result.unknown_player %}
+<p class="muted">Nobody here matches “{{ result.unknown_player }}”. A Dota account id works too.</p>
+{% else %}
+<p class="muted small">{{ result.total }} match{{ "" if result.total == 1 else "es" }}{% if result.pages > 1 %} · page {{ result.page }} of {{ result.pages }}{% endif %}</p>
+
+<div class="scroll">
+<table>
+  <thead><tr>
+    <th>Date</th><th>Season</th><th>Teams</th>
+    {% if result.account_id %}<th>Hero</th><th>Result</th><th class="num">K/D/A</th>{% else %}<th>Winner</th>{% endif %}
+    <th class="num">Length</th><th></th>
+  </tr></thead>
+  <tbody>
+  {% for m in result.rows %}
+    <tr>
+      <td>{{ m.start_time|date("%b %-d, %Y") }}</td>
+      <td class="small">{% if m.season %}<a href="{{ season_url(m.season) }}">{{ m.season.label }}</a>
+        {% elif m.by_hand %}<span class="tag">By hand</span>
+        {% else %}<span class="muted">—</span>{% endif %}
+        {% if m.division_name %}<div class="muted small">{{ m.division_name }}</div>{% endif %}</td>
+      <td class="small">
+        {% if m.radiant_team or m.dire_team %}
+          {% if m.season %}<a href="{{ team_url(m.season, m.radiant_team) }}">{{ m.radiant_team or "Stand-ins" }}</a>
+          v <a href="{{ team_url(m.season, m.dire_team) }}">{{ m.dire_team or "Stand-ins" }}</a>
+          {% else %}{{ m.radiant_team or "Stand-ins" }} v {{ m.dire_team or "Stand-ins" }}{% endif %}
+        {% else %}<span class="muted">—</span>{% endif %}
+      </td>
+      {% if result.account_id %}
+        <td class="with-avatar">{% if m.me and m.me.hero %}{{ hero_icon(m.me.hero) }}{{ m.me.hero.name }}{% endif %}</td>
+        <td class="{{ 'win' if m.me and m.me.won else 'loss' }}">{% if m.me %}{{ "Win" if m.me.won else "Loss" }}{% endif %}</td>
+        <td class="num">{% if m.me %}{{ m.me.kills }}/{{ m.me.deaths }}/{{ m.me.assists }}{% endif %}</td>
+      {% else %}
+        <td class="small">{{ "Radiant" if m.radiant_win else "Dire" }}</td>
+      {% endif %}
+      <td class="num">{% if m.duration %}{{ m.duration|duration }}{% else %}<span class="muted">—</span>{% endif %}</td>
+      <td>{% if not m.by_hand %}<a href="/match/{{ m.match_id }}">Details</a>{% endif %}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="8" class="muted">No matches with those filters.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+
+{% if result.pages > 1 %}
+<nav class="pager">
+  {% if result.page > 1 %}
+  <a class="button" href="/matches?{{ query }}{% if query %}&{% endif %}page={{ result.page - 1 }}">← Newer</a>
+  {% endif %}
+  <span class="muted small">Page {{ result.page }} of {{ result.pages }}</span>
+  {% if result.page < result.pages %}
+  <a class="button" href="/matches?{{ query }}{% if query %}&{% endif %}page={{ result.page + 1 }}">Older →</a>
+  {% endif %}
+</nav>
+{% endif %}
+{% endif %}
+{% endblock %}

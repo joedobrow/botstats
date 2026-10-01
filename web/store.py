@@ -18,6 +18,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import db
+from config import LEAGUE_TZ
 from db import _conn
 
 SESSION_DAYS = 30
@@ -574,6 +575,97 @@ def season_teams(season: dict, matches: list[dict] | None = None) -> list[dict]:
         if loser in teams:
             teams[loser]["losses"] += 1
     return sorted(teams.values(), key=lambda t: (-t["wins"], t["losses"], t["name"].lower()))
+
+
+MATCHES_PER_PAGE = 50
+
+
+def search_matches(*, player: str = "", season: int | None = None, division: int | None = None,
+                   kind: str = "", date_from: str = "", date_to: str = "",
+                   min_minutes: int | None = None, max_minutes: int | None = None,
+                   page: int = 1, per_page: int = MATCHES_PER_PAGE) -> dict:
+    """Matches matching the filters, newest first, one page at a time.
+
+    `player` is a name or an account id and narrows to matches that player
+    was in, which also means each row can carry what they did in it. `kind`
+    is one of "league" (part of a season), "other" (played outside one) or
+    "manual" (entered by hand, which is what a negative match id means).
+
+    Returns {rows, total, page, pages, per_page}.
+    """
+    where, params = ["1=1"], []
+    account_id = None
+    if player.strip():
+        from player_api import account_id_from
+        account_id = account_id_from(player)
+        if account_id is None:
+            names = [p["account_id"] for p in search_players(player)]
+            if not names:
+                return {"rows": [], "total": 0, "page": 1, "pages": 1, "per_page": per_page,
+                        "unknown_player": player}
+            account_id = names[0] if len(names) == 1 else None
+            if account_id is None:
+                where.append(f"m.match_id IN (SELECT match_id FROM players WHERE account_id IN "
+                             f"({','.join('?' * len(names))}))")
+                params += names
+        if account_id is not None:
+            where.append("m.match_id IN (SELECT match_id FROM players WHERE account_id = ?)")
+            params.append(account_id)
+    if season:
+        where.append("m.league_id = ?"); params.append(season)
+    if division:
+        where.append("m.division_id = ?"); params.append(division)
+    if kind == "league":
+        where.append("m.league_id > 0 AND m.match_id > 0")
+    elif kind == "other":
+        where.append("m.league_id = 0 AND m.match_id > 0")
+    elif kind == "manual":
+        where.append("m.match_id < 0")
+    for value, op in ((date_from, ">="), (date_to, "<=")):
+        if value:
+            try:
+                when = datetime.strptime(value, "%Y-%m-%d").replace(tzinfo=LEAGUE_TZ)
+            except ValueError:
+                continue
+            if op == "<=":
+                when = when.replace(hour=23, minute=59, second=59)
+            where.append(f"m.start_time {op} ?"); params.append(int(when.timestamp()))
+    if min_minutes:
+        where.append("m.duration >= ?"); params.append(min_minutes * 60)
+    if max_minutes:
+        where.append("m.duration <= ?"); params.append(max_minutes * 60)
+
+    clause = " AND ".join(where)
+    page = max(1, page)
+    with _conn() as conn:
+        total = conn.execute(f"SELECT COUNT(*) FROM matches m WHERE {clause}", params).fetchone()[0]
+        rows = [dict(r) for r in conn.execute(
+            f"SELECT m.* FROM matches m WHERE {clause} ORDER BY m.start_time DESC, m.match_id DESC "
+            f"LIMIT ? OFFSET ?", params + [per_page, (page - 1) * per_page])]
+        if account_id is not None and rows:
+            marks = ",".join("?" * len(rows))
+            mine = {r["match_id"]: dict(r) for r in conn.execute(
+                f"SELECT match_id, hero_id, team_side, kills, deaths, assists, gpm, won "
+                f"FROM players WHERE account_id = ? AND match_id IN ({marks})",
+                [account_id] + [r["match_id"] for r in rows])}
+            for r in rows:
+                r["me"] = mine.get(r["match_id"])
+
+    # Teams, season and division labels, so a row reads without a lookup.
+    seasons = all_seasons()
+    div_names = {d["id"]: d["name"] for d in divisions()}
+    caps = db.get_match_team_captains_for_matches(rows) if rows else {}
+    for r in rows:
+        r["season"] = season_of_match(seasons, r)
+        r["division_name"] = div_names.get(r["division_id"])
+        sides = caps.get(r["match_id"], {})
+        r["radiant_team"], r["dire_team"] = sides.get("radiant"), sides.get("dire")
+        r["by_hand"] = r["match_id"] < 0
+        if r.get("me"):
+            r["me"]["hero"] = hero(r["me"]["hero_id"])
+    pages = max(1, -(-total // per_page))
+    return {"rows": rows, "total": total, "page": min(page, pages), "pages": pages,
+            "per_page": per_page, "account_id": account_id}
 
 
 def rating_breakdown(account_id: int) -> dict | None:

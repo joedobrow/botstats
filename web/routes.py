@@ -290,8 +290,12 @@ async def season_page(request: web.Request):
         ctx["leaders"], ctx["min_games"], ctx["max_games"] = store.season_leaders(season)
     elif tab == "matches":
         matches = store.season_matches(season)
-        ctx["matches"] = [m for m in matches if m["radiant_team"] or m["dire_team"]]
-        ctx["other_matches"] = [m for m in matches if not (m["radiant_team"] or m["dire_team"])]
+        attributed = [m for m in matches if m["radiant_team"] or m["dire_team"]]
+        unattributed = [m for m in matches if not (m["radiant_team"] or m["dire_team"])]
+        # The first twenty of each; the rest are a filtered Matches page away.
+        ctx["matches"], ctx["other_matches"] = attributed[:20], unattributed[:20]
+        ctx["match_total"] = len(matches)
+        ctx["more_matches"] = len(attributed) > 20 or len(unattributed) > 20
         ctx["team_names"] = {t["captain"]: t["name"] for t in store.season_teams(season, matches)}
     elif tab == "teams":
         teams = store.season_teams(season)
@@ -529,6 +533,30 @@ async def players_page(request: web.Request):
     return render(request, "players.html", title="Players", q=q, players=players, notice=None)
 
 
+@routes.get("/matches")
+async def matches_page(request: web.Request):
+    """Every match, filtered. The filters live in the query string so a view
+    is a link — which is what the More buttons on a player and a season page
+    hand you."""
+    q = request.query
+
+    def number(name: str) -> int | None:
+        raw = re.sub(r"\D", "", q.get(name, ""))
+        return int(raw) if raw else None
+
+    result = store.search_matches(
+        player=q.get("player", ""), season=number("season"), division=number("division"),
+        kind=q.get("kind", ""), date_from=q.get("from", ""), date_to=q.get("to", ""),
+        min_minutes=number("min_minutes"), max_minutes=number("max_minutes"),
+        page=number("page") or 1,
+    )
+    # Keep every filter but the page, so the pager can rebuild the URL.
+    filters = {k: v for k, v in q.items() if k != "page" and v}
+    return render(request, "matches.html", title="Matches", result=result, filters=filters,
+                  query=urlencode(filters), seasons=store.all_seasons(),
+                  divisions=store.divisions(), q=q)
+
+
 @routes.get("/player/{account_id}")
 async def player_page(request: web.Request):
     try:
@@ -579,7 +607,7 @@ async def player_page(request: web.Request):
         breakdown = store.rating_breakdown(account_id)
     return render(request, "player.html", title=ident["name"] or str(account_id),
                   account_id=account_id, ident=ident, overall=store.aggregate(matches),
-                  season_rows=season_rows, matches=matches[:50],
+                  season_rows=season_rows, matches=matches[:10], match_total=len(matches),
                   rating=store.player_ratings().get(account_id),
                   breakdown=breakdown, unavailable=unavailable,
                   notice=request.query.get("notice"))
