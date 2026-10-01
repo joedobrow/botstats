@@ -7,7 +7,15 @@
     <select name="season">
       {% if not draft_relative %}<option value=""{% if not season %} selected{% endif %}>Every season</option>{% endif %}
       {% for s in seasons %}
-      <option value="{{ s.id }}"{% if season and season.id == s.id %} selected{% endif %}>{{ s.label }} · {{ s.division }}</option>
+      <option value="{{ s.id }}"{% if season and season.id == s.id %} selected{% endif %}>{{ s.label }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Division
+    <select name="division">
+      <option value="">Any</option>
+      {% for d in divisions %}
+      <option value="{{ d.id }}"{% if division_id == d.id %} selected{% endif %}>{{ d.name }}</option>
       {% endfor %}
     </select>
   </label>
