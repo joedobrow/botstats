@@ -669,7 +669,7 @@ async def matches_page(request: web.Request):
     filters = {k: v for k, v in q.items() if k != "page" and v}
     return render(request, "matches.html", title="Matches", result=result, filters=filters,
                   query=urlencode(filters), seasons=store.all_seasons(),
-                  divisions=store.divisions(), q=q)
+                  divisions=store.divisions(), q=q, kind=kind)
 
 
 @routes.get("/player/{account_id}")
