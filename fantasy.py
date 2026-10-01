@@ -77,6 +77,83 @@ WEIGHTS = {
 }
 
 
+# What each component is called, and how to read the number behind it, for
+# anywhere the score is explained rather than just totalled.
+LABELS = {
+    "death_base":                   ("Staying alive", "base, per game"),
+    "kills_per_game":               ("Kills", "per game"),
+    "deaths_per_game":              ("Deaths", "per game"),
+    "assists_per_game":             ("Assists", "per game"),
+    "last_hits_per_game":           ("Last hits", "per game"),
+    "denies_per_game":              ("Denies", "per game"),
+    "gpm":                          ("Gold per minute", ""),
+    "xpm":                          ("Experience per minute", ""),
+    "teamfight_participation":      ("Teamfight participation", "share of fights"),
+    "stuns_per_game":               ("Stun duration", "seconds per game"),
+    "obs_placed_per_game":          ("Observer wards placed", "per game"),
+    "sen_placed_per_game":          ("Sentry wards placed", "per game"),
+    "obs_kills_per_game":           ("Observer wards killed", "per game"),
+    "sen_kills_per_game":           ("Sentry wards killed", "per game"),
+    "camps_stacked_per_game":       ("Camps stacked", "per game"),
+    "rune_pickups_per_game":        ("Runes taken", "per game"),
+    "damage_per_100":               ("Hero damage", "per game"),
+    "healing_per_100":              ("Hero healing", "per game"),
+    "building_damage_per_100":      ("Building damage", "per game"),
+    "defensive_item_uses_per_game": ("Defensive items used", "per game"),
+    "duration":                     ("Game length adjustment", "average minutes"),
+}
+
+
+def breakdown(player: dict) -> list[dict]:
+    """Every component of a player's fantasy score, as
+    [{key, label, unit, value, weight, points}] summing to the total.
+
+    The score is one number made of twenty-one, and which of them a player
+    earns is the interesting part — so this is what explains it, and
+    calculate_fantasy_points totals it rather than repeating the arithmetic.
+    """
+    games = max(player.get("games_played", 1), 1)
+    per_game = lambda key: (player.get(key, 0) or 0) / games
+    avg = lambda key: player.get(key, 0) or 0          # already per-game from SQL AVG()
+
+    values = {
+        "death_base":                   1.0,
+        "kills_per_game":               per_game("total_kills"),
+        "deaths_per_game":              per_game("total_deaths"),
+        "assists_per_game":             per_game("total_assists"),
+        "last_hits_per_game":           avg("last_hits"),
+        "denies_per_game":              avg("denies"),
+        "gpm":                          avg("gpm"),
+        "xpm":                          avg("xpm"),
+        "teamfight_participation":      avg("teamfight_participation"),
+        "stuns_per_game":               avg("stuns"),
+        "obs_placed_per_game":          avg("obs_placed"),
+        "sen_placed_per_game":          avg("sen_placed"),
+        "obs_kills_per_game":           avg("observer_kills"),
+        "sen_kills_per_game":           avg("sentry_kills"),
+        "camps_stacked_per_game":       avg("camps_stacked"),
+        "rune_pickups_per_game":        avg("rune_pickups"),
+        "damage_per_100":               avg("hero_damage") / 100,
+        "healing_per_100":              avg("hero_healing") / 100,
+        "building_damage_per_100":      avg("building_damage") / 100,
+        "defensive_item_uses_per_game": avg("defensive_item_uses"),
+    }
+    rows = []
+    for key, value in values.items():
+        label, unit = LABELS[key]
+        # Hero damage and healing are scored per 100 but read per game.
+        shown = value * 100 if key.endswith("_per_100") else value
+        rows.append({"key": key, "label": label, "unit": unit, "value": shown,
+                     "weight": WEIGHTS[key], "points": value * WEIGHTS[key]})
+
+    avg_duration_min = (player.get("avg_duration") or (DURATION_MEAN_MIN * 60)) / 60.0
+    label, unit = LABELS["duration"]
+    rows.append({"key": "duration", "label": label, "unit": unit,
+                 "value": avg_duration_min, "weight": -DURATION_SLOPE,
+                 "points": -DURATION_SLOPE * (avg_duration_min - DURATION_MEAN_MIN)})
+    return rows
+
+
 def calculate_fantasy_points(player: dict) -> float:
     """
     Given an aggregated player dict (as returned by db stats functions),
@@ -84,55 +161,4 @@ def calculate_fantasy_points(player: dict) -> float:
 
     Players with more games are NOT rewarded — this is purely skill-based.
     """
-    games = max(player.get("games_played", 1), 1)  # avoid div-by-zero
-
-    # Convert totals to per-game averages
-    kills    = player.get("total_kills", 0) / games
-    deaths   = player.get("total_deaths", 0) / games
-    assists  = player.get("total_assists", 0) / games
-
-    # These are already per-game averages from SQL AVG()
-    lh                      = player.get("last_hits", 0) or 0
-    denies                  = player.get("denies", 0) or 0
-    gpm                     = player.get("gpm", 0) or 0
-    xpm                     = player.get("xpm", 0) or 0
-    damage                  = player.get("hero_damage", 0) or 0
-    healing                 = player.get("hero_healing", 0) or 0
-    building_damage         = player.get("building_damage", 0) or 0
-    obs_placed              = player.get("obs_placed", 0) or 0
-    sen_placed              = player.get("sen_placed", 0) or 0
-    obs_kills               = player.get("observer_kills", 0) or 0
-    sen_kills               = player.get("sentry_kills", 0) or 0
-    teamfight_participation = player.get("teamfight_participation", 0) or 0
-    stuns                   = player.get("stuns", 0) or 0
-    camps_stacked           = player.get("camps_stacked", 0) or 0
-    rune_pickups            = player.get("rune_pickups", 0) or 0
-    defensive_item_uses     = player.get("defensive_item_uses", 0) or 0
-
-    pts  = kills                   * WEIGHTS["kills_per_game"]
-    pts += WEIGHTS["death_base"]                               # +3 per game base
-    pts += deaths                  * WEIGHTS["deaths_per_game"]
-    pts += assists                 * WEIGHTS["assists_per_game"]
-    pts += lh                      * WEIGHTS["last_hits_per_game"]
-    pts += denies                  * WEIGHTS["denies_per_game"]
-    pts += gpm                     * WEIGHTS["gpm"]
-    pts += xpm                     * WEIGHTS["xpm"]
-    pts += teamfight_participation * WEIGHTS["teamfight_participation"]
-    pts += stuns                   * WEIGHTS["stuns_per_game"]
-    pts += obs_placed              * WEIGHTS["obs_placed_per_game"]
-    pts += sen_placed              * WEIGHTS["sen_placed_per_game"]
-    pts += obs_kills               * WEIGHTS["obs_kills_per_game"]
-    pts += sen_kills               * WEIGHTS["sen_kills_per_game"]
-    pts += camps_stacked           * WEIGHTS["camps_stacked_per_game"]
-    pts += rune_pickups            * WEIGHTS["rune_pickups_per_game"]
-    pts += damage          / 100   * WEIGHTS["damage_per_100"]
-    pts += healing         / 100   * WEIGHTS["healing_per_100"]
-    pts += building_damage / 100   * WEIGHTS["building_damage_per_100"]
-    pts += defensive_item_uses     * WEIGHTS["defensive_item_uses_per_game"]
-
-    # Duration normalisation: subtract the expected pts gained purely from game length.
-    # avg_duration is in seconds (from SQL AVG(p.duration)); fall back to mean if missing.
-    avg_duration_min = (player.get("avg_duration") or (DURATION_MEAN_MIN * 60)) / 60.0
-    pts -= DURATION_SLOPE * (avg_duration_min - DURATION_MEAN_MIN)
-
-    return round(pts, 1)
+    return round(sum(c["points"] for c in breakdown(player)), 1)
