@@ -67,7 +67,7 @@
 
 <h2 class="with-action">Matches
   {% if is_admin %}<button type="button" class="add-button" data-open-dialog="add-match-dialog"
-    title="Add a game that was played but never ticketed">+</button>{% endif %}
+    title="Add a game that was played but isn't here">+</button>{% endif %}
 </h2>
 <table>
   <thead><tr><th>Date</th><th>Opponent</th><th>Result</th><th class="num">Length</th><th></th></tr></thead>
@@ -125,10 +125,10 @@
 </table>
 {% if is_admin %}
 <dialog id="add-match-dialog" class="dialog">
-  <h2 class="flush">Add a match</h2>
-  <p class="muted small">For a game that was played but isn't on the site. A game nobody ticketed
-    has no Dota match to fetch, so enter the result; if it <em>was</em> ticketed, the match id
-    brings the whole game in.</p>
+  <h2 class="flush">Add a game</h2>
+  <p class="muted small">One game that was played but isn't here — a night can be half ticketed,
+    and this is for the half that's missing. A game nobody ticketed has no Dota match to fetch, so
+    enter who won; if it <em>was</em> ticketed, the match id brings the whole game in.</p>
   <form method="post" action="{{ team_url(season, team.captain) }}/match/record" class="form">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <label>Against
@@ -139,13 +139,15 @@
         {% endfor %}
       </select>
     </label>
-    <div class="form grid">
-      <label>Games {{ team.name }} won <input type="number" name="won" value="1" min="0" max="7" required></label>
-      <label>Games they lost <input type="number" name="lost" value="1" min="0" max="7" required></label>
-    </div>
+    <label>Result
+      <select name="result" required>
+        <option value="won">{{ team.name }} won</option>
+        <option value="lost">{{ team.name }} lost</option>
+      </select>
+    </label>
     <label>Played on <input type="date" name="played" required></label>
     <div class="actions">
-      <button class="primary">Record the result</button>
+      <button class="primary">Add the game</button>
       <button type="button" data-close-dialog>Cancel</button>
     </div>
   </form>

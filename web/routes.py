@@ -408,9 +408,12 @@ async def match_opponent(request: web.Request):
 
 @routes.post("/season/{season_id}/{division}/team/{captain}/match/record")
 async def match_record(request: web.Request):
-    """Enter a result for a game that has no Dota match to fetch. Most games
-    that go missing were never ticketed, so there is nothing to look up —
-    only the teams and who won."""
+    """Enter one game that has no Dota match to fetch. Most games that go
+    missing were never ticketed, so there is nothing to look up — only who
+    played and who won.
+
+    One game, not a night's score: a night can be half ticketed, and the
+    missing half is what needs entering."""
     season = _season_or_404(request)
     _require_admin(request)
     captain = request.match_info["captain"]
@@ -421,13 +424,9 @@ async def match_record(request: web.Request):
     opponent = (data.get("opponent") or "").strip()
     if opponent not in teams or opponent == captain:
         raise web.HTTPFound(back + "?" + urlencode({"notice": "Pick which team they played."}))
-    try:
-        won, lost = int(data.get("won") or 0), int(data.get("lost") or 0)
-    except ValueError:
-        raise web.HTTPFound(back + "?" + urlencode({"notice": "Games won and lost must be numbers."}))
-    if won < 0 or lost < 0 or not 1 <= won + lost <= 7:
-        raise web.HTTPFound(back + "?" + urlencode({
-            "notice": "Enter between 1 and 7 games in total."}))
+    result = data.get("result")
+    if result not in ("won", "lost"):
+        raise web.HTTPFound(back + "?" + urlencode({"notice": "Say who won the game."}))
     try:
         # Midday in the league's own timezone, so the result lands in the week
         # it was played whatever the UTC offset does to the boundaries.
@@ -436,16 +435,14 @@ async def match_record(request: web.Request):
     except ValueError:
         raise web.HTTPFound(back + "?" + urlencode({"notice": "Give the date it was played."}))
 
-    for _ in range(won):
-        db.add_manual_match(division_id=season["division_id"], league_id=season["id"],
-                            start_time=played_at, winner=captain, loser=opponent,
-                            set_by=request["user"]["account_id"])
-    for _ in range(lost):
-        db.add_manual_match(division_id=season["division_id"], league_id=season["id"],
-                            start_time=played_at, winner=opponent, loser=captain,
-                            set_by=request["user"]["account_id"])
+    winner, loser = (captain, opponent) if result == "won" else (opponent, captain)
+    db.add_manual_match(division_id=season["division_id"], league_id=season["id"],
+                        start_time=played_at, winner=winner, loser=loser,
+                        set_by=request["user"]["account_id"])
+    verb = "Win" if result == "won" else "Loss"
     raise web.HTTPFound(back + "?" + urlencode({
-        "notice": f"Recorded {won}–{lost} against {teams[opponent]['name']}."}))
+        "notice": f"{verb} against {teams[opponent]['name']} recorded. "
+                  f"Add another if more than one game is missing."}))
 
 
 @routes.post("/season/{season_id}/{division}/team/{captain}/match/{match_id}/delete")
