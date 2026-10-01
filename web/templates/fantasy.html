@@ -46,8 +46,8 @@
   </label>
   <label>Player <input type="search" name="player" value="{{ q.get('player', '') }}" autocomplete="off"></label>
   <label>Minimum games
-    <input type="number" name="min_games" min="0" max="200" value="{{ q.get('min_games', '') }}"
-           placeholder="{{ table.threshold }}"
+    <input type="number" name="min_games" min="0" max="200"
+           value="{{ q.get('min_games') if q.get('min_games') else table.default_min_games }}"
            title="How many games it takes to appear here. 0 shows everyone.">
   </label>
   <div class="actions"><button class="primary">Show</button>
@@ -61,8 +61,8 @@
 
 <h2>{{ stat_label }}</h2>
 {% if table.relaxed %}
-<p class="muted small">Nobody has {{ table.default_min_games }} games yet — the most anyone has
-  played is {{ table.max_games }} — so everyone is shown.</p>
+<p class="muted small">Nobody has {{ table.asked_min_games }} game{{ "" if table.asked_min_games == 1 else "s" }} —
+  the most anyone here has played is {{ table.max_games }} — so everyone is shown.</p>
 {% endif %}
 <div class="scroll">
 <table class="sortable">
