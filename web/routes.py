@@ -546,11 +546,12 @@ async def fantasy_page(request: web.Request):
     selected = None
     if q.get("player"):
         account_id = account_id_from(q["player"])
-        selected = next((r for r in table["rows"]
+        selected = next((r for r in table["everyone"]
                          if r["account_id"] == account_id
                          or q["player"].lower() in (r["name"] or "").lower()), None)
     return render(request, "fantasy.html", title="Fantasy", table=table, seasons=seasons,
                   season=season, selected=selected, q=q,
+                  not_found=bool(q.get("player")) and selected is None,
                   labels=fantasy.LABELS, duration_mean=fantasy.DURATION_MEAN_MIN)
 
 

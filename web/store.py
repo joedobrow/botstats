@@ -532,8 +532,9 @@ def fantasy_table(season: dict | None, min_games: int | None = None) -> dict:
     threshold = max_games // 2 if min_games is None else min_games
     qualified = [r for r in rows if (r.get("games_played") or 0) >= threshold]
 
-    for r in qualified:
+    for r in rows:
         r["breakdown"] = fantasy.breakdown(r)
+        r["qualifies"] = (r.get("games_played") or 0) >= threshold
     # The field's average for each component, so a player's row can be read as
     # "ahead here, behind there" rather than as twenty-one bare numbers.
     field: dict[str, dict] = {}
@@ -546,14 +547,17 @@ def fantasy_table(season: dict | None, min_games: int | None = None) -> dict:
         f["value"] /= max(len(qualified), 1)
         f["points"] /= max(len(qualified), 1)
 
-    idents = player_identities([r["account_id"] for r in qualified])
-    for r in qualified:
+    # Everyone gets a name and a comparison, so that looking up a player who
+    # hasn't played enough to rank still answers the question — the ranking is
+    # what the games cut is for, not the explanation.
+    idents = player_identities([r["account_id"] for r in rows])
+    for r in rows:
         r["name"] = idents.get(r["account_id"], {}).get("name") or str(r["account_id"])
         r["avatar_url"] = idents.get(r["account_id"], {}).get("avatar_url")
         for c in r["breakdown"]:
-            c["vs_field"] = c["points"] - field[c["key"]]["points"]
+            c["vs_field"] = c["points"] - field.get(c["key"], {}).get("points", 0.0)
     qualified.sort(key=lambda r: -(r.get("fantasy_points") or 0))
-    return {"rows": qualified, "field": field, "threshold": threshold,
+    return {"rows": qualified, "everyone": rows, "field": field, "threshold": threshold,
             "max_games": max_games, "weights": fantasy.WEIGHTS}
 
 

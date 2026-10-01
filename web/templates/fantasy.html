@@ -23,9 +23,18 @@
     {% if q.get('season') or q.get('min_games') or q.get('player') %}<a class="button" href="/fantasy">Clear</a>{% endif %}</div>
 </form>
 
+{% if not_found %}
+<div class="errors"><p>No games recorded for “{{ q.get('player') }}” in this season, so there's
+  nothing to break down. Try another season, or a Dota account id.</p></div>
+{% endif %}
 {% if selected %}
 <section class="panel">
   <h2>{{ selected.name }} · {{ "%.1f"|format(selected.fantasy_points) }} points a game</h2>
+  {% if not selected.qualifies %}
+  <p class="muted small">⚠️ {{ selected.games_played }} game{{ "" if selected.games_played == 1 else "s" }} —
+    below the {{ table.threshold }} needed to rank, so they're not on the leaderboard below. The
+    working is the same either way.</p>
+  {% endif %}
   <p class="muted small">Each component is what they average, what it's worth, and how that
     compares with everyone else qualifying here. Green is where they earn more than the field.</p>
   <div class="scroll">
