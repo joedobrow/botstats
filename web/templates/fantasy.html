@@ -44,7 +44,7 @@
   <label>Minimum games
     <input type="number" name="min_games" min="0" max="200" value="{{ q.get('min_games', '') }}"
            placeholder="{{ table.threshold }}"
-           title="Left blank, it's half the games the most active player has — {{ table.threshold }} of {{ table.max_games }}. 0 shows everyone.">
+           title="How many games it takes to appear here. 0 shows everyone.">
   </label>
   <div class="actions"><button class="primary">Show</button>
     {% if q %}<a class="button" href="/fantasy">Clear</a>{% endif %}</div>
@@ -56,10 +56,6 @@
 {% endif %}
 
 <h2>{{ stat_label }}</h2>
-<p class="muted small">
-  {% if table.threshold %}Players with at least {{ table.threshold }} game{{ "" if table.threshold == 1 else "s" }}
-  ({{ table.max_games }} is the most anyone has played){% else %}Everyone with a game{% endif %}.
-  Click a name to see where their fantasy points come from.</p>
 <div class="scroll">
 <table class="sortable">
   <thead><tr>
