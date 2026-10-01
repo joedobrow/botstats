@@ -60,6 +60,10 @@
 {% endif %}
 
 <h2>{{ stat_label }}</h2>
+{% if table.relaxed %}
+<p class="muted small">Nobody has {{ table.default_min_games }} games yet — the most anyone has
+  played is {{ table.max_games }} — so everyone is shown.</p>
+{% endif %}
 <div class="scroll">
 <table class="sortable">
   <thead><tr>
