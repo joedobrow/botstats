@@ -45,8 +45,10 @@
     {% if bracket.champion %}
     <p class="champion">🏆 <strong>{{ bracket.champion_name }}</strong> win the season.</p>
     {% endif %}
+    {% if is_admin %}
     <form method="post" action="{{ season_url(season) }}/playoffs/seed" id="bracket-form">
       <input type="hidden" name="csrf" value="{{ csrf }}">
+    {% endif %}
       <div class="bracket">
         {% for round in bracket.rounds %}
         <div class="bracket-round">
@@ -54,8 +56,7 @@
           {% for m in round %}
           <div class="bracket-match{% if m.decided %} decided{% endif %}">
             {% for seat, team, name, wins in [(0, m.a, m.a_name, m.a_wins), (1, m.b, m.b_name, m.b_wins)] %}
-            <div class="bracket-seat{% if m.winner and m.winner == team %} won{% elif m.decided %} out{% endif %}"
-                 {% if loop.first %}data-slot="{{ m.idx * 2 }}"{% else %}data-slot="{{ m.idx * 2 + 1 }}"{% endif %}>
+            <div class="bracket-seat{% if m.winner and m.winner == team %} won{% elif m.decided %} out{% endif %}">
               {% if is_admin and m.round == 1 %}
                 <select name="seat{{ m.idx * 2 + loop.index0 }}" aria-label="Seat">
                   <option value=""></option>
@@ -80,8 +81,8 @@
         <button type="submit" formaction="{{ season_url(season) }}/playoffs/delete" class="danger"
                 onclick="return confirm('Remove the bracket? The games stay; only the bracket goes.')">Remove the bracket</button>
       </div>
-      {% endif %}
     </form>
+    {% endif %}
     {% if is_admin and bracket.unplaced %}
     <p class="muted small">Drag a team onto a seat, or pick it from the list.
       Still to place: {% for t in bracket.unplaced %}<span class="team-chip" draggable="true"
