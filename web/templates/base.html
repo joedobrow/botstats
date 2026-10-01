@@ -86,7 +86,14 @@ document.querySelectorAll("form[data-live-filter]").forEach(function (form) {
     var empty = table.querySelector("tr.no-results"); if (empty) empty.hidden = shown > 0;
   }
   input.addEventListener("input", filter);
-  form.addEventListener("submit", function (e) { e.preventDefault(); filter(); });
+  // Filtering as you type is a client-side convenience; a form that also has
+  // a lookup field means "and submitting asks the server something", so that
+  // submit has to be allowed through. Cancelling every submit is what made
+  // the Look up button dead.
+  form.addEventListener("submit", function (e) {
+    if (form.querySelector("[name=lookup]")) return;
+    e.preventDefault(); filter();
+  });
   filter();
 });
 

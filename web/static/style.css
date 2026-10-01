@@ -109,6 +109,9 @@ legend { font-weight: 500; padding: 0 4px; }
 .errors { background: var(--tag-bg); border-left: 4px solid var(--loss); padding: 6px 14px; border-radius: 4px; margin-bottom: 16px; }
 .errors p { margin: 4px 0; }
 .search { display: flex; gap: 8px; max-width: 480px; margin-bottom: 16px; }
+.search input[type=search] { flex: 1 1 auto; min-width: 0; }
+/* Don't let the flex row squeeze a button until its label wraps. */
+.search button { flex: 0 0 auto; white-space: nowrap; }
 
 /* Tables */
 .scroll { overflow-x: auto; }
