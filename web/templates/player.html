@@ -1,6 +1,11 @@
 {% extends "base.html" %}
 {% from "macros.html" import hero_icon, team_cell %}
 {% block content %}
+{% if notice %}<div class="errors"><p>{{ notice }}</p></div>{% endif %}
+{% if unavailable %}
+<div class="errors"><p>Couldn't reach {{ unavailable|join(", ") }} just now, so this player
+  couldn't be rated — a rating from a partial fetch would be a guess. Try again in a minute.</p></div>
+{% endif %}
 <div class="profile-head">
   {% if ident.avatar_url %}<img class="avatar big" src="{{ ident.avatar_url }}" alt="">{% endif %}
   <div>
@@ -64,6 +69,56 @@
 </table>
 </div>
 {% else %}
-<p class="muted">No league matches recorded for this player yet.</p>
+<p class="muted">No league matches recorded for this player yet.{% if rating is not none %}
+  Their rating above is worked out from their Ability Draft record on windrun and their ranked
+  badge, the same as for anyone else.{% endif %}</p>
+{% endif %}
+
+{% if breakdown %}
+<section class="panel" id="rating">
+  <h2 class="with-action">How the rating is worked out
+    <form method="post" action="/player/{{ account_id }}/recheck" class="inline">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <button title="Fetch windrun and OpenDota again now">Recheck</button>
+    </form>
+  </h2>
+  <p class="muted small">Admins only — the same working the bot prints for
+    <code>/lookup</code>. Checked
+    {% if breakdown.age_days is not none %}{{ breakdown.age_days }} days ago{% else %}never{% endif %}{% if breakdown.stale %}, which is past the seven-day limit, so the next look at this player will refresh it{% endif %}.</p>
+  <table>
+    <tbody>
+      <tr><th>Internal rating</th><td><strong class="rating">{{ breakdown.rating if breakdown.rating is not none else "—" }}</strong>
+        {% if breakdown.group_rating is not none %}<span class="muted small">pooled across their accounts; this one alone is {{ breakdown.own_rating }}</span>{% endif %}</td></tr>
+      <tr><th>Breakdown</th><td>{{ breakdown.explanation or "—" }}</td></tr>
+      <tr><th>Windrun</th><td>
+        {% if breakdown.windrun is not none %}{{ breakdown.windrun|round|int }}
+          <span class="muted small">from {{ breakdown.windrun_games if breakdown.windrun_games is not none else "an unknown number of" }} games{% if not breakdown.windrun_counts %} — not counted, a rating needs {{ breakdown.min_windrun_games }} games behind it{% endif %}</span>
+        {% else %}<span class="muted">no windrun record</span>{% endif %}</td></tr>
+      <tr><th>Ranked badge</th><td>{{ breakdown.badge or "—" }}</td></tr>
+      <tr><th>Ability Draft games</th><td>
+        {% if breakdown.history_hidden %}<span class="muted">Steam match history is private, so counts can't be seen</span>
+        {% else %}{{ breakdown.ad_last_year if breakdown.ad_last_year is not none else "?" }} in the last year ·
+          {{ breakdown.ad_all_time if breakdown.ad_all_time is not none else "?" }} all time{% endif %}</td></tr>
+      <tr><th>Ranked games</th><td>
+        {% if breakdown.history_hidden %}<span class="muted">hidden</span>
+        {% else %}{{ breakdown.ranked_last_year if breakdown.ranked_last_year is not none else "?" }} in the last year ·
+          {{ breakdown.ranked_all_time if breakdown.ranked_all_time is not none else "?" }} all time{% endif %}</td></tr>
+      {% if breakdown.linked_accounts %}
+      <tr><th>Other accounts</th><td>
+        {% for a in breakdown.linked_accounts %}<a href="/player/{{ a }}">{{ a }}</a>{% if not loop.last %} · {% endif %}{% endfor %}
+        <div class="muted small">{{ breakdown.group_explanation }}</div></td></tr>
+      {% endif %}
+      {% if breakdown.overrides %}
+      <tr><th>Overrides</th><td>
+        {% for k, v in breakdown.overrides.items() %}<code>{{ k }}={{ v }}</code>{% if not loop.last %} · {% endif %}{% endfor %}
+        {% if breakdown.override_by %}<div class="muted small">set by {{ breakdown.override_by }}</div>{% endif %}</td></tr>
+      {% endif %}
+    </tbody>
+  </table>
+  {% if not breakdown.reproduced %}
+  <p class="muted small">⚠️ Re-resolving the stored inputs doesn't reproduce the stored rating, so
+    one of them has changed meaning since it was written. A Recheck settles it.</p>
+  {% endif %}
+</section>
 {% endif %}
 {% endblock %}

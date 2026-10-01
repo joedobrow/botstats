@@ -7,6 +7,7 @@ import io
 import logging
 import os
 import re
+import time
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote, urlencode
@@ -488,10 +489,44 @@ async def match_add(request: web.Request):
     raise web.HTTPFound(back + "?" + urlencode({"notice": notice}))
 
 
+# Looking up an account nobody has rated costs a windrun call, serialised at
+# one every five seconds, and the site is public — so anonymous visitors share
+# a budget. Admins don't, since they're the ones doing league admin.
+_PUBLIC_LOOKUPS_PER_HOUR = 30
+_public_lookups: list[float] = []
+
+
+def _may_rate_unknown(request: web.Request) -> bool:
+    if request.get("is_admin"):
+        return True
+    now = time.time()
+    _public_lookups[:] = [t for t in _public_lookups if now - t < 3600]
+    if len(_public_lookups) >= _PUBLIC_LOOKUPS_PER_HOUR:
+        return False
+    _public_lookups.append(now)
+    return True
+
+
 @routes.get("/players")
 async def players_page(request: web.Request):
     q = request.query.get("q", "")
-    return render(request, "players.html", title="Players", q=q, players=store.search_players(q))
+    players = store.search_players(q)
+    # "Look up" means: go straight to this player's page, the way /player in
+    # Discord does — by account id, by Steam64 id, or by a name that matches
+    # exactly one person. Filtering as you type is for browsing; this is for
+    # when you know who you want.
+    if request.query.get("lookup") is not None and q.strip():
+        account_id = account_id_from(q)
+        if account_id is None and len(players) == 1:
+            account_id = players[0]["account_id"]
+        if account_id is not None:
+            raise web.HTTPFound(f"/player/{account_id}")
+        return render(request, "players.html", title="Players", q=q, players=players,
+                      notice=("No one by that name. A Dota account id or a Steam64 id goes "
+                              "straight to a player, whether or not they've played here."
+                              if not players else
+                              "That matches more than one player — pick one below."))
+    return render(request, "players.html", title="Players", q=q, players=players, notice=None)
 
 
 @routes.get("/player/{account_id}")
@@ -500,11 +535,23 @@ async def player_page(request: web.Request):
         account_id = int(request.match_info["account_id"])
     except ValueError:
         return not_found(request, "Player")
+    import rating_compute
+
     matches = store.player_matches(account_id)
     ident = store.player_identities([account_id])[account_id]
     site_user = store.get_user(account_id)
-    if not matches and not site_user and not ident["name"]:
-        return not_found(request, "Player")
+    # Someone we've never seen isn't "not found" — they're a Dota account we
+    # haven't rated yet, and rating them is the thing a visitor came for. The
+    # bot's /player does exactly this.
+    unavailable: tuple[str, ...] = ()
+    if not matches and not site_user and rating_compute.age_in_days(account_id) is None:
+        if _may_rate_unknown(request):
+            try:
+                unavailable = await rating_compute.refresh_if_stale(account_id, compute_missing=True)
+            except Exception:
+                logger.exception("couldn't rate unknown player %s", account_id)
+                unavailable = ("the rating sources",)
+            ident = store.player_identities([account_id])[account_id]
     seasons = store.all_seasons()
     by_season: dict[tuple, list[dict]] = {}
     for m in matches:
@@ -524,10 +571,38 @@ async def player_page(request: web.Request):
                           if r["account_id"] == account_id), None) or store.aggregate(rows)
             season_rows.append({"season": s, "stats": stats, "captain": team.get("captain"),
                                 "team_name": team.get("name"), "cost": costs.get("cost")})
+    # Admins get the working: the same inputs and the same breakdown string
+    # the bot's /lookup prints, rebuilt from the cache so the page costs
+    # nothing. Every number here is one the rating was computed from.
+    breakdown = None
+    if request.get("is_admin"):
+        breakdown = store.rating_breakdown(account_id)
     return render(request, "player.html", title=ident["name"] or str(account_id),
                   account_id=account_id, ident=ident, overall=store.aggregate(matches),
                   season_rows=season_rows, matches=matches[:50],
-                  rating=store.player_ratings().get(account_id))
+                  rating=store.player_ratings().get(account_id),
+                  breakdown=breakdown, unavailable=unavailable,
+                  notice=request.query.get("notice"))
+
+
+@routes.post("/player/{account_id}/recheck")
+async def player_recheck(request: web.Request):
+    """Re-fetch and re-rate one player now, instead of waiting for the weekly
+    job or the seven-day staleness limit."""
+    import rating_compute
+
+    _require_admin(request)
+    account_id = int(request.match_info["account_id"])
+    try:
+        unavailable = await rating_compute.refresh_if_stale(
+            account_id, max_age_days=0, compute_missing=True)
+    except Exception:
+        logger.exception("recheck failed for %s", account_id)
+        unavailable = ("the rating sources",)
+    notice = (f"Couldn't reach {', '.join(unavailable)}, so nothing was changed — "
+              f"a rating from a partial fetch would be a guess. Try again shortly."
+              if unavailable else "Rechecked.")
+    raise web.HTTPFound(f"/player/{account_id}?" + urlencode({"notice": notice}))
 
 
 @routes.get("/match/{match_id}")

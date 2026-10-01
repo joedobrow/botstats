@@ -576,6 +576,55 @@ def season_teams(season: dict, matches: list[dict] | None = None) -> list[dict]:
     return sorted(teams.values(), key=lambda t: (-t["wins"], t["losses"], t["name"].lower()))
 
 
+def rating_breakdown(account_id: int) -> dict | None:
+    """How this player's rating was arrived at — the same inputs and the same
+    explanation string the bot's /lookup prints, for showing an admin.
+
+    Built from the cache, so the page costs no API calls: every input a rating
+    is computed from is stored alongside it, and re-resolving them reproduces
+    the number (rating_compute.inputs_from_cache).
+    """
+    import rating_compute
+    from formatters import format_badge
+
+    row = db.get_rating_cache_row(account_id)
+    if not row:
+        return None
+    override = db.get_skill_override(account_id) or {}
+    inputs = rating_compute.inputs_from_cache(account_id)
+    resolved = rating_compute.resolve(inputs, override)
+    windrun_used = rating_compute.trusted_windrun(row.get("raw_windrun"), row.get("windrun_games"))
+    age = rating_compute.age_in_days(account_id)
+    return {
+        "rating": row.get("internal_rating"),
+        "own_rating": row.get("own_rating"),
+        "group_rating": row.get("group_rating"),
+        "group_explanation": row.get("group_explanation"),
+        "explanation": (resolved[1] if resolved else None) or row.get("explanation"),
+        "reproduced": bool(resolved) and resolved[0] == row.get("own_rating"),
+        "windrun": row.get("raw_windrun"),
+        "windrun_games": row.get("windrun_games"),
+        "windrun_counts": windrun_used is not None,
+        "min_windrun_games": __import__("formatters").MIN_WINDRUN_GAMES,
+        "badge": format_badge(row.get("rank_tier"), row.get("leaderboard_rank"))
+                 if row.get("rank_tier") else None,
+        "ad_last_year": row.get("ad_last_year"),
+        "ad_all_time": row.get("ad_all_time"),
+        "ranked_last_year": row.get("ranked_last_year"),
+        "ranked_all_time": row.get("ranked_all_time"),
+        "history_hidden": bool(row.get("fh_unavailable")),
+        "updated_at": row.get("updated_at"),
+        "age_days": round(age, 1) if age is not None else None,
+        "stale": age is not None and age >= rating_compute.MAX_AGE_DAYS,
+        "linked_accounts": [a for a in (row.get("linked_accounts") or []) if a != account_id],
+        "overrides": {k: override[k] for k in
+                      ("windrun_rating", "rank_tier", "leaderboard_rank",
+                       "internal_rating_override", "nickname")
+                      if override.get(k) is not None},
+        "override_by": override.get("set_by_name"),
+    }
+
+
 def season_matchups(season: dict) -> list[dict]:
     """Who plays whom, week by week.
 
