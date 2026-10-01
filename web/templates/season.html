@@ -30,13 +30,15 @@
         <tr>
           <td class="matchup-side {{ 'win' if p.winner == p.a else '' }}">
             <a href="{{ team_url(season, p.a) }}">{{ p.a_name }}</a>
-            <span class="muted small">{{ p.a_record }}</span>
+            <span class="muted small">{{ p.a_record }}{% if not r.played and p.a_tiebreak is not none %}
+              <span title="Tiebreaker: the combined wins of everyone they've played">· {{ p.a_tiebreak }}</span>{% endif %}</span>
           </td>
           <td class="muted small">v</td>
           <td class="matchup-side {{ 'win' if p.winner == p.b else '' }}">
             {% if p.bye %}<span class="muted">Bye</span>
             {% else %}<a href="{{ team_url(season, p.b) }}">{{ p.b_name }}</a>
-            <span class="muted small">{{ p.b_record }}</span>{% endif %}
+            <span class="muted small">{{ p.b_record }}{% if not r.played and p.b_tiebreak is not none %}
+              <span title="Tiebreaker: the combined wins of everyone they've played">· {{ p.b_tiebreak }}</span>{% endif %}</span>{% endif %}
           </td>
           <td class="num muted small">
             {% if p.rematch %}rematch{% elif p.match_ids %}{{ p.match_ids|length }} game{{ "" if p.match_ids|length == 1 else "s" }}{% endif %}
@@ -49,8 +51,9 @@
     </div>
   </section>
   {% endfor %}
-  <p class="muted small">The week still to play is paired by taking the standings in order and
-    drawing each team against the nearest one it hasn't met. It's a suggestion, not a schedule.</p>
+  <p class="muted small">The week still to play is paired down the standings — record first, then
+    the combined wins of everyone a team has played — and no team is drawn against one it has
+    already had unless the field leaves no other pairing. It's a suggestion, not a schedule.</p>
   {% else %}
   <p class="muted">Matchups appear here once the season has weeks and teams.</p>
   {% endif %}
