@@ -9,7 +9,7 @@
 <form method="get" class="form grid filters">
   <label>Season
     <select name="season">
-      <option value="">Every season</option>
+      <option value=""{% if not season %} selected{% endif %}>Every season</option>
       {% for s in seasons %}
       <option value="{{ s.id }}"{% if season and season.id == s.id %} selected{% endif %}>{{ s.label }} · {{ s.division }}</option>
       {% endfor %}
@@ -56,6 +56,11 @@
 {% endif %}
 
 <h2>{{ stat_label }}</h2>
+{% if scoped %}
+<p class="muted small">{{ stat_label }} is measured against a draft — what a player cost, and how
+  much of their team's season they played — so it only means something inside one. Showing
+  <strong>{{ season.label }}</strong>.</p>
+{% endif %}
 <div class="scroll">
 <table class="sortable">
   <thead><tr>
