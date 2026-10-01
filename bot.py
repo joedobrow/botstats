@@ -518,12 +518,17 @@ async def player(interaction: discord.Interaction, name: str, week: int = None, 
         # job only covers people who play in a division, and most of the cache
         # is people looked up once. Reading one is what keeps it current.
         import rating_compute
+        unavailable: tuple[str, ...] = ()
         try:
             # compute_missing: someone asked about this player by name, so
             # answer with a number even if we've never rated them.
-            await rating_compute.refresh_if_stale(account_id, compute_missing=True)
+            unavailable = await rating_compute.refresh_if_stale(account_id, compute_missing=True)
         except Exception:
             logger.exception("stale-rating refresh failed for %d in /player", account_id)
+        # Nothing is rated from a partial fetch, so when a source was down the
+        # number below is the last one worked out rather than a checked one.
+        stale_note = (f"⚠️ Couldn't reach {', '.join(unavailable)}, so this rating wasn't "
+                      f"rechecked just now — try again in a minute." if unavailable else None)
         rating: int | None = None
         cache_row = get_rating_cache_row(account_id)
         if cache_row and cache_row.get("internal_rating") is not None:
@@ -578,6 +583,8 @@ async def player(interaction: discord.Interaction, name: str, week: int = None, 
                 value=f"[Dotabuff]({dotabuff_url}) · [Windrun]({windrun_url})",
                 inline=False,
             )
+            if stale_note:
+                embed.add_field(name="⚠️ Rating not rechecked", value=stale_note, inline=False)
             if (cache_row or {}).get("fh_unavailable"):
                 embed.add_field(
                     name="⚠️ Match history hidden",
@@ -594,6 +601,8 @@ async def player(interaction: discord.Interaction, name: str, week: int = None, 
             match_row, week_label=week_label, debug=debug, rating=rating,
             qualified_pool=qualified_pool,
         )
+        if stale_note:
+            embed.add_field(name="⚠️ Rating not rechecked", value=stale_note, inline=False)
         if (cache_row or {}).get("fh_unavailable"):
             embed.add_field(
                 name="⚠️ Match history hidden",
@@ -1232,7 +1241,8 @@ async def lookup(interaction: discord.Interaction, query: str, force_refresh: bo
     fallback_cached_avatar = None
     fallback_updated_at = None
     is_stale_render = False
-    if not have_any_signal and cache_row:
+    could_not_rate = bool(inputs.get("unavailable")) or not have_any_signal
+    if could_not_rate and cache_row:
         fallback_cached_rating = cache_row.get("internal_rating")
         if not (cache_row.get("hide_avatar") or (override and override.get("hide_avatar"))):
             fallback_cached_avatar = cache_row.get("avatar_url")
@@ -1241,13 +1251,14 @@ async def lookup(interaction: discord.Interaction, query: str, force_refresh: bo
 
     # Build a fetch-error message when we couldn't get fresh data.
     fetch_error: str | None = None
-    stale_inputs = [what for what, flag in (("game counts", inputs.get("counts_from_cache")),
-                                           ("ranked badge", inputs.get("badge_from_cache"))) if flag]
-    if stale_inputs:
-        fetch_error = (f"OpenDota didn't answer for {' and '.join(stale_inputs)}, so what's shown "
-                       f"is the last we saw. The rating uses that rather than treating it as "
-                       f"unknown, which would swing the weighting.")
-    if not have_any_signal:
+    if inputs.get("unavailable"):
+        # Nothing is rated from a partial picture — a missing count reads as
+        # "activity unknown" and moves the weighting onto the badge, which is
+        # how a 3371 became a 3506. Say so and show what was last worked out.
+        fetch_error = (f"Couldn't reach {', '.join(inputs['unavailable'])} just now, so this "
+                       f"player can't be rated accurately — the rating below is whatever was "
+                       f"last worked out, and nothing has been updated. Try again in a minute.")
+    elif not have_any_signal:
         failed_apis = [label for label, got in (("windrun", wr), ("OpenDota profile", od),
                                                 ("OpenDota game counts", od_counts)) if got is None]
         if failed_apis:
@@ -1264,7 +1275,7 @@ async def lookup(interaction: discord.Interaction, query: str, force_refresh: bo
     # several accounts gets their shared rating (rating_group) recomputed from
     # what we just fetched, rather than from the previous refresh.
     info = rating_compute.resolve(inputs, override)
-    if have_any_signal and not has_override_rating:
+    if have_any_signal and not has_override_rating and not inputs.get("unavailable"):
         try:
             rating_compute.cache(inputs, info, player_name)
         except Exception:

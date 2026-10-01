@@ -76,15 +76,20 @@ async def fetch_inputs(account_id: int) -> dict:
     from opendota_lookup import fetch_player_profile, fetch_player_game_counts
     from formatters import sanitize_od_counts
 
+    labels = ("windrun", "OpenDota profile", "OpenDota game counts")
     results = await asyncio.gather(
         fetch_windrun_player(account_id),
         fetch_player_profile(account_id),
         fetch_player_game_counts(account_id),
         return_exceptions=True,
     )
-    for label, r in zip(("windrun", "opendota", "opendota-counts"), results):
+    # A source that answered with nothing gives None, which is a fact to rate
+    # on. A source that couldn't be reached raises, and then nothing about
+    # this player is worth computing (see sources.Unavailable).
+    unavailable = [label for label, r in zip(labels, results) if isinstance(r, Exception)]
+    for label, r in zip(labels, results):
         if isinstance(r, Exception):
-            logger.warning("%s fetch failed for %d: %s", label, account_id, r)
+            logger.warning("%s unavailable for %d: %s", label, account_id, r)
     wr, od, od_counts = (None if isinstance(r, Exception) else r for r in results)
 
     # Two different reasons a count can be missing, and they mean opposite
@@ -100,33 +105,10 @@ async def fetch_inputs(account_id: int) -> dict:
     # read 3371 one day and 3506 the next on nothing but an API blink. What
     # we knew last time is a far better answer than "unknown", so fall back
     # to it; those fields aren't authoritative here, so the cache keeps them.
-    counts_reached = od_counts is not None
+    # Private match history makes OpenDota report 0 for every count, which
+    # means "can't see", not "hasn't played".
     od_counts = sanitize_od_counts(od, od_counts)
-    cached = {}
-    if not counts_reached or od is None:
-        from db import get_rating_cache_row
-        cached = get_rating_cache_row(account_id) or {}
-    if not counts_reached and any(cached.get(k) is not None for k in
-                                  ("ad_last_year", "ranked_last_year", "ranked_all_time")):
-        logger.warning("OpenDota counts unavailable for %d; using the last ones we saw",
-                       account_id)
-        od_counts = {
-            "last_year_ad": cached.get("ad_last_year"),
-            "all_time_ad": cached.get("ad_all_time"),
-            "last_year_ranked": cached.get("ranked_last_year"),
-            "all_time_ranked": cached.get("ranked_all_time"),
-        }
-    # The profile carries the ranked badge, and it fails the same way — an
-    # OpenDota timeout would otherwise rate a player as though they have no
-    # badge at all, which for anyone the badge carries weight for is the same
-    # 135-point kind of swing from the other direction.
     rank_tier, lb_rank = (od or {}).get("rank_tier"), (od or {}).get("leaderboard_rank")
-    badge_from_cache = False
-    if od is None and cached.get("rank_tier") is not None:
-        logger.warning("OpenDota profile unavailable for %d; using the last badge we saw",
-                       account_id)
-        rank_tier, lb_rank = cached.get("rank_tier"), cached.get("leaderboard_rank")
-        badge_from_cache = True
     od_last = (od_counts or {}).get("last_year_ad")
     od_all = (od_counts or {}).get("all_time_ad")
 
@@ -163,10 +145,9 @@ async def fetch_inputs(account_id: int) -> dict:
         "fh_unavailable": (bool((od.get("profile") or {}).get("fh_unavailable"))
                            if od else None),
         "reached_any_api": wr is not None or od is not None or od_counts is not None,
-        # True when the numbers above are what we last saw rather than what
-        # OpenDota just said, so a caller can say so.
-        "counts_from_cache": not counts_reached and od_counts is not None,
-        "badge_from_cache": badge_from_cache,
+        # The sources that couldn't be reached. Non-empty means this player
+        # can't be rated right now, and nothing about them gets written.
+        "unavailable": tuple(unavailable),
         # Which fields we actually reached the source for, so "unknown" can be
         # written as unknown instead of leaving a stale number behind (see
         # db.upsert_rating_cache_row). A source that was down leaves its
@@ -175,7 +156,7 @@ async def fetch_inputs(account_id: int) -> dict:
             (("raw_windrun", "windrun_games") if wr is not None else ())
             + (("rank_tier", "leaderboard_rank", "fh_unavailable") if od is not None else ())
             + (("ad_last_year", "ad_all_time", "ranked_last_year", "ranked_all_time")
-               if counts_reached else ())
+               if od_counts is not None else ())
         ),
     }
 
@@ -238,11 +219,22 @@ def effective_inputs(inputs: dict, override: dict | None) -> tuple[float | None,
 
 
 def resolve(inputs: dict, override: dict | None) -> tuple[int, str] | None:
-    """The internal rating for these inputs, or None when nothing was reachable."""
+    """The internal rating for these inputs, or None when it can't be worked
+    out — either nothing was reachable, or something that was needed wasn't.
+
+    A missing source is not a zero and not an absence: rated anyway, a player
+    whose game counts timed out looks like someone whose activity is unknown,
+    and the weighting moves off windrun and onto their badge. A manual
+    override needs no source and always resolves.
+    """
     from formatters import _resolve_internal_rating
 
     manual = (override or {}).get("internal_rating_override") is not None
-    if not manual and not inputs["reached_any_api"]:
+    if manual:
+        return _resolve_internal_rating(
+            override=override, ad_last=None, ad_all=None, ranked_last=None,
+            ranked_all=None, wr_rating=None, ranked_in_wr_raw=None)
+    if inputs.get("unavailable") or not inputs["reached_any_api"]:
         return None
     wr_rating, ranked_in_wr_raw = effective_inputs(inputs, override)
     return _resolve_internal_rating(
@@ -257,9 +249,19 @@ def resolve(inputs: dict, override: dict | None) -> tuple[int, str] | None:
 
 
 def cache(inputs: dict, info: tuple[int, str] | None, name_fallback: str | None = None) -> None:
-    """Store these inputs and their rating, and re-pool any second accounts."""
+    """Store these inputs and their rating, and re-pool any second accounts.
+
+    Writes nothing at all when a source was unavailable — not even the
+    timestamp, so the next read tries again instead of treating a row it
+    couldn't verify as freshly checked.
+    """
     import rating_group
     from db import upsert_rating_cache_row
+
+    if inputs.get("unavailable"):
+        logger.info("Not caching %s: %s unavailable",
+                    inputs["account_id"], ", ".join(inputs["unavailable"]))
+        return
 
     upsert_rating_cache_row({
         "account_id":       inputs["account_id"],
@@ -304,9 +306,14 @@ def age_in_days(account_id: int) -> float | None:
 
 
 async def refresh_if_stale(account_id: int, max_age_days: float = MAX_AGE_DAYS,
-                           compute_missing: bool = False) -> bool:
+                           compute_missing: bool = False) -> tuple[str, ...]:
     """Re-rate this account if what's cached has gone stale, so that reading a
     rating is what keeps it current. Returns whether it refreshed.
+
+    Returns the sources that couldn't be reached — empty when the rating is
+    current, which includes the case where it was already fresh enough to
+    leave alone. A caller showing a number should say when this is non-empty:
+    what it has is the last rating worked out, not a checked one.
 
     `compute_missing` also rates an account with nothing cached at all, for a
     caller that was asked about this player by name and should answer with a
@@ -317,17 +324,24 @@ async def refresh_if_stale(account_id: int, max_age_days: float = MAX_AGE_DAYS,
     callers that read many players at once (the leaderboard, /players) must not
     use this — they'd queue minutes of work for numbers nobody asked about.
     """
+    from db import get_skill_override
+
     age = age_in_days(account_id)
     if age is None:
         if not compute_missing:
-            return False
+            return ()
         logger.info("No cached rating for %d; computing on read", account_id)
     elif age < max_age_days:
-        return False
+        return ()
     else:
         logger.info("Rating for %d is %.1f days old; refreshing on read", account_id, age)
-    await compute_and_cache_rating(account_id)
-    return True
+    try:
+        inputs = await fetch_inputs(account_id)
+    except Exception:
+        logger.exception("couldn't fetch inputs for %d", account_id)
+        return ("the rating sources",)
+    cache(inputs, resolve(inputs, get_skill_override(account_id)))
+    return inputs.get("unavailable", ())
 
 
 async def compute_and_cache_rating(account_id: int, name_fallback: str | None = None) -> int | None:
