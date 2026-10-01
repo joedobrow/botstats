@@ -220,6 +220,10 @@ ul.plain { list-style: none; padding: 0; margin: 0; }
 ul.plain li { padding: 4px 0; border-bottom: 1px solid var(--border); }
 ul.plain li:last-child { border-bottom: 0; }
 
+/* A cell holding a link and an action next to it: tags collapse to a single
+   space, which isn't enough to tell them apart. */
+.row-actions > form.inline { margin-left: 14px; }
+
 /* A total row is the answer the table was adding up to, so it reads as one. */
 tfoot tr.total th, tfoot tr.total td {
   border-top: 2px solid var(--border); font-weight: 700; font-size: 1.05rem;
