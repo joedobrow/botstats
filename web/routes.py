@@ -540,9 +540,17 @@ async def fantasy_page(request: web.Request):
 
     q = request.query
     seasons = store.all_seasons()
+    divisions = store.divisions()
+    # A season row is one season in one division, so the two are picked
+    # separately: the season names the league, the division names whose games
+    # in it. Listing them together made a season read as "Season 39 · NA".
+    season_options = list({s["id"]: s for s in seasons}.values())
+    division_id = int(re.sub(r"\D", "", q.get("division", "")) or 0) or None
     season = None
     if q.get("season"):
-        season = next((s for s in seasons if str(s["id"]) == q["season"]), None)
+        matches = [s for s in seasons if str(s["id"]) == q["season"]]
+        season = (next((s for s in matches if s["division_id"] == division_id), None)
+                  or (matches[0] if matches else None))
     stat = q.get("stat") if q.get("stat") in STAT_LABELS else "fantasy_points"
     # Value and attendance are measured against a draft — what a player cost
     # and how much of their team's season they turned up for — so pooled
@@ -554,11 +562,17 @@ async def fantasy_page(request: web.Request):
     week = re.sub(r"\D", "", q.get("week", ""))
     position = re.sub(r"\D", "", q.get("position", ""))
     weeks = db.get_season_weeks(season["id"], season["division_id"]) if season else []
+    # Without a season chosen, a division still narrows which games count.
+    if season is None and division_id:
+        store_divisions = [d for d in divisions if d["id"] == division_id]
+    else:
+        store_divisions = None
     min_games = re.sub(r"\D", "", q.get("min_games", ""))
     table = store.fantasy_table(season, stat=stat,
                                 week=int(week) if week and season else None,
                                 position=int(position) if position else None,
-                                min_games=int(min_games) if min_games else None)
+                                min_games=int(min_games) if min_games else None,
+                                only_divisions=store_divisions)
     # Naming a player is a way of getting to their page, not a filter on this
     # one — the working is its own page.
     selected = None
@@ -575,7 +589,8 @@ async def fantasy_page(request: web.Request):
     # rather than in a dropdown.
     stats = sorted(((key, re.sub(r"^[^\w(]+", "", label).strip())
                     for key, label in STAT_LABELS.items()), key=lambda kv: kv[1].lower())
-    return render(request, "fantasy.html", title="Fantasy", table=table, seasons=seasons,
+    return render(request, "fantasy.html", title="Fantasy", table=table,
+                  seasons=season_options, divisions=divisions, division_id=division_id,
                   season=season, draft_relative=draft_relative, q=q, stats=stats, stat=stat,
                   stat_label=dict(stats).get(stat, stat), weeks=weeks,
                   not_found=bool(q.get("player")),

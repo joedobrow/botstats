@@ -523,7 +523,8 @@ DEFAULT_MIN_GAMES = 10
 
 
 def fantasy_table(season: dict | None, stat: str = "fantasy_points", week: int | None = None,
-                  position: int | None = None, min_games: int | None = None) -> dict:
+                  position: int | None = None, min_games: int | None = None,
+                  only_divisions: list[dict] | None = None) -> dict:
     """The leaderboard the bot's /leaderboard shows, with every player's
     fantasy score broken into the components that made it and each component
     set against the field's average — the part that answers "why is she top?".
@@ -542,7 +543,7 @@ def fantasy_table(season: dict | None, stat: str = "fantasy_points", week: int |
                                                cross_season=stat not in DRAFT_RELATIVE))
     else:
         rows = []
-        for d in divisions():
+        for d in (only_divisions if only_divisions is not None else divisions()):
             rows += db.ranked(db.get_all_time_stats(d["id"], None))
     if position:
         rows = [r for r in rows if r.get("role_position") == position]
