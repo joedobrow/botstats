@@ -447,17 +447,37 @@ async def match_record(request: web.Request):
 
 @routes.post("/season/{season_id}/{division}/team/{captain}/match/{match_id}/delete")
 async def match_delete(request: web.Request):
-    """Take back a hand-entered result. Real matches stay: they're facts from
-    OpenDota, and voiding one is a different question."""
+    """Take a game out of the league's reckoning.
+
+    A hand-entered one is deleted, since nothing would bring it back. A real
+    one is excluded instead: the row is a game that happened, and deleting it
+    would only mean fetching it again next time the league is pulled.
+    """
     season = _season_or_404(request)
     _require_admin(request)
     captain = request.match_info["captain"]
-    try:
-        removed = db.delete_manual_match(int(request.match_info["match_id"]))
-    except ValueError as e:
-        raise web.HTTPBadRequest(text=str(e))
-    raise web.HTTPFound(team_url(season, captain) + "?" + urlencode({
-        "notice": "Result removed." if removed else "That result was already gone."}))
+    match_id = int(request.match_info["match_id"])
+    reason = ((await request.post()).get("reason") or "").strip()[:200] or None
+    if match_id < 0:
+        done = db.delete_manual_match(match_id)
+        notice = "Game removed." if done else "That game was already gone."
+    else:
+        done = db.set_match_excluded(match_id, True, reason=reason,
+                                     by=request["user"]["account_id"])
+        notice = (f"Game {match_id} no longer counts — records, stats and matchups all skip it, "
+                  f"and re-fetching the league won't bring it back. Find it again under "
+                  f"Matches → Kind → Taken out." if done else f"No game {match_id}.")
+    raise web.HTTPFound(team_url(season, captain) + "?" + urlencode({"notice": notice}))
+
+
+@routes.post("/matches/{match_id}/restore")
+async def match_restore(request: web.Request):
+    """Put an excluded game back."""
+    _require_admin(request)
+    match_id = int(request.match_info["match_id"])
+    db.set_match_excluded(match_id, False)
+    raise web.HTTPFound("/matches?" + urlencode({"kind": "excluded",
+                                                 "notice": f"Game {match_id} counts again."}))
 
 
 @routes.post("/season/{season_id}/{division}/team/{captain}/match/add")
