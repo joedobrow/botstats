@@ -29,7 +29,7 @@
   {% if weeks %}
   <label>Week
     <select name="week">
-      <option value="">All of it</option>
+      <option value="">All</option>
       {% for w in weeks %}
       <option value="{{ w.week_number }}"{% if q.get('week') == w.week_number|string %} selected{% endif %}>Week {{ w.week_number }}</option>
       {% endfor %}
