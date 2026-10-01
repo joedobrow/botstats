@@ -531,6 +531,29 @@ async def players_page(request: web.Request):
     return render(request, "players.html", title="Players", q=q, players=players, notice=None)
 
 
+@routes.get("/fantasy")
+async def fantasy_page(request: web.Request):
+    """What the fantasy score is made of, and who earns it where."""
+    import fantasy
+
+    q = request.query
+    seasons = store.all_seasons()
+    season = None
+    if q.get("season"):
+        season = next((s for s in seasons if str(s["id"]) == q["season"]), None)
+    min_games = re.sub(r"\D", "", q.get("min_games", ""))
+    table = store.fantasy_table(season, int(min_games) if min_games else None)
+    selected = None
+    if q.get("player"):
+        account_id = account_id_from(q["player"])
+        selected = next((r for r in table["rows"]
+                         if r["account_id"] == account_id
+                         or q["player"].lower() in (r["name"] or "").lower()), None)
+    return render(request, "fantasy.html", title="Fantasy", table=table, seasons=seasons,
+                  season=season, selected=selected, q=q,
+                  labels=fantasy.LABELS, duration_mean=fantasy.DURATION_MEAN_MIN)
+
+
 @routes.get("/matches")
 async def matches_page(request: web.Request):
     """Every match, filtered. The filters live in the query string so a view
@@ -596,7 +619,11 @@ async def player_page(request: web.Request):
             stats = next((r for r in db.get_all_time_stats(s["division_id"], s["id"])
                           if r["account_id"] == account_id), None) or store.aggregate(rows)
             season_rows.append({"season": s, "stats": stats, "captain": team.get("captain"),
-                                "team_name": team.get("name"), "cost": costs.get("cost")})
+                                "team_name": team.get("name"), "cost": costs.get("cost"),
+                                # A captain isn't drafted, so they have no cost —
+                                # an empty cell reads as missing data rather than
+                                # as the reason there's nothing to show.
+                                "is_captain": team.get("captain_account_id") == account_id})
     # Admins get the working: the same inputs and the same breakdown string
     # the bot's /lookup prints, rebuilt from the cache so the page costs
     # nothing. Every number here is one the rating was computed from.

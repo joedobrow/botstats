@@ -511,6 +511,52 @@ def season_leaders(season: dict) -> tuple[list[dict], int, int]:
     return sorted(rows, key=lambda r: -r["fantasy_points"]), threshold, max_games
 
 
+def fantasy_table(season: dict | None, min_games: int | None = None) -> dict:
+    """The fantasy leaderboard, with every player's score broken into the
+    components that made it and each component set against the field's
+    average — which is the part that answers "why is she top?".
+
+    season=None pools every season. min_games defaults the way /leaderboard
+    qualifies: at least half as many games as the most active player, so a
+    stand-in's one good night doesn't lead the table.
+    """
+    import fantasy
+
+    if season:
+        rows = db.ranked(db.get_all_time_stats(season["division_id"], season["id"]))
+    else:
+        rows = []
+        for d in divisions():
+            rows += db.ranked(db.get_all_time_stats(d["id"], None))
+    max_games = max((r.get("games_played") or 0 for r in rows), default=0)
+    threshold = max_games // 2 if min_games is None else min_games
+    qualified = [r for r in rows if (r.get("games_played") or 0) >= threshold]
+
+    for r in qualified:
+        r["breakdown"] = fantasy.breakdown(r)
+    # The field's average for each component, so a player's row can be read as
+    # "ahead here, behind there" rather than as twenty-one bare numbers.
+    field: dict[str, dict] = {}
+    for r in qualified:
+        for c in r["breakdown"]:
+            f = field.setdefault(c["key"], {"label": c["label"], "unit": c["unit"],
+                                            "weight": c["weight"], "value": 0.0, "points": 0.0})
+            f["value"] += c["value"]; f["points"] += c["points"]
+    for f in field.values():
+        f["value"] /= max(len(qualified), 1)
+        f["points"] /= max(len(qualified), 1)
+
+    idents = player_identities([r["account_id"] for r in qualified])
+    for r in qualified:
+        r["name"] = idents.get(r["account_id"], {}).get("name") or str(r["account_id"])
+        r["avatar_url"] = idents.get(r["account_id"], {}).get("avatar_url")
+        for c in r["breakdown"]:
+            c["vs_field"] = c["points"] - field[c["key"]]["points"]
+    qualified.sort(key=lambda r: -(r.get("fantasy_points") or 0))
+    return {"rows": qualified, "field": field, "threshold": threshold,
+            "max_games": max_games, "weights": fantasy.WEIGHTS}
+
+
 def player_ratings() -> dict[int, int]:
     """{account_id: displayed internal rating} for everyone, as the bot
     shows it (db.displayed_ratings) in the division they last played in."""

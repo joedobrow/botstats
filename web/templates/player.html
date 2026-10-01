@@ -23,26 +23,22 @@
 <div class="stat-row">
   <div><span class="stat">{{ overall.games_played }}</span><span class="label">League games</span></div>
   <div><span class="stat">{{ (100 * overall.wins / overall.games_played)|round|int }}%</span><span class="label">Win rate</span></div>
-  <div><span class="stat">{{ "%.2f"|format(overall.kda) }}</span><span class="label">KDA</span></div>
-  <div><span class="stat">{{ overall.gpm|round|int }}</span><span class="label">GPM</span></div>
   <div><span class="stat">{{ "%.1f"|format(overall.fantasy_points) }}</span><span class="label">Fantasy pts</span></div>
 </div>
 
 <h2>Seasons</h2>
 <div class="scroll">
 <table>
-  <thead><tr><th>Season</th><th>Team</th><th class="num">Cost</th><th class="num">Games</th><th class="num">W–L</th><th class="num">Fantasy</th><th class="num">KDA</th><th class="num">GPM</th></tr></thead>
+  <thead><tr><th>Season</th><th>Team</th><th class="num">Cost</th><th class="num">Games</th><th class="num">W–L</th><th class="num">Fantasy</th></tr></thead>
   <tbody>
   {% for r in season_rows %}
     <tr>
       <td><a href="{{ season_url(r.season) }}">{{ r.season.label }}</a><div class="muted small">{{ r.season.division }}</div></td>
       <td>{% if r.captain %}<a href="{{ team_url(r.season, r.captain) }}">{{ r.team_name }}</a>{% else %}<span class="muted">—</span>{% endif %}</td>
-      <td class="num">{% if r.cost %}${{ r.cost }}{% endif %}</td>
+      <td class="num">{% if r.is_captain %}<span class="tag">Captain</span>{% elif r.cost %}${{ r.cost }}{% endif %}</td>
       <td class="num">{{ r.stats.games_played }}</td>
       <td class="num">{{ r.stats.wins }}–{{ r.stats.games_played - r.stats.wins }}</td>
       <td class="num">{{ "%.1f"|format(r.stats.fantasy_points) }}</td>
-      <td class="num">{{ "%.2f"|format(r.stats.kda) }}</td>
-      <td class="num">{{ r.stats.gpm|round|int }}</td>
     </tr>
   {% endfor %}
   </tbody>

@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+{% from "macros.html" import player_link %}
+{% block content %}
+<h1>Fantasy</h1>
+<p class="muted">Fantasy points are a per-game average, so playing more games doesn't earn more —
+  it's what you did in them. The score is one number made of twenty-one; this is where each
+  player's comes from.</p>
+
+<form method="get" class="form grid filters">
+  <label>Season
+    <select name="season">
+      <option value="">Every season</option>
+      {% for s in seasons %}
+      <option value="{{ s.id }}"{% if season and season.id == s.id %} selected{% endif %}>{{ s.label }} · {{ s.division }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Fewest games <span class="muted small">(blank qualifies the usual way)</span>
+    <input type="number" name="min_games" min="0" max="200" value="{{ q.get('min_games', '') }}"></label>
+  <label>Show the working for <span class="muted small">(name or account id)</span>
+    <input type="search" name="player" value="{{ q.get('player', '') }}" autocomplete="off"></label>
+  <div class="actions"><button class="primary">Show</button>
+    {% if q.get('season') or q.get('min_games') or q.get('player') %}<a class="button" href="/fantasy">Clear</a>{% endif %}</div>
+</form>
+
+{% if selected %}
+<section class="panel">
+  <h2>{{ selected.name }} · {{ "%.1f"|format(selected.fantasy_points) }} points a game</h2>
+  <p class="muted small">Each component is what they average, what it's worth, and how that
+    compares with everyone else qualifying here. Green is where they earn more than the field.</p>
+  <div class="scroll">
+  <table>
+    <thead><tr><th></th><th class="num">Their average</th><th class="num">Worth</th>
+      <th class="num">Points</th><th class="num">vs the field</th></tr></thead>
+    <tbody>
+    {% for c in selected.breakdown|sort(attribute="vs_field", reverse=true) %}
+      <tr>
+        <td>{{ c.label }}{% if c.unit %} <span class="muted small">{{ c.unit }}</span>{% endif %}</td>
+        <td class="num">{{ "%.2f"|format(c.value) }}</td>
+        <td class="num muted">{{ "%+.3f"|format(c.weight) }}</td>
+        <td class="num">{{ "%+.2f"|format(c.points) }}</td>
+        <td class="num {{ 'win' if c.vs_field > 0.05 else ('loss' if c.vs_field < -0.05 else '') }}">
+          {{ "%+.2f"|format(c.vs_field) }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+    <tfoot><tr><th>Total</th><td></td><td></td>
+      <td class="num"><strong>{{ "%.1f"|format(selected.fantasy_points) }}</strong></td><td></td></tr></tfoot>
+  </table>
+  </div>
+</section>
+{% endif %}
+
+<h2>Leaderboard</h2>
+<p class="muted small">
+  {% if table.threshold %}Players with at least {{ table.threshold }} game{{ "" if table.threshold == 1 else "s" }}
+  ({{ table.max_games }} is the most anyone has played){% else %}Everyone with a game{% endif %}.
+  Click a name to see where their points come from.</p>
+<div class="scroll">
+<table class="sortable">
+  <thead><tr>
+    <th data-sort-type="text">Player</th>
+    <th class="num" data-sort-type="num" data-sort-first="desc">Points a game</th>
+    <th class="num" data-sort-type="num" data-sort-first="desc">Games</th>
+    <th>Earns most from</th>
+  </tr></thead>
+  <tbody>
+  {% for r in table.rows %}
+    {% set best = r.breakdown|sort(attribute="vs_field", reverse=true) %}
+    <tr>
+      <td class="with-avatar" data-sort="{{ r.name|lower }}">
+        {% if r.avatar_url %}<img class="avatar" src="{{ r.avatar_url }}" alt="">{% endif %}
+        <a href="/fantasy?{% if q.get('season') %}season={{ q.get('season') }}&{% endif %}player={{ r.account_id }}">{{ r.name }}</a>
+      </td>
+      <td class="num" data-sort="{{ r.fantasy_points }}"><strong>{{ "%.1f"|format(r.fantasy_points) }}</strong></td>
+      <td class="num" data-sort="{{ r.games_played }}">{{ r.games_played }}</td>
+      <td class="small muted">
+        {% for c in best[:2] %}{{ c.label }} ({{ "%+.1f"|format(c.vs_field) }}){% if not loop.last %}, {% endif %}{% endfor %}
+      </td>
+    </tr>
+  {% else %}
+    <tr><td colspan="4" class="muted">No players qualify yet.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+
+<h2>How a score is built</h2>
+<p class="muted small">Every component, what it's worth, and what the qualifying players average.
+  A game is worth <strong>+3 to start</strong> and each death eats 0.2 of it, so fifteen deaths
+  cancels it out. Longer games earn more of everything, so a score is corrected for the length of
+  the games it came from — the average is {{ duration_mean }} minutes, and a player whose games ran
+  longer gives some back.</p>
+<div class="scroll">
+<table class="sortable">
+  <thead><tr>
+    <th data-sort-type="text">Component</th>
+    <th class="num" data-sort-type="num">Worth</th>
+    <th class="num" data-sort-type="num" data-sort-first="desc">Field average</th>
+    <th class="num" data-sort-type="num" data-sort-first="desc">Points from it</th>
+  </tr></thead>
+  <tbody>
+  {% for key, f in table.field.items() %}
+    <tr>
+      <td>{{ f.label }}{% if f.unit %} <span class="muted small">{{ f.unit }}</span>{% endif %}</td>
+      <td class="num muted">{{ "%+.3f"|format(f.weight) }}</td>
+      <td class="num">{{ "%.2f"|format(f.value) }}</td>
+      <td class="num">{{ "%+.2f"|format(f.points) }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}
