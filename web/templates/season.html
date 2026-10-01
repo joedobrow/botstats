@@ -96,37 +96,38 @@
     <h2 class="with-action">{{ r.label }}
       {% if r.played %}<span class="tag">Completed</span>{% endif %}
     </h2>
+    {% if r.pairs %}
     <div class="scroll">
-    <table>
+    <table class="matchups">
       <tbody>
       {% for p in r.pairs %}
         <tr>
-          <td class="matchup-side {{ 'win' if p.winner == p.a else '' }}">
+          <td class="matchup-side">
             <a href="{{ team_url(season, p.a) }}">{{ p.a_name }}</a>
-            <span class="muted small">{{ p.a_record }}{% if not r.played and p.a_tiebreak is not none %}
-              <span title="Tiebreaker: the combined wins of everyone they've played">· {{ p.a_tiebreak }}</span>{% endif %}</span>
+            {% if r.played %}<span class="matchup-score">{{ p.a_score }}</span>
+            {% else %}<span class="muted small">{{ p.a_record }}{% if p.a_tiebreak is not none %}
+              <span title="Tiebreaker: the combined wins of everyone they've played">· {{ p.a_tiebreak }}</span>{% endif %}</span>{% endif %}
           </td>
           <td class="muted small">v</td>
-          <td class="matchup-side {{ 'win' if p.winner == p.b else '' }}">
+          <td class="matchup-side">
             {% if p.bye %}<span class="muted">Bye</span>
             {% else %}<a href="{{ team_url(season, p.b) }}">{{ p.b_name }}</a>
-            <span class="muted small">{{ p.b_record }}{% if not r.played and p.b_tiebreak is not none %}
-              <span title="Tiebreaker: the combined wins of everyone they've played">· {{ p.b_tiebreak }}</span>{% endif %}</span>{% endif %}
+            {% if r.played %}<span class="matchup-score">{{ p.b_score }}</span>
+            {% else %}<span class="muted small">{{ p.b_record }}{% if p.b_tiebreak is not none %}
+              <span title="Tiebreaker: the combined wins of everyone they've played">· {{ p.b_tiebreak }}</span>{% endif %}</span>{% endif %}{% endif %}
           </td>
-          <td class="num muted small">
-            {% if p.rematch %}rematch{% elif p.match_ids %}{{ p.match_ids|length }} game{{ "" if p.match_ids|length == 1 else "s" }}{% endif %}
+          <td class="matchup-games">
+            {% for mid in p.match_ids %}<a href="/match/{{ mid }}" class="small">Game {{ loop.index }}</a>{% if not loop.last %} · {% endif %}{% endfor %}
+            {% if p.rematch %}<span class="muted small">rematch</span>{% endif %}
           </td>
-          <td>{% for mid in p.match_ids %}<a href="/match/{{ mid }}" class="small">Game {{ loop.index }}</a>{% if not loop.last %} · {% endif %}{% endfor %}</td>
         </tr>
       {% endfor %}
       </tbody>
     </table>
     </div>
+    {% endif %}
   </section>
   {% endfor %}
-  <p class="muted small">The week still to play is paired down the standings — record first, then
-    the combined wins of everyone a team has played — and no team is drawn against one it has
-    already had unless the field leaves no other pairing. It's a suggestion, not a schedule.</p>
   {% else %}
   <p class="muted">Matchups appear here once the season has weeks and teams.</p>
   {% endif %}

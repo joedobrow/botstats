@@ -255,10 +255,14 @@ tfoot tr.total th, tfoot tr.total td {
 .pager { display: flex; align-items: center; gap: 14px; margin: 16px 0; }
 .small-button { font-size: 0.85rem; padding: 3px 10px; }
 
-/* Matchups: two teams a row, the winner in the win colour. */
+/* Matchups: two teams a row. Every week's table lays out the same, so a week
+   with no games to link still lines up with the ones that have. */
 .matchup-side { white-space: nowrap; }
-.matchup-side.win a { font-weight: 700; }
-.matchup-side.win { color: var(--win); }
+.matchup-score { display: inline-block; min-width: 1.5em; margin-left: 8px;
+                 font-variant-numeric: tabular-nums; font-weight: 600; }
+.matchups { table-layout: fixed; }
+.matchups td.matchup-side { width: 40%; }
+.matchups td.matchup-games { width: 16%; white-space: nowrap; }
 
 /* A heading with an admin action on it, e.g. Matches + */
 h2.with-action { display: flex; align-items: center; gap: 10px; }
