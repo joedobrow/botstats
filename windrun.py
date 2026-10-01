@@ -13,6 +13,8 @@ from typing import Optional
 
 import aiohttp
 
+from sources import Unavailable
+
 logger = logging.getLogger(__name__)
 
 BASE_URL = "https://api.windrun.io/api/v2"
@@ -52,17 +54,24 @@ async def fetch_player(account_id: int) -> dict | None:
     try:
         async with aiohttp.ClientSession(timeout=timeout, headers=HEADERS) as session:
             async with session.get(url) as resp:
+                if resp.status == 404:
+                    # windrun has no record of this account, which is a fact
+                    # about the player and not a failure to ask.
+                    logger.info("Windrun has no player %d", account_id)
+                    return None
                 if resp.status != 200:
                     logger.warning("Windrun returned %d for %s", resp.status, url)
-                    return None
+                    raise Unavailable(f"windrun returned {resp.status}")
                 data = await resp.json()
                 return data.get("data") if isinstance(data, dict) else data
+    except Unavailable:
+        raise
     except asyncio.TimeoutError:
         logger.error("Windrun request timed out for player %d", account_id)
-        return None
-    except Exception:
+        raise Unavailable("windrun timed out") from None
+    except Exception as e:
         logger.exception("Windrun request failed for player %d", account_id)
-        return None
+        raise Unavailable(f"windrun request failed: {e}") from e
 
 
 async def fetch_player_matches(account_id: int, limit: int = 200) -> list | None:
@@ -84,19 +93,24 @@ async def fetch_player_matches(account_id: int, limit: int = 200) -> list | None
     try:
         async with aiohttp.ClientSession(timeout=timeout, headers=HEADERS) as session:
             async with session.get(url) as resp:
+                if resp.status == 404:
+                    logger.info("Windrun has no matches for %d", account_id)
+                    return []
                 if resp.status != 200:
                     logger.warning("Windrun returned %d for %s", resp.status, url)
-                    return None
+                    raise Unavailable(f"windrun match list returned {resp.status}")
                 data = await resp.json()
                 if isinstance(data, dict):
                     return data.get("data") or []
                 return data
+    except Unavailable:
+        raise
     except asyncio.TimeoutError:
         logger.error("Windrun matches request timed out for %d", account_id)
-        return None
-    except Exception:
+        raise Unavailable("windrun match list timed out") from None
+    except Exception as e:
         logger.exception("Windrun matches request failed for %d", account_id)
-        return None
+        raise Unavailable(f"windrun match list failed: {e}") from e
 
 
 async def fetch_match(match_id: int) -> dict | None:

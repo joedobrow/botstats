@@ -11,6 +11,8 @@ from collections import Counter
 
 import aiohttp
 
+from sources import Unavailable
+
 logger = logging.getLogger(__name__)
 
 OPENDOTA_BASE = "https://api.opendota.com/api"
@@ -65,13 +67,19 @@ async def fetch_player_profile(account_id: int) -> dict | None:
         timeout = aiohttp.ClientTimeout(total=15)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.get(url) as resp:
+                if resp.status == 404:
+                    # OpenDota doesn't know this account — a fact, not a failure.
+                    logger.info("OpenDota has no player %d", account_id)
+                    return None
                 if resp.status != 200:
                     logger.warning("OpenDota returned %d for %s", resp.status, url)
-                    return None
+                    raise Unavailable(f"OpenDota returned {resp.status}")
                 return await resp.json()
-    except Exception:
+    except Unavailable:
+        raise
+    except Exception as e:
         logger.exception("OpenDota player fetch failed for %d", account_id)
-        return None
+        raise Unavailable(f"OpenDota profile unreachable: {e}") from e
 
 
 def decode_rank_tier(
@@ -149,6 +157,9 @@ async def fetch_player_game_counts(account_id: int) -> dict | None:
     wrong by re-querying moments later). Those two are verified by
     re-querying — see fetch_wl_verified.
 
+    Raises sources.Unavailable when any of the five never answered — see
+    that module for why that isn't the same as a count of zero.
+
     Returns:
         {
             'all_time_total':   int,
@@ -158,7 +169,6 @@ async def fetch_player_game_counts(account_id: int) -> dict | None:
             'all_time_ad':      int,
             'last_year_ad':     int,
         }
-    or None if any request fails.
     """
     base = f"{OPENDOTA_BASE}/players/{account_id}/wl"
     all_time_total_url  = _with_key(f"{base}?significant=0")
@@ -219,8 +229,11 @@ async def fetch_player_game_counts(account_id: int) -> dict | None:
             )
         counts = (all_total, last_total, all_ranked, all_ad, last_ad)
         if any(c is None for c in counts):
+            # Five queries, and a count is unknown if any of them never
+            # answered. Unknown is not zero and not "hasn't played": nothing
+            # should be rated from it (see sources.Unavailable).
             logger.warning("OpenDota wl fetch failed for %d", account_id)
-            return None
+            raise Unavailable("OpenDota game counts unreachable")
         # OpenDota's lobby_type+date filter is broken (returns 0/0), so we
         # estimate last-year ranked from the *non-AD* slice:
         #   non_ad_last  = last_total - last_ad
@@ -241,6 +254,8 @@ async def fetch_player_game_counts(account_id: int) -> dict | None:
             "all_time_ad":      all_ad,
             "last_year_ad":     last_ad,
         }
-    except Exception:
+    except Unavailable:
+        raise
+    except Exception as e:
         logger.exception("OpenDota counts fetch failed for %d", account_id)
-        return None
+        raise Unavailable(f"OpenDota game counts unreachable: {e}") from e

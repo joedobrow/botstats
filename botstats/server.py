@@ -567,6 +567,7 @@ async def player_api_handler(request: web.Request) -> web.Response:
 
     import rating_compute
 
+    unavailable: tuple[str, ...] = ()
     known = get_rating_cache_row(account_id) is not None or get_skill_override(account_id) is not None
     stale = known and (rating_compute.age_in_days(account_id) or 0) >= rating_compute.MAX_AGE_DAYS
     if not known or stale:
@@ -582,13 +583,16 @@ async def player_api_handler(request: web.Request) -> web.Response:
         if not over_budget:
             _new_lookups[caller] = recent + [now]
             try:
-                await rating_compute.compute_and_cache_rating(account_id)
+                inputs = await rating_compute.fetch_inputs(account_id)
+                unavailable = inputs.get("unavailable", ())
+                info = rating_compute.resolve(inputs, get_skill_override(account_id))
+                rating_compute.cache(inputs, info)
             except Exception:
                 logger.exception("player API: couldn't compute rating for %s", account_id)
         # Over budget with something cached: serve what we have. The payload
         # already says how old it is, which beats refusing to answer.
 
-    payload = player_api.build(account_id, guild_id)
+    payload = player_api.build(account_id, guild_id, unavailable=unavailable)
     if payload is None:
         logger.info("player API: %s looked up %s (unknown)", caller, account_id)
         return web.json_response({"error": "no data for that account"}, status=404)

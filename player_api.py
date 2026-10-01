@@ -35,7 +35,7 @@ def account_id_from(raw: str) -> int | None:
     return n - STEAM64_OFFSET if n > STEAM64_OFFSET else n
 
 
-def build(account_id: int, guild_id: int | None) -> dict | None:
+def build(account_id: int, guild_id: int | None, unavailable: tuple[str, ...] = ()) -> dict | None:
     """The payload for one player, or None if the bot knows nothing about them."""
     from db import (compute_fantasy_adjusted_ratings, get_guild_division, get_rating_cache_row,
                     get_skill_override, latest_match_fetch)
@@ -95,6 +95,12 @@ def build(account_id: int, guild_id: int | None) -> dict | None:
                 warnings.append(f"Cached rating is {age} days old.")
         except ValueError:
             pass
+    # Couldn't check just now: the rating below is whatever was last worked
+    # out, and nothing was recomputed, because a rating from a partial fetch
+    # is a guess dressed as a number.
+    if unavailable:
+        warnings.append(f"Couldn't reach {', '.join(unavailable)}, so this rating wasn't "
+                        f"rechecked. Try again shortly.")
 
     return {
         "account_id": account_id,
@@ -106,7 +112,7 @@ def build(account_id: int, guild_id: int | None) -> dict | None:
         "leaderboard_rank": lb_rank,
         "badge": format_badge(rank_tier, lb_rank) if rank_tier else None,
         "match_history_hidden": hidden,
-        "accurate": base is not None and not hidden,
+        "accurate": base is not None and not hidden and not unavailable,
         "warnings": warnings,
         "updated_at": updated,
         # The newer of: this player's data, and the division's latest match —
