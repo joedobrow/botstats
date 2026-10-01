@@ -31,7 +31,7 @@
   <label>Kind
     <select name="kind">
       {% for key, label in [("", "Any"), ("league", "League games"), ("other", "Outside a season"), ("manual", "Entered by hand")] + ([("excluded", "Taken out")] if is_admin else []) %}
-      <option value="{{ key }}"{% if q.get('kind', '') == key %} selected{% endif %}>{{ label }}</option>
+      <option value="{{ key }}"{% if kind == key %} selected{% endif %}>{{ label }}</option>
       {% endfor %}
     </select>
   </label>
@@ -48,7 +48,7 @@
 </form>
 
 {% if q.get('notice') %}<div class="errors"><p>{{ q.get('notice') }}</p></div>{% endif %}
-{% if q.get('kind') == 'excluded' %}
+{% if kind == 'excluded' %}
 <p class="muted small">Games taken out of the league's reckoning. They stay in the table so a
   re-fetch can't quietly put them back, and nothing counts them until they're restored.</p>
 {% endif %}
