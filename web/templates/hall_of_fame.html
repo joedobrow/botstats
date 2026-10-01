@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% from "macros.html" import player_link %}
+{% block content %}
+<h1>Hall of Fame</h1>
+{% if champions %}
+<div class="cards">
+{% for c in champions %}
+  <section class="card champions">
+    <div class="muted small">{{ c.season.division }} · <a href="{{ season_url(c.season) }}">{{ c.season.label }}</a></div>
+    <h3 class="flush">🏆 {% if c.team %}{{ c.team }}{% else %}Champions{% endif %}</h3>
+    {% if c.note %}<div class="muted small">{{ c.note }}</div>{% endif %}
+    <ul class="champion-list">
+      {% for m in c.members %}
+      <li>
+        {% if m.avatar_url %}<img class="avatar" src="{{ m.avatar_url }}" alt="">{% endif %}
+        {% if m.account_id %}{{ player_link(m.account_id, m.name) }}{% else %}{{ m.name }}{% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+{% endfor %}
+</div>
+{% else %}
+<p class="muted">No season has been won yet.</p>
+{% endif %}
+{% endblock %}

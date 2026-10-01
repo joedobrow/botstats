@@ -5,7 +5,7 @@
 <div class="profile-head">
   {% if player.avatar_url %}<img class="avatar big" src="{{ player.avatar_url }}" alt="">{% endif %}
   <div>
-    <h1>{{ player.name }}</h1>
+    <h1>{{ player.name }}{{ rings(player.account_id) }}</h1>
     <div class="muted">
       <strong class="rating">{{ "%.1f"|format(player.fantasy_points) }}</strong> Average Fantasy Points ·
       {{ player.games_played }} game{{ "" if player.games_played == 1 else "s" }}

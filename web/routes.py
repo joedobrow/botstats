@@ -72,7 +72,16 @@ env = jinja2.Environment(
 )
 env.filters.update(date=_fmt_date, duration=_fmt_duration,
                    markdown=lambda text: Markup(markup.render(text)))
-env.globals.update(season_url=season_url, team_url=team_url, hero=store.hero,
+def rings(account_id: int | None) -> Markup:
+    """One ring per season won, for after a player's name."""
+    n = store.champion_counts().get(account_id) if account_id else 0
+    if not n:
+        return Markup("")
+    return Markup('<span class="rings" title="Won {} season{}">{}</span>'.format(
+        n, "" if n == 1 else "s", "\N{RING}" * n))
+
+
+env.globals.update(season_url=season_url, team_url=team_url, hero=store.hero, rings=rings,
                    POSITION_NAMES=POSITION_NAMES, SEASON_STATUSES=store.SEASON_STATUSES)
 
 
@@ -315,6 +324,12 @@ async def season_page(request: web.Request):
     if request.get("user"):
         ctx["my_signup"] = store.get_signup(season, request["user"]["account_id"])
     return render(request, "season.html", **ctx)
+
+
+@routes.get("/hall-of-fame")
+async def hall_of_fame(request: web.Request):
+    return render(request, "hall_of_fame.html", title="Hall of Fame",
+                  champions=store.all_champions())
 
 
 @routes.post("/season/{season_id}/{division}/champions")

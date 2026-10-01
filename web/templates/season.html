@@ -163,15 +163,15 @@
       <input type="hidden" name="csrf" value="{{ csrf }}">
       <label>Winners
         <textarea name="winners" rows="3" placeholder="Paste the congratulations message, @names and all"
-          >{% if champions and champions.source == "recorded" %}{% for m in champions.members %}@{{ m.name }} {% endfor %}{% endif %}</textarea>
+          >{% if champions %}{% for m in champions.members %}@{{ m.name }} {% endfor %}{% endif %}</textarea>
       </label>
       <p class="muted small">Names split on @, so one with a space in it survives; a line of commas or
         one name per line works too. An account id links for certain.</p>
       <label>Team <input type="text" name="team" maxlength="80"
-             value="{% if champions and champions.source == "recorded" %}{{ champions.team or "" }}{% endif %}"></label>
+             value="{% if champions %}{{ champions.team or "" }}{% endif %}"></label>
       <label>Note <span class="muted small">(optional)</span>
         <input type="text" name="note" maxlength="200"
-               value="{% if champions and champions.source == "recorded" %}{{ champions.note or "" }}{% endif %}"></label>
+               value="{% if champions %}{{ champions.note or "" }}{% endif %}"></label>
       <div class="actions"><button class="primary">Save</button></div>
     </form>
   </section>

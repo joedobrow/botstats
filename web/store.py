@@ -381,9 +381,37 @@ def season_champions(season: dict) -> dict | None:
     return out
 
 
+# Rings are drawn next to a name on nearly every page, so the counts are read
+# once and kept until they change.
+_champion_counts: dict[int, int] | None = None
+
+
+def champion_counts() -> dict[int, int]:
+    """{account_id: seasons won}, for the ring after a player's name."""
+    global _champion_counts
+    if _champion_counts is None:
+        with _conn() as conn:
+            _champion_counts = {r["account_id"]: r["n"] for r in conn.execute(
+                "SELECT account_id, COUNT(*) AS n FROM site_season_champions "
+                "WHERE account_id IS NOT NULL GROUP BY account_id")}
+    return _champion_counts
+
+
+def all_champions() -> list[dict]:
+    """Every season that has been won, newest first, with its winners."""
+    out = []
+    for season in all_seasons():
+        won = season_champions(season)
+        if won:
+            out.append({"season": season, **won})
+    return out
+
+
 def set_season_champions(season_id: int, division_id: int, members: list[dict],
                          team: str = "", note: str = "") -> None:
     """Record (or, with an empty members list, clear) a season's winners."""
+    global _champion_counts
+    _champion_counts = None
     with _conn() as conn:
         conn.execute("DELETE FROM site_season_champions WHERE season_id = ? AND division_id = ?",
                      (season_id, division_id))

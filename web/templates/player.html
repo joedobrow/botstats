@@ -9,7 +9,7 @@
 <div class="profile-head">
   {% if ident.avatar_url %}<img class="avatar big" src="{{ ident.avatar_url }}" alt="">{% endif %}
   <div>
-    <h1>{{ ident.name or account_id }}</h1>
+    <h1>{{ ident.name or account_id }}{{ rings(account_id) }}</h1>
     <div class="muted">
       {% if rating is not none %}Rating <strong class="rating">{{ rating }}</strong> · {% endif %}
       <a href="https://windrun.io/players/{{ account_id }}" rel="noopener">Windrun</a> ·
