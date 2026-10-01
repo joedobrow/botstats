@@ -220,6 +220,25 @@ ul.plain { list-style: none; padding: 0; margin: 0; }
 ul.plain li { padding: 4px 0; border-bottom: 1px solid var(--border); }
 ul.plain li:last-child { border-bottom: 0; }
 
+/* Playoffs: rounds as columns, each match a pair of seats. */
+.bracket { display: flex; gap: 28px; overflow-x: auto; padding-bottom: 8px; align-items: stretch; }
+.bracket-round { display: flex; flex-direction: column; justify-content: space-around; gap: 18px; min-width: 210px; }
+.bracket-round h3 { margin: 0 0 4px; font-size: 0.95rem; color: var(--muted); }
+.bracket-match { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--surface); }
+.bracket-match.decided { border-color: var(--win); }
+.bracket-seat { display: flex; align-items: center; gap: 8px; padding: 7px 10px; }
+.bracket-seat + .bracket-seat { border-top: 1px solid var(--border); }
+.bracket-seat.won { font-weight: 700; color: var(--win); }
+.bracket-seat.out { color: var(--muted); }
+.bracket-seat.drop-target { outline: 2px dashed var(--accent); outline-offset: -2px; }
+.bracket-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bracket-seat select { flex: 1; min-width: 0; height: auto; padding: 3px 24px 3px 6px; background-position: right 7px center; }
+.bracket-score { margin-left: auto; font-variant-numeric: tabular-nums; }
+.team-chip { display: inline-block; margin: 2px 4px 2px 0; padding: 2px 9px; border-radius: 12px;
+             border: 1px solid var(--border); background: var(--surface); cursor: grab; }
+.team-chip.dragging { opacity: 0.5; }
+.champion { font-size: 1.1rem; }
+
 /* A cell holding a link and an action next to it: tags collapse to a single
    space, which isn't enough to tell them apart. */
 .row-actions > form.inline { margin-left: 14px; }

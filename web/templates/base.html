@@ -97,6 +97,36 @@ document.querySelectorAll("form[data-live-filter]").forEach(function (form) {
   filter();
 });
 
+// Playoff bracket: drag a team chip onto a seat. The seat is a <select>
+// underneath, so the bracket can be filled in without any of this.
+(function () {
+  var dragging = null;
+  document.querySelectorAll(".team-chip").forEach(function (chip) {
+    chip.addEventListener("dragstart", function (e) {
+      dragging = chip.dataset.captain;
+      chip.classList.add("dragging");
+      e.dataTransfer.setData("text/plain", dragging);
+    });
+    chip.addEventListener("dragend", function () { chip.classList.remove("dragging"); });
+  });
+  document.querySelectorAll(".bracket-seat select").forEach(function (sel) {
+    var seat = sel.closest(".bracket-seat");
+    seat.addEventListener("dragover", function (e) { e.preventDefault(); seat.classList.add("drop-target"); });
+    seat.addEventListener("dragleave", function () { seat.classList.remove("drop-target"); });
+    seat.addEventListener("drop", function (e) {
+      e.preventDefault();
+      seat.classList.remove("drop-target");
+      var captain = e.dataTransfer.getData("text/plain") || dragging;
+      if (!captain) return;
+      // A team sits in one seat, so clear it from wherever it was.
+      document.querySelectorAll(".bracket-seat select").forEach(function (other) {
+        if (other !== sel && other.value === captain) other.value = "";
+      });
+      sel.value = captain;
+    });
+  });
+})();
+
 // Dialogs: a [data-open-dialog="id"] button opens <dialog id="id">;
 // [data-close-dialog] inside it closes it.
 document.querySelectorAll("[data-open-dialog]").forEach(function (b) {

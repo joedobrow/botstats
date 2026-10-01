@@ -827,6 +827,99 @@ def rating_breakdown(account_id: int) -> dict | None:
     }
 
 
+def playoff_bracket(season: dict) -> dict | None:
+    """The bracket, filled in as far as the games have decided it.
+
+    Only the first round's seats are stored; every round after is worked out
+    from the results, so a bracket can't disagree with the games it came from.
+    A series is whichever pair are seated against each other, counting the
+    games they've played since playoffs started, first to best_of // 2 + 1.
+
+    Returns {size, best_of, started_at, rounds: [[match, ...], ...], champion,
+    unplaced, teams} where a match is {a, b, a_name, b_name, a_wins, b_wins,
+    winner, decided, match_ids, round, idx}.
+    """
+    bracket = db.get_playoff_bracket(season["id"], season["division_id"])
+    if not bracket:
+        return None
+    matches = season_matches(season)
+    teams = {t["captain"]: t for t in season_teams(season, matches)}
+    started_ts = _t_iso(bracket["started_at"])
+
+    # Games between a pair since playoffs began, newest last.
+    played: dict[frozenset, list[dict]] = {}
+    for m in matches:
+        rad, dire = m["radiant_team"], m["dire_team"]
+        if not rad or not dire or rad == dire:
+            continue
+        if m["start_time"] < started_ts:      # a regular-season game between the pair
+            continue
+        played.setdefault(frozenset((rad, dire)), []).append(m)
+
+    needed = bracket["best_of"] // 2 + 1
+
+    def series(a: str | None, b: str | None) -> dict:
+        games = played.get(frozenset((a, b)), []) if a and b else []
+        a_wins = sum(1 for m in games
+                     if (m["radiant_team"] == a) == bool(m["radiant_win"]))
+        b_wins = len(games) - a_wins
+        winner = a if a_wins >= needed else (b if b_wins >= needed else None)
+        return {"a": a, "b": b,
+                "a_name": teams[a]["name"] if a in teams else a,
+                "b_name": teams[b]["name"] if b in teams else b,
+                "a_wins": a_wins, "b_wins": b_wins, "winner": winner,
+                "decided": winner is not None,
+                "match_ids": [m["match_id"] for m in games]}
+
+    rounds, seats = [], list(bracket["seats"])
+    while len(seats) >= 2:
+        row = []
+        for i in range(0, len(seats), 2):
+            m = series(seats[i], seats[i + 1])
+            m["round"], m["idx"] = len(rounds) + 1, i // 2
+            row.append(m)
+        rounds.append(row)
+        seats = [m["winner"] for m in row]        # the next round is the winners
+    champion = seats[0] if seats else None
+
+    placed = {c for c in bracket["seats"] if c}
+    bracket.update({
+        "rounds": rounds,
+        "champion": champion,
+        "champion_name": teams[champion]["name"] if champion in teams else champion,
+        "needed": needed,
+        "teams": [{"captain": t["captain"], "name": t["name"], "wins": t["wins"],
+                   "losses": t["losses"], "buchholz": t["buchholz"]} for t in teams.values()],
+        "unplaced": [{"captain": t["captain"], "name": t["name"]}
+                     for t in teams.values() if t["captain"] not in placed],
+        "complete": all(m["decided"] for r in rounds for m in r),
+    })
+    return bracket
+
+
+def _t_iso(iso: str) -> int:
+    """An ISO timestamp as unix seconds, for comparing with a match's."""
+    try:
+        when = datetime.fromisoformat(iso)
+    except ValueError:
+        return 0
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return int(when.timestamp())
+
+
+def round_name(round_number: int, total_rounds: int) -> str:
+    """Final, Semi-finals, Quarter-finals, then Round of N."""
+    from_end = total_rounds - round_number
+    if from_end == 0:
+        return "Final"
+    if from_end == 1:
+        return "Semi-finals"
+    if from_end == 2:
+        return "Quarter-finals"
+    return f"Round of {2 ** (from_end + 1)}"
+
+
 def weeks_with_games(season: dict) -> list[dict]:
     """The season's weeks that actually have games in them.
 
