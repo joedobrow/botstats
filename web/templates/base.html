@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{% if title %}{{ title }} · {% endif %}CADL</title>
+<title>{% if title %}{{ title }} · {% endif %}ADCL</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Alfa+Slab+One&display=swap">
@@ -22,7 +22,7 @@
 <body>
 <header class="topbar">
   <nav class="wrap">
-    <a class="brand" href="/">CADL</a>
+    <a class="brand" href="/" title="Ability Draft Community League">ADCL</a>
     <span class="spacer"></span>
     <a href="/admin" {% if path.startswith('/admin') %}class="active"{% endif %}>Admin</a>
     <a href="/settings" {% if path == '/settings' %}class="active"{% endif %}>Settings</a>
