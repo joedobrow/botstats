@@ -75,7 +75,10 @@
   </tr></thead>
   <tbody>
   {% for r in table.rows %}
-    {% set best = r.breakdown|sort(attribute="vs_field", reverse=true) %}
+    {# The duration correction isn't something a player does, so it has no
+       business being what they're said to earn most from. It stays in the
+       full breakdown, where it explains the total. #}
+    {% set best = r.breakdown|rejectattr("key", "equalto", "duration")|sort(attribute="vs_field", reverse=true)|list %}
     <tr>
       <td class="muted">{{ loop.index }}</td>
       <td class="with-avatar" data-sort="{{ r.name|lower }}">
