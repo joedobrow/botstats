@@ -205,6 +205,19 @@ def init_db():
             # a player's accounts are compared, not just at fetch time.
             logger.info("Migrating: adding windrun_games to player_ratings_cache")
             conn.execute("ALTER TABLE player_ratings_cache ADD COLUMN windrun_games INTEGER")
+        cursor = conn.execute("PRAGMA table_info(matches)")
+        match_cols = [row[1] for row in cursor.fetchall()]
+        if match_cols and "excluded" not in match_cols:
+            # Taking a game out can't mean deleting the row: upsert_match is
+            # INSERT OR IGNORE, so the next fetch of that league would put it
+            # straight back. A flag the fetch never writes is what makes the
+            # removal stick — scrim-week games, remakes, a lobby that counted
+            # for nothing.
+            logger.info("Migrating: adding excluded to matches")
+            conn.execute("ALTER TABLE matches ADD COLUMN excluded INTEGER NOT NULL DEFAULT 0")
+            conn.execute("ALTER TABLE matches ADD COLUMN excluded_reason TEXT")
+            conn.execute("ALTER TABLE matches ADD COLUMN excluded_by INTEGER")
+            conn.execute("ALTER TABLE matches ADD COLUMN excluded_at TEXT")
         if prc_cols and "ranked_all_time" not in prc_cols:
             # The last of the rating formula's inputs to go unstored, which
             # left a rating rebuilt from the cache (rating_compute
@@ -1293,7 +1306,10 @@ class MatchScope:
 
     def where(self, alias: str = "m") -> tuple[str, list]:
         """(SQL condition, params) over the matches table aliased `alias`."""
-        clauses, params = [f"{alias}.division_id = ?"], [self.division_id]
+        # A game somebody took out stays in the table — deleting it would only
+        # have it fetched again — and is left out of every scoped query from
+        # the one place they all build their WHERE from.
+        clauses, params = [f"{alias}.division_id = ?", f"{alias}.excluded = 0"], [self.division_id]
         if self.league_id is not None:
             clauses.append(f"{alias}.league_id = ?"); params.append(self.league_id)
         else:
@@ -2632,6 +2648,24 @@ def add_manual_match(*, division_id: int, league_id: int, start_time: int,
     set_match_team_override(match_id, "dire", loser, set_by=set_by)
     logger.info("Manual result %d: %s beat %s in division %s", match_id, winner, loser, division_id)
     return match_id
+
+
+def set_match_excluded(match_id: int, excluded: bool, *, reason: str | None = None,
+                       by: int | None = None) -> bool:
+    """Take a game out of the league's reckoning, or put it back.
+
+    The row stays: it's a real game that really happened, and deleting it
+    would only mean fetching it again next time the league is pulled. Every
+    scoped query skips it (MatchScope), so records, stats, standings and
+    matchups all stop counting it at once.
+    """
+    with _conn() as conn:
+        cur = conn.execute(
+            "UPDATE matches SET excluded = ?, excluded_reason = ?, excluded_by = ?, "
+            "excluded_at = ? WHERE match_id = ?",
+            (1 if excluded else 0, reason if excluded else None, by if excluded else None,
+             datetime.now(timezone.utc).isoformat() if excluded else None, match_id))
+    return cur.rowcount > 0
 
 
 def delete_manual_match(match_id: int) -> bool:

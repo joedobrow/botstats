@@ -105,16 +105,14 @@
       <td class="{{ 'win' if won else 'loss' }}">{{ "Win" if won else "Loss" }}</td>
       <td class="num">{% if m.match_id > 0 %}{{ m.duration|duration }}{% else %}<span class="muted">—</span>{% endif %}</td>
       <td>
-        {% if m.match_id > 0 %}<a href="/match/{{ m.match_id }}">Details</a>
-        {% else %}<span class="tag">By hand</span>
-          {% if is_admin %}
-          <form method="post" class="inline"
-                action="{{ team_url(season, team.captain) }}/match/{{ m.match_id }}/delete"
-                onsubmit="return confirm('Remove this result?')">
-            <input type="hidden" name="csrf" value="{{ csrf }}">
-            <button class="linklike danger">Remove</button>
-          </form>
-          {% endif %}
+        {% if m.match_id > 0 %}<a href="/match/{{ m.match_id }}">Details</a>{% else %}<span class="tag">By hand</span>{% endif %}
+        {% if is_admin %}
+        <form method="post" class="inline"
+              action="{{ team_url(season, team.captain) }}/match/{{ m.match_id }}/delete"
+              onsubmit="return confirm('Take this game out? It stops counting everywhere, and won\'t come back when the league is re-fetched.')">
+          <input type="hidden" name="csrf" value="{{ csrf }}">
+          <button class="linklike danger" title="Scrim week, a remake, a game that shouldn't count">Remove</button>
+        </form>
         {% endif %}
       </td>
     </tr>

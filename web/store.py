@@ -465,7 +465,7 @@ def player_matches(account_id: int) -> list[dict]:
             SELECT p.*, m.start_time, m.division_id, m.league_id, m.duration AS match_duration,
                    m.radiant_score, m.dire_score
             FROM players p JOIN matches m ON m.match_id = p.match_id
-            WHERE p.account_id = ?
+            WHERE p.account_id = ? AND m.excluded = 0
             ORDER BY m.start_time DESC
         """, (account_id,)).fetchall()
     return [dict(r) for r in rows]
@@ -708,11 +708,15 @@ def search_matches(*, player: str = "", season: int | None = None, division: int
     if division:
         where.append("m.division_id = ?"); params.append(division)
     if kind == "league":
-        where.append("m.league_id > 0 AND m.match_id > 0")
+        where.append("m.league_id > 0 AND m.match_id > 0 AND m.excluded = 0")
     elif kind == "other":
-        where.append("m.league_id = 0 AND m.match_id > 0")
+        where.append("m.league_id = 0 AND m.match_id > 0 AND m.excluded = 0")
     elif kind == "manual":
-        where.append("m.match_id < 0")
+        where.append("m.match_id < 0 AND m.excluded = 0")
+    elif kind == "excluded":
+        where.append("m.excluded = 1")
+    else:
+        where.append("m.excluded = 0")
     for value, op in ((date_from, ">="), (date_to, "<=")):
         if value:
             try:
@@ -753,6 +757,7 @@ def search_matches(*, player: str = "", season: int | None = None, division: int
         sides = caps.get(r["match_id"], {})
         r["radiant_team"], r["dire_team"] = sides.get("radiant"), sides.get("dire")
         r["by_hand"] = r["match_id"] < 0
+        r["excluded"] = bool(r.get("excluded"))
         if r.get("me"):
             r["me"]["hero"] = hero(r["me"]["hero_id"])
     pages = max(1, -(-total // per_page))

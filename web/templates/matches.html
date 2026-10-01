@@ -30,7 +30,7 @@
   </label>
   <label>Kind
     <select name="kind">
-      {% for key, label in [("", "Any"), ("league", "League games"), ("other", "Outside a season"), ("manual", "Entered by hand")] %}
+      {% for key, label in [("", "Any"), ("league", "League games"), ("other", "Outside a season"), ("manual", "Entered by hand"), ("excluded", "Taken out")] %}
       <option value="{{ key }}"{% if q.get('kind', '') == key %} selected{% endif %}>{{ label }}</option>
       {% endfor %}
     </select>
@@ -47,6 +47,11 @@
   </div>
 </form>
 
+{% if q.get('notice') %}<div class="errors"><p>{{ q.get('notice') }}</p></div>{% endif %}
+{% if q.get('kind') == 'excluded' %}
+<p class="muted small">Games taken out of the league's reckoning. They stay in the table so a
+  re-fetch can't quietly put them back, and nothing counts them until they're restored.</p>
+{% endif %}
 {% if result.unknown_player %}
 <p class="muted">Nobody here matches “{{ result.unknown_player }}”. A Dota account id works too.</p>
 {% else %}
@@ -80,7 +85,15 @@
         <td class="small">{{ "Radiant" if m.radiant_win else "Dire" }}</td>
       {% endif %}
       <td class="num">{% if m.duration %}{{ m.duration|duration }}{% else %}<span class="muted">—</span>{% endif %}</td>
-      <td>{% if not m.by_hand %}<a href="/match/{{ m.match_id }}">Details</a>{% endif %}</td>
+      <td>
+        {% if not m.by_hand %}<a href="/match/{{ m.match_id }}">Details</a>{% endif %}
+        {% if m.excluded and is_admin %}
+        <form method="post" action="/matches/{{ m.match_id }}/restore" class="inline">
+          <input type="hidden" name="csrf" value="{{ csrf }}">
+          <button class="linklike">Restore</button>
+        </form>
+        {% endif %}
+      </td>
     </tr>
   {% else %}
     <tr><td colspan="8" class="muted">No matches with those filters.</td></tr>
