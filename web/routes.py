@@ -289,6 +289,9 @@ async def season_page(request: web.Request):
         ctx["rounds"] = store.season_matchups(season)
     elif tab == "signups":
         ctx["signups"] = store.list_signups(season)
+    elif tab == "champions":
+        ctx["champions"] = store.season_champions(season)
+        ctx["notice"] = request.query.get("notice")
     elif tab == "leaders":
         ctx["leaders"], ctx["min_games"], ctx["max_games"] = store.season_leaders(season)
     elif tab == "matches":
@@ -312,6 +315,27 @@ async def season_page(request: web.Request):
     if request.get("user"):
         ctx["my_signup"] = store.get_signup(season, request["user"]["account_id"])
     return render(request, "season.html", **ctx)
+
+
+@routes.post("/season/{season_id}/{division}/champions")
+async def season_champions_set(request: web.Request):
+    """Record who won a season. Names are matched to accounts where they can
+    be; one that can't is kept as typed rather than dropped."""
+    season = _season_or_404(request)
+    _require_admin(request)
+    data = await request.post()
+    members = store.resolve_champion_names(data.get("winners", ""))
+    store.set_season_champions(season["id"], season["division_id"], members,
+                               team=data.get("team", ""), note=data.get("note", ""))
+    if not members:
+        notice = "Champions cleared."
+    else:
+        unknown = [m["name"] for m in members if not m["account_id"]]
+        notice = f"Recorded {len(members)} winners."
+        if unknown:
+            notice += (" No account here matches " + ", ".join(unknown)
+                       + " — shown as typed. Paste an account id instead to link them.")
+    raise web.HTTPFound(f"{season_url(season)}?tab=champions&" + urlencode({"notice": notice}))
 
 
 @routes.post("/season/{season_id}/{division}/playoffs/start")

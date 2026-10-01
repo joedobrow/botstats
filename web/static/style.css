@@ -266,6 +266,9 @@ tfoot tr.total th, tfoot tr.total td {
 .matchups { table-layout: fixed; }
 .matchups td.matchup-side { width: 40%; }
 .matchups td.matchup-games { width: 16%; white-space: nowrap; }
+.champion-list { list-style: none; padding: 0; margin: 10px 0 0; display: flex; flex-wrap: wrap; gap: 8px 18px; }
+.champion-list li { display: flex; align-items: center; gap: 7px; }
+.panel.champions h2 { margin-bottom: 0; }
 .matchups td.matchup-vs { width: 4%; text-align: center; color: var(--muted);
   font-size: 0.68rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.65; }
 

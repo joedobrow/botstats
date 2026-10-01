@@ -13,7 +13,7 @@
 </div>
 
 <nav class="tabs">
-  {% for key, label in [("matchups", "Matchups"), ("signups", "Signups (" ~ season.signup_count ~ ")"), ("teams", "Teams"), ("matches", "Matches"), ("playoffs", "Playoffs"), ("leaders", "Leaders")] %}
+  {% for key, label in [("matchups", "Matchups"), ("signups", "Signups (" ~ season.signup_count ~ ")"), ("teams", "Teams"), ("matches", "Matches"), ("playoffs", "Playoffs"), ("champions", "Champions"), ("leaders", "Leaders")] %}
   <a href="?tab={{ key }}" {% if tab == key %}class="active"{% endif %}>{{ label }}</a>
   {% endfor %}
 </nav>
@@ -133,6 +133,48 @@
   {% endfor %}
   {% else %}
   <p class="muted">Matchups appear here once the season has weeks and teams.</p>
+  {% endif %}
+
+{% elif tab == "champions" %}
+  {% if notice %}<div class="errors"><p>{{ notice }}</p></div>{% endif %}
+  {% if champions %}
+  <section class="panel champions">
+    <h2 class="flush">🏆 {% if champions.team %}{{ champions.team }}{% else %}Champions{% endif %}</h2>
+    {% if champions.note %}<p class="muted small">{{ champions.note }}</p>{% endif %}
+    <ul class="champion-list">
+      {% for m in champions.members %}
+      <li>
+        {% if m.avatar_url %}<img class="avatar" src="{{ m.avatar_url }}" alt="">{% endif %}
+        {% if m.account_id %}{{ player_link(m.account_id, m.name) }}{% else %}{{ m.name }}{% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% else %}
+  <p class="muted">TBD — this season hasn't been won yet.</p>
+  {% endif %}
+  {% if is_admin %}
+  <section class="panel">
+    <h2>{{ "Change the champions" if champions and champions.source == "recorded" else "Record the champions" }}</h2>
+    {% if champions and champions.source == "bracket" %}
+    <p class="muted small">Taken from the finished bracket. Recording them here overrides that.</p>
+    {% endif %}
+    <form method="post" action="{{ season_url(season) }}/champions" class="form">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <label>Winners
+        <textarea name="winners" rows="3" placeholder="Paste the congratulations message, @names and all"
+          >{% if champions and champions.source == "recorded" %}{% for m in champions.members %}@{{ m.name }} {% endfor %}{% endif %}</textarea>
+      </label>
+      <p class="muted small">Names split on @, so one with a space in it survives; a line of commas or
+        one name per line works too. An account id links for certain.</p>
+      <label>Team <input type="text" name="team" maxlength="80"
+             value="{% if champions and champions.source == "recorded" %}{{ champions.team or "" }}{% endif %}"></label>
+      <label>Note <span class="muted small">(optional)</span>
+        <input type="text" name="note" maxlength="200"
+               value="{% if champions and champions.source == "recorded" %}{{ champions.note or "" }}{% endif %}"></label>
+      <div class="actions"><button class="primary">Save</button></div>
+    </form>
+  </section>
   {% endif %}
 
 {% elif tab == "teams" %}
