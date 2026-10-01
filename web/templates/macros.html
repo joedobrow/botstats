@@ -1,5 +1,5 @@
 {% macro player_link(account_id, name) -%}
-<a href="/player/{{ account_id }}">{{ name or account_id }}</a>
+<a href="/player/{{ account_id }}">{{ name or account_id }}</a>{{ rings(account_id) }}
 {%- endmacro %}
 
 {% macro hero_icon(h) -%}

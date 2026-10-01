@@ -83,7 +83,7 @@
       <td class="muted">{{ loop.index }}</td>
       <td class="with-avatar" data-sort="{{ r.name|lower }}">
         {% if r.avatar_url %}<img class="avatar" src="{{ r.avatar_url }}" alt="">{% endif %}
-        <a href="/fantasy/{{ r.account_id }}{% if q.get('season') %}?season={{ q.get('season') }}{% endif %}">{{ r.name }}</a>
+        <a href="/fantasy/{{ r.account_id }}{% if q.get('season') %}?season={{ q.get('season') }}{% endif %}">{{ r.name }}</a>{{ rings(r.account_id) }}
       </td>
       <td class="num" data-sort="{{ r.get(stat) or 0 }}"><strong>{{ r.stat_text }}</strong></td>
       <td class="num" data-sort="{{ r.games_played }}">{{ r.games_played }}</td>
