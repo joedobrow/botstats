@@ -180,6 +180,12 @@ ul.plain { list-style: none; padding: 0; margin: 0; }
 ul.plain li { padding: 4px 0; border-bottom: 1px solid var(--border); }
 ul.plain li:last-child { border-bottom: 0; }
 
+/* Matches page: a wide filter bar, and a pager under the table. */
+.filters { align-items: end; }
+.filters label { min-width: 0; }
+.pager { display: flex; align-items: center; gap: 14px; margin: 16px 0; }
+.small-button { font-size: 0.85rem; padding: 3px 10px; }
+
 /* Matchups: two teams a row, the winner in the win colour. */
 .matchup-side { white-space: nowrap; }
 .matchup-side.win a { font-weight: 700; }
