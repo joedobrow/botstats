@@ -3,16 +3,16 @@
 {% block content %}
 <h1>Fantasy</h1>
 <form method="get" class="form grid filters">
-  <label>Season
+  <label>Season{% if draft_relative %} <span class="muted small">(measured against one draft)</span>{% endif %}
     <select name="season">
-      <option value=""{% if not season %} selected{% endif %}>Every season</option>
+      {% if not draft_relative %}<option value=""{% if not season %} selected{% endif %}>Every season</option>{% endif %}
       {% for s in seasons %}
       <option value="{{ s.id }}"{% if season and season.id == s.id %} selected{% endif %}>{{ s.label }} · {{ s.division }}</option>
       {% endfor %}
     </select>
   </label>
   <label>Stat
-    <select name="stat">
+    <select name="stat" onchange="this.form.submit()">
       {% for key, label in stats %}
       <option value="{{ key }}"{% if key == stat %} selected{% endif %}>{{ label }}</option>
       {% endfor %}
@@ -52,11 +52,6 @@
 {% endif %}
 
 <h2>{{ stat_label }}</h2>
-{% if scoped %}
-<p class="muted small">{{ stat_label }} is measured against a draft — what a player cost, and how
-  much of their team's season they played — so it only means something inside one. Showing
-  <strong>{{ season.label }}</strong>.</p>
-{% endif %}
 <div class="scroll">
 <table class="sortable">
   <thead><tr>

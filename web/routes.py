@@ -548,10 +548,9 @@ async def fantasy_page(request: web.Request):
     # and how much of their team's season they turned up for — so pooled
     # across seasons there's nothing to measure against and the table comes
     # out empty. Scope them to a season, the way the bot always does.
-    scoped = False
-    if stat in store.DRAFT_RELATIVE and season is None and seasons:
+    draft_relative = stat in store.DRAFT_RELATIVE
+    if draft_relative and season is None and seasons:
         season = max(seasons, key=lambda s: (s["season_start"], s["id"]))
-        scoped = True
     week = re.sub(r"\D", "", q.get("week", ""))
     position = re.sub(r"\D", "", q.get("position", ""))
     weeks = db.get_season_weeks(season["id"], season["division_id"]) if season else []
@@ -577,7 +576,7 @@ async def fantasy_page(request: web.Request):
     stats = sorted(((key, re.sub(r"^[^\w(]+", "", label).strip())
                     for key, label in STAT_LABELS.items()), key=lambda kv: kv[1].lower())
     return render(request, "fantasy.html", title="Fantasy", table=table, seasons=seasons,
-                  season=season, scoped=scoped, q=q, stats=stats, stat=stat,
+                  season=season, draft_relative=draft_relative, q=q, stats=stats, stat=stat,
                   stat_label=dict(stats).get(stat, stat), weeks=weeks,
                   not_found=bool(q.get("player")),
                   labels=fantasy.LABELS, duration_mean=fantasy.DURATION_MEAN_MIN)
