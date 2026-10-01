@@ -30,7 +30,7 @@
   </label>
   <label>Kind
     <select name="kind">
-      {% for key, label in [("", "Any"), ("league", "League games"), ("other", "Outside a season"), ("manual", "Entered by hand"), ("excluded", "Taken out")] %}
+      {% for key, label in [("", "Any"), ("league", "League games"), ("other", "Outside a season"), ("manual", "Entered by hand")] + ([("excluded", "Taken out")] if is_admin else []) %}
       <option value="{{ key }}"{% if q.get('kind', '') == key %} selected{% endif %}>{{ label }}</option>
       {% endfor %}
     </select>
