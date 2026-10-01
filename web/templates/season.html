@@ -13,7 +13,7 @@
 </div>
 
 <nav class="tabs">
-  {% for key, label in [("matchups", "Matchups"), ("playoffs", "Playoffs"), ("teams", "Teams"), ("matches", "Matches"), ("leaders", "Leaders"), ("signups", "Signups (" ~ season.signup_count ~ ")")] %}
+  {% for key, label in [("matchups", "Matchups"), ("signups", "Signups (" ~ season.signup_count ~ ")"), ("teams", "Teams"), ("matches", "Matches"), ("playoffs", "Playoffs"), ("leaders", "Leaders")] %}
   <a href="?tab={{ key }}" {% if tab == key %}class="active"{% endif %}>{{ label }}</a>
   {% endfor %}
 </nav>
@@ -162,7 +162,7 @@
 
 {% elif tab == "matches" %}
   {% if more_matches %}
-  <p><a class="button" href="/matches?season={{ season.id }}&division={{ season.division_id }}">Every match, with filters →</a></p>
+  <p><a class="button" href="/matches?season={{ season.id }}&division={{ season.division_id }}">See all</a></p>
   {% endif %}
   {% macro match_table(rows, with_teams) %}
   <div class="scroll">
@@ -198,10 +198,9 @@
   {% endif %}
 
 {% elif tab == "leaders" %}
-  <p class="muted small">This season's games only. Players with at least {{ min_games }} of {{ max_games }} games (half of the most active player's), so stand-ins don't top the list.</p>
   <div class="scroll">
   <table class="sortable">
-    <thead><tr><th data-sort-type="num">#</th><th data-sort-type="text">Player</th><th class="num" data-sort-type="num" data-sort-first="desc">Games</th><th class="num" data-sort-type="num" data-sort-first="desc">W–L</th><th class="num" data-sort-type="num" data-sort-first="desc">Fantasy</th><th class="num" data-sort-type="num" data-sort-first="desc">KDA</th><th class="num" data-sort-type="num" data-sort-first="desc">GPM</th><th class="num" data-sort-type="num" data-sort-first="desc">XPM</th><th class="num" data-sort-type="num" data-sort-first="desc">Hero dmg</th></tr></thead>
+    <thead><tr><th data-sort-type="num">#</th><th data-sort-type="text">Player</th><th class="num" data-sort-type="num" data-sort-first="desc">Games</th><th class="num" data-sort-type="num" data-sort-first="desc">W–L</th><th class="num" data-sort-type="num" data-sort-first="desc">Fantasy</th><th class="num" data-sort-type="num" data-sort-first="desc" title="What they were worth at the draft, less what they cost">Value</th><th class="num" data-sort-type="num" data-sort-first="desc" title="Share of their team's games they turned up for">Attendance</th></tr></thead>
     <tbody>
     {% for p in leaders %}
       <tr>
@@ -210,13 +209,16 @@
         <td class="num">{{ p.games_played }}</td>
         <td class="num" data-sort="{{ p.wins }}">{{ p.wins }}–{{ p.games_played - p.wins }}</td>
         <td class="num">{{ "%.1f"|format(p.fantasy_points) }}</td>
-        <td class="num">{{ "%.2f"|format(p.kda) }}</td>
-        <td class="num">{{ p.gpm|round|int }}</td>
-        <td class="num">{{ p.xpm|round|int }}</td>
-        <td class="num" data-sort="{{ p.hero_damage|round|int }}">{{ "{:,}".format(p.hero_damage|round|int) }}</td>
+        {# Both come from the draft, so a stand-in has neither. #}
+        <td class="num {{ 'win' if p.value and p.value > 0 else ('loss' if p.value and p.value < 0 else '') }}"
+            data-sort="{{ p.value if p.value is not none else '' }}"
+            {% if p.value is not none %}title="Paid {{ p.cost }}, deserved {{ p.deserved_cost|round|int }}"{% endif %}>
+          {% if p.value is not none %}{{ "%+.0f"|format(p.value) }}{% else %}<span class="muted">—</span>{% endif %}</td>
+        <td class="num" data-sort="{{ p.attendance if p.attendance is not none else '' }}">
+          {% if p.attendance is not none %}{{ (p.attendance * 100)|round|int }}%{% else %}<span class="muted">—</span>{% endif %}</td>
       </tr>
     {% else %}
-      <tr><td colspan="9" class="muted">No matches yet.</td></tr>
+      <tr><td colspan="7" class="muted">No matches yet.</td></tr>
     {% endfor %}
     </tbody>
   </table>
