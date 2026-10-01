@@ -85,7 +85,7 @@
         <td class="small">{{ "Radiant" if m.radiant_win else "Dire" }}</td>
       {% endif %}
       <td class="num">{% if m.duration %}{{ m.duration|duration }}{% else %}<span class="muted">—</span>{% endif %}</td>
-      <td>
+      <td class="row-actions">
         {% if not m.by_hand %}<a href="/match/{{ m.match_id }}">Details</a>{% endif %}
         {% if m.excluded and is_admin %}
         <form method="post" action="/matches/{{ m.match_id }}/restore" class="inline">

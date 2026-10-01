@@ -104,7 +104,7 @@
       </td>
       <td class="{{ 'win' if won else 'loss' }}">{{ "Win" if won else "Loss" }}</td>
       <td class="num">{% if m.match_id > 0 %}{{ m.duration|duration }}{% else %}<span class="muted">—</span>{% endif %}</td>
-      <td>
+      <td class="row-actions">
         {% if m.match_id > 0 %}<a href="/match/{{ m.match_id }}">Details</a>{% else %}<span class="tag">By hand</span>{% endif %}
         {% if is_admin %}
         <form method="post" class="inline"
