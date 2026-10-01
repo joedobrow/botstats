@@ -5,8 +5,8 @@
   <div>
     <h1>{{ season_name(season, csrf, is_admin, path) }}</h1>
     <div class="muted small">{{ season.division }} ·
-      <a href="https://www.opendota.com/leagues/{{ season.id }}" rel="noopener"
-         title="This season's Dota league on OpenDota, where its matches come from">League {{ season.id }}</a></div>
+      <a href="https://www.dotabuff.com/esports/leagues/{{ season.id }}" rel="noopener"
+         title="This season's Dota league on Dotabuff">League {{ season.id }}</a></div>
     <div class="muted small">Starts {{ season_start(season, csrf, is_uberadmin, path) }} · {{ season_status(season) }}</div>
   </div>
   <div>{{ signup_button(season, my_signup) }}</div>
@@ -144,7 +144,8 @@
         {% if t.logo_url %}<img class="logo" src="{{ t.logo_url }}" alt="">{% endif %}
         <div>
           <h3><a href="{{ team_url(season, t.captain) }}">{{ t.name }}</a></h3>
-          <div class="muted small">{{ t.wins }}–{{ t.losses }}</div>
+          <div class="muted small">{{ t.wins }}–{{ t.losses }}{% if t.buchholz is not none %}
+            <span title="Tiebreaker: the combined wins of everyone they've played">· {{ t.buchholz }}</span>{% endif %}</div>
         </div>
       </div>
       <ul class="roster">
