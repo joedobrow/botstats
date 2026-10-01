@@ -1,5 +1,11 @@
 {% extends "base.html" %}
 {% from "macros.html" import hero_icon %}
+{# A side is only a link when it's a team; an unattributed one has no page. #}
+{% macro side(season, captain) -%}
+{% if captain and season %}<a href="{{ team_url(season, captain) }}">{{ captain }}</a>
+{%- elif captain %}{{ captain }}
+{%- else %}<span class="muted">Stand-ins</span>{% endif %}
+{%- endmacro %}
 {% block content %}
 <h1>Matches</h1>
 
@@ -63,9 +69,7 @@
         {% if m.division_name %}<div class="muted small">{{ m.division_name }}</div>{% endif %}</td>
       <td class="small">
         {% if m.radiant_team or m.dire_team %}
-          {% if m.season %}<a href="{{ team_url(m.season, m.radiant_team) }}">{{ m.radiant_team or "Stand-ins" }}</a>
-          v <a href="{{ team_url(m.season, m.dire_team) }}">{{ m.dire_team or "Stand-ins" }}</a>
-          {% else %}{{ m.radiant_team or "Stand-ins" }} v {{ m.dire_team or "Stand-ins" }}{% endif %}
+          {{ side(m.season, m.radiant_team) }} v {{ side(m.season, m.dire_team) }}
         {% else %}<span class="muted">—</span>{% endif %}
       </td>
       {% if result.account_id %}
