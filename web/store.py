@@ -655,7 +655,18 @@ def season_teams(season: dict, matches: list[dict] | None = None) -> list[dict]:
             teams[winner]["wins"] += 1
         if loser in teams:
             teams[loser]["losses"] += 1
-    return sorted(teams.values(), key=lambda t: (-t["wins"], t["losses"], t["name"].lower()))
+        for side, other in ((rad, dire), (dire, rad)):
+            if side in teams:
+                teams[side].setdefault("opponents", set()).add(other)
+
+    # Buchholz: the combined wins of everyone you've played. Two teams on the
+    # same record aren't level — the one who got there against the teams who
+    # went on to win is ahead, and that's what the league breaks ties on.
+    for t in teams.values():
+        t["opponents"] = sorted(t.get("opponents", set()))
+        t["buchholz"] = sum(teams[o]["wins"] for o in t["opponents"] if o in teams)
+    return sorted(teams.values(),
+                  key=lambda t: (-t["wins"], t["losses"], -t["buchholz"], t["name"].lower()))
 
 
 MATCHES_PER_PAGE = 50
@@ -826,6 +837,10 @@ def season_matchups(season: dict) -> list[dict]:
         t = by_captain.get(cap)
         return f"{t['wins']}–{t['losses']}" if t else ""
 
+    def tiebreak(cap: str | None) -> int | None:
+        t = by_captain.get(cap)
+        return t["buchholz"] if t else None
+
     # Which pairs have met, and what each week's games were.
     met: set[frozenset] = set()
     per_week: dict[int, dict[frozenset, dict]] = {}
@@ -843,23 +858,50 @@ def season_matchups(season: dict) -> list[dict]:
         pair["match_ids"].append(m["match_id"])
         pair["wins"][rad if m["radiant_win"] else dire] += 1
 
+    def _pair(order: tuple[str, ...], budget: int) -> list[tuple[str, str, bool]] | None:
+        """Pair everyone, using at most `budget` rematches. Taking the first
+        free-looking opponent for each team in turn can strand the last two
+        having already played, when a different assignment higher up would
+        have left nobody stranded — so this backs out and tries again rather
+        than declaring a rematch unavoidable."""
+        if not order:
+            return []
+        a, rest = order[0], order[1:]
+        for i, b in enumerate(rest):
+            rematch = frozenset((a, b)) in met
+            if rematch and budget == 0:
+                continue
+            tail = _pair(rest[:i] + rest[i + 1:], budget - (1 if rematch else 0))
+            if tail is not None:
+                return [(a, b, rematch)] + tail
+        return None
+
     def swiss(order: list[str]) -> list[dict]:
-        """Pair down the standings, skipping anyone a team has already met."""
-        left, pairs = list(order), []
-        while len(left) > 1:
-            a = left.pop(0)
-            opponent = next((c for c in left if frozenset((a, c)) not in met), None)
-            rematch = opponent is None
-            if rematch:                      # everyone left has played them already
-                opponent = left[0]
-            left.remove(opponent)
-            pairs.append({"a": a, "b": opponent, "a_name": team_name(a), "b_name": team_name(opponent),
-                          "a_record": record(a), "b_record": record(opponent),
-                          "winner": None, "match_ids": [], "rematch": rematch, "bye": False})
-        if left:
-            a = left.pop()
-            pairs.append({"a": a, "b": None, "a_name": team_name(a), "b_name": None,
-                          "a_record": record(a), "b_record": "", "winner": None,
+        """The next round: strongest against strongest, nobody replaying
+        anyone they've already had unless the field leaves no choice."""
+        bye = None
+        if len(order) % 2:
+            # The bye goes as low as it can while still leaving a pairing the
+            # rest of the field can take without rematches.
+            for candidate in reversed(order):
+                rest = tuple(t for t in order if t != candidate)
+                if _pair(rest, 0) is not None:
+                    bye, order = candidate, list(rest)
+                    break
+            else:
+                bye, order = order[-1], order[:-1]
+        for budget in range(0, len(order) // 2 + 1):
+            found = _pair(tuple(order), budget)
+            if found is not None:
+                break
+        pairs = [{"a": a, "b": b, "a_name": team_name(a), "b_name": team_name(b),
+                  "a_record": record(a), "b_record": record(b),
+                  "a_tiebreak": tiebreak(a), "b_tiebreak": tiebreak(b), "winner": None,
+                  "match_ids": [], "rematch": rematch, "bye": False}
+                 for a, b, rematch in (found or [])]
+        if bye:
+            pairs.append({"a": bye, "b": None, "a_name": team_name(bye), "b_name": None,
+                          "a_record": record(bye), "b_record": "", "winner": None,
                           "match_ids": [], "rematch": False, "bye": True})
         return pairs
 
