@@ -24,8 +24,18 @@
   <nav class="wrap">
     <a class="brand" href="/" title="Ability Draft Community League">ADCL</a>
     <span class="spacer"></span>
+    {# The bar says who you are: logged out it offers the way in, and Admin
+       only appears for someone who can actually use it. #}
+    {% if is_admin %}
     <a href="/admin" {% if path.startswith('/admin') %}class="active"{% endif %}>Admin</a>
-    <a href="/settings" {% if path == '/settings' %}class="active"{% endif %}>Settings</a>
+    {% endif %}
+    {% if user %}
+    <a class="whoami" href="/settings" {% if path == '/settings' %}class="active"{% endif %}>
+      {% if user.avatar_url %}<img class="avatar" src="{{ user.avatar_url }}" alt="">{% endif %}
+      {{ user.steam_name or user.account_id }}</a>
+    {% else %}
+    <a href="/login?next={{ path|urlencode }}">Log in</a>
+    {% endif %}
   </nav>
 </header>
 <main class="wrap">
