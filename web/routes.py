@@ -578,7 +578,7 @@ async def fantasy_page(request: web.Request):
         season = max(seasons, key=lambda s: (s["season_start"], s["id"]))
     week = re.sub(r"\D", "", q.get("week", ""))
     position = re.sub(r"\D", "", q.get("position", ""))
-    weeks = db.get_season_weeks(season["id"], season["division_id"]) if season else []
+    weeks = store.weeks_with_games(season) if season else []
     # Without a season chosen, a division still narrows which games count.
     if season is None and division_id:
         store_divisions = [d for d in divisions if d["id"] == division_id]

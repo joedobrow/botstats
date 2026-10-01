@@ -824,6 +824,22 @@ def rating_breakdown(account_id: int) -> dict | None:
     }
 
 
+def weeks_with_games(season: dict) -> list[dict]:
+    """The season's weeks that actually have games in them.
+
+    A season is created with its full run of weeks, so offering all of them
+    as filters means most of the list returns nothing — and a week emptied by
+    taking its games out shouldn't be offered either, which is why this counts
+    matches rather than reading the calendar.
+    """
+    weeks = db.get_season_weeks(season["id"], season["division_id"])
+    if not weeks:
+        return []
+    starts = [m["start_time"] for m in season_matches(season)]
+    return [w for w in weeks
+            if any(w["start_ts"] <= t <= w["end_ts"] for t in starts)]
+
+
 def season_matchups(season: dict) -> list[dict]:
     """Who plays whom, week by week.
 
