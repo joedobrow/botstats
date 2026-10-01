@@ -3,8 +3,10 @@
 {% block content %}
 <div class="page-head">
   <div>
-    <div class="muted small">{{ season.division }} · League {{ season.id }}</div>
     <h1>{{ season_name(season, csrf, is_admin, path) }}</h1>
+    <div class="muted small">{{ season.division }} ·
+      <a href="https://www.opendota.com/leagues/{{ season.id }}" rel="noopener"
+         title="This season's Dota league on OpenDota, where its matches come from">League {{ season.id }}</a></div>
     <div class="muted small">Starts {{ season_start(season, csrf, is_uberadmin, path) }} · {{ season_status(season) }}</div>
   </div>
   <div>{{ signup_button(season, my_signup) }}</div>
