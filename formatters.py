@@ -95,6 +95,49 @@ def _sort_key(player: dict, sort_by: str) -> float:
 # /leaderboard
 # ---------------------------------------------------------------------------
 
+def format_stat_value(player: dict, sort_by: str, debug: bool = False) -> str | None:
+    """One leaderboard value, written the way that stat should read — a
+    percentage, a time, a rate, points. None when the player has no value for
+    it (undrafted on a value sort), which means leave them out.
+
+    Shared so the site's leaderboard says what Discord's says; they were two
+    renderings of one number, which is how they drift."""
+    val = player.get(sort_by)
+    if val is None:
+        return None
+    val = val or 0
+    if sort_by == "fantasy_points":
+        return f"{val:.1f} pts"
+    if sort_by == "value":
+        sign = "+" if val >= 0 else ""
+        cost = player.get("cost") or 0
+        deserved = player.get("deserved_cost") or (cost + val)
+        out = f"{sign}{val:.0f} (paid {cost}, deserved {deserved:.0f})"
+        if debug:
+            d_all = player.get("diff_vs_lobby") or 0
+            out += f" · diff_vs_lobby {'+' if d_all >= 0 else ''}{d_all:.2f}"
+        return out
+    if sort_by == "attendance":
+        games = player.get("games_played", 0) or 0
+        return f"{val * 100:.0f}% ({games} games)"
+    if sort_by == "diff":
+        return f"{'+' if val >= 0 else ''}{val:.1f} pts"
+    if sort_by in ("avg_pct_damage", "teamfight_participation", "firstblood_claimed"):
+        return f"{val * 100:.1f}%"
+    if sort_by in ("gpm", "xpm", "kda", "stuns"):
+        return f"{val:.1f}"
+    if sort_by in ("stuns_per_min", "observer_kills_per_min"):
+        return f"{val:.2f}/min"
+    if sort_by == "avg_first_tormentor_time":
+        return _format_seconds(val)
+    if sort_by == "avg_duration":
+        r_val, d_val = player.get("avg_duration_radiant"), player.get("avg_duration_dire")
+        r_str = _format_seconds(r_val) if r_val else "—"
+        d_str = _format_seconds(d_val) if d_val else "—"
+        return f"{_format_seconds(val)} (R: {r_str} · D: {d_str})"
+    return f"{val:.2f}"
+
+
 def format_leaderboard(
     stats: list[dict],
     sort_by: str = "fantasy_points",
@@ -120,53 +163,10 @@ def format_leaderboard(
     lines = []
     for i, p in enumerate(sorted_players[:cap]):
         medal = MEDAL[i] if i < 3 else f"**{i+1}.**"
-        val = p.get(sort_by)
-        if val is None:
+        val_str = format_stat_value(p, sort_by, debug)
+        if val_str is None:
             # Undrafted on a value sort — skip rather than show 'None'
             continue
-        val = val or 0
-        # Format nicely depending on type
-        if sort_by == "fantasy_points":
-            val_str = f"{val:.1f} pts"
-        elif sort_by == "value":
-            sign = "+" if val >= 0 else ""
-            cost = p.get("cost") or 0
-            deserved = p.get("deserved_cost") or (cost + val)
-            val_str = f"{sign}{val:.0f} (paid {cost}, deserved {deserved:.0f})"
-            if debug:
-                d_all = p.get("diff_vs_lobby") or 0
-                d_all_sign = "+" if d_all >= 0 else ""
-                val_str += f" · diff_vs_lobby {d_all_sign}{d_all:.2f}"
-        elif sort_by == "attendance":
-            games = p.get("games_played", 0) or 0
-            val_str = f"{val * 100:.0f}% ({games} games)"
-        elif sort_by == "diff":
-            sign = "+" if val >= 0 else ""
-            val_str = f"{sign}{val:.1f} pts"
-        elif sort_by == "avg_pct_damage":
-            val_str = f"{val * 100:.1f}%"
-        elif sort_by == "teamfight_participation":
-            val_str = f"{val * 100:.1f}%"
-        elif sort_by == "firstblood_claimed":
-            val_str = f"{val * 100:.1f}%"
-        elif sort_by in ("gpm", "xpm", "kda", "stuns"):
-            val_str = f"{val:.1f}"
-        elif sort_by == "stuns_per_min":
-            val_str = f"{val:.2f}/min"
-        elif sort_by == "observer_kills_per_min":
-            val_str = f"{val:.2f}/min"
-        elif sort_by == "avg_first_tormentor_time":
-            val_str = _format_seconds(val)
-        elif sort_by == "avg_duration":
-            r_val = p.get("avg_duration_radiant")
-            d_val = p.get("avg_duration_dire")
-            r_str = _format_seconds(r_val) if r_val else "—"
-            d_str = _format_seconds(d_val) if d_val else "—"
-            val_str = f"{_format_seconds(val)} (R: {r_str} · D: {d_str})"
-        elif sort_by in ("tormentor_kills", "watcher_captures"):
-            val_str = f"{val:.2f}"
-        else:
-            val_str = f"{val:.2f}"
 
         # Make name a clickable Dotabuff link
         account_id = p.get("account_id", 0)
