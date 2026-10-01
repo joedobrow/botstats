@@ -511,25 +511,42 @@ def season_leaders(season: dict) -> tuple[list[dict], int, int]:
     return sorted(rows, key=lambda r: -r["fantasy_points"]), threshold, max_games
 
 
-def fantasy_table(season: dict | None, min_games: int | None = None) -> dict:
-    """The fantasy leaderboard, with every player's score broken into the
-    components that made it and each component set against the field's
-    average — which is the part that answers "why is she top?".
+# Stats that only mean anything against one draft, so they stay in a season
+# and skip the games cut: a deserved cost or an attendance rate is measured
+# from the draft, not from the games.
+DRAFT_RELATIVE = {"value", "attendance"}
 
-    season=None pools every season. min_games defaults the way /leaderboard
-    qualifies: at least half as many games as the most active player, so a
-    stand-in's one good night doesn't lead the table.
+
+def fantasy_table(season: dict | None, stat: str = "fantasy_points", week: int | None = None,
+                  position: int | None = None, everyone: bool = False) -> dict:
+    """The leaderboard the bot's /leaderboard shows, with every player's
+    fantasy score broken into the components that made it and each component
+    set against the field's average — the part that answers "why is she top?".
+
+    season=None pools every season; week picks one of that season's weeks.
+    Players are qualified the way /leaderboard qualifies — at least half as
+    many games as the most active player, so a stand-in's one good night
+    doesn't lead the table — unless `everyone`, or the stat is draft-relative,
+    where the draft itself is the qualification.
     """
     import fantasy
 
-    if season:
-        rows = db.ranked(db.get_all_time_stats(season["division_id"], season["id"]))
+    if season and week is not None:
+        rows = db.get_stats_for_season_week(season["id"], season["division_id"], week)
+    elif season:
+        rows = db.ranked(db.get_all_time_stats(season["division_id"], season["id"],
+                                               cross_season=stat not in DRAFT_RELATIVE))
     else:
         rows = []
         for d in divisions():
             rows += db.ranked(db.get_all_time_stats(d["id"], None))
+    if position:
+        rows = [r for r in rows if r.get("role_position") == position]
+    if stat in DRAFT_RELATIVE:
+        rows = [r for r in rows if r.get("cost") is not None]
+
     max_games = max((r.get("games_played") or 0 for r in rows), default=0)
-    threshold = max_games // 2 if min_games is None else min_games
+    threshold = 0 if (everyone or stat in DRAFT_RELATIVE) else max_games // 2
     qualified = [r for r in rows if (r.get("games_played") or 0) >= threshold]
 
     for r in rows:
@@ -556,9 +573,15 @@ def fantasy_table(season: dict | None, min_games: int | None = None) -> dict:
         r["avatar_url"] = idents.get(r["account_id"], {}).get("avatar_url")
         for c in r["breakdown"]:
             c["vs_field"] = c["points"] - field.get(c["key"], {}).get("points", 0.0)
-    qualified.sort(key=lambda r: -(r.get("fantasy_points") or 0))
+    # Sorted and written the way the bot sorts and writes them, so the two
+    # leaderboards agree about what "top" means.
+    from formatters import _sort_key, format_stat_value
+    qualified.sort(key=lambda r: _sort_key(r, stat), reverse=True)
+    for r in qualified:
+        r["stat_text"] = format_stat_value(r, stat)
+    qualified = [r for r in qualified if r["stat_text"] is not None]
     return {"rows": qualified, "everyone": rows, "field": field, "threshold": threshold,
-            "max_games": max_games, "weights": fantasy.WEIGHTS}
+            "max_games": max_games, "weights": fantasy.WEIGHTS, "stat": stat}
 
 
 def player_ratings() -> dict[int, int]:

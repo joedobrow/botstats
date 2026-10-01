@@ -15,12 +15,36 @@
       {% endfor %}
     </select>
   </label>
-  <label>Fewest games <span class="muted small">(blank qualifies the usual way)</span>
-    <input type="number" name="min_games" min="0" max="200" value="{{ q.get('min_games', '') }}"></label>
-  <label>Show the working for <span class="muted small">(name or account id)</span>
-    <input type="search" name="player" value="{{ q.get('player', '') }}" autocomplete="off"></label>
+  <label>Stat
+    <select name="stat">
+      {% for key, label in stats %}
+      <option value="{{ key }}"{% if key == stat %} selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  {% if weeks %}
+  <label>Week
+    <select name="week">
+      <option value="">All of it</option>
+      {% for w in weeks %}
+      <option value="{{ w.week_number }}"{% if q.get('week') == w.week_number|string %} selected{% endif %}>Week {{ w.week_number }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  {% endif %}
+  <label>Position
+    <select name="position">
+      <option value="">Any</option>
+      {% for n, name in POSITION_NAMES.items() %}
+      <option value="{{ n }}"{% if q.get('position') == n|string %} selected{% endif %}>{{ n }} · {{ name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Player <input type="search" name="player" value="{{ q.get('player', '') }}" autocomplete="off"></label>
+  <label class="check"><input type="checkbox" name="everyone" value="1"{% if q.get('everyone') is not none %} checked{% endif %}>
+    Everyone, not just those with enough games</label>
   <div class="actions"><button class="primary">Show</button>
-    {% if q.get('season') or q.get('min_games') or q.get('player') %}<a class="button" href="/fantasy">Clear</a>{% endif %}</div>
+    {% if q %}<a class="button" href="/fantasy">Clear</a>{% endif %}</div>
 </form>
 
 {% if not_found %}
@@ -60,35 +84,39 @@
 </section>
 {% endif %}
 
-<h2>Leaderboard</h2>
+<h2>{{ stat_label }}</h2>
 <p class="muted small">
   {% if table.threshold %}Players with at least {{ table.threshold }} game{{ "" if table.threshold == 1 else "s" }}
   ({{ table.max_games }} is the most anyone has played){% else %}Everyone with a game{% endif %}.
-  Click a name to see where their points come from.</p>
+  Click a name to see where their fantasy points come from.</p>
 <div class="scroll">
 <table class="sortable">
   <thead><tr>
+    <th data-sort-type="text">#</th>
     <th data-sort-type="text">Player</th>
-    <th class="num" data-sort-type="num" data-sort-first="desc">Points a game</th>
+    <th class="num" data-sort-type="num" data-sort-first="desc">{{ stat_label }}</th>
     <th class="num" data-sort-type="num" data-sort-first="desc">Games</th>
-    <th>Earns most from</th>
+    {% if stat == "fantasy_points" %}<th>Earns most from</th>{% endif %}
   </tr></thead>
   <tbody>
   {% for r in table.rows %}
     {% set best = r.breakdown|sort(attribute="vs_field", reverse=true) %}
     <tr>
+      <td class="muted">{{ loop.index }}</td>
       <td class="with-avatar" data-sort="{{ r.name|lower }}">
         {% if r.avatar_url %}<img class="avatar" src="{{ r.avatar_url }}" alt="">{% endif %}
-        <a href="/fantasy?{% if q.get('season') %}season={{ q.get('season') }}&{% endif %}player={{ r.account_id }}">{{ r.name }}</a>
+        <a href="/fantasy?{% for k, v in q.items() if k != 'player' %}{{ k }}={{ v }}&{% endfor %}player={{ r.account_id }}">{{ r.name }}</a>
       </td>
-      <td class="num" data-sort="{{ r.fantasy_points }}"><strong>{{ "%.1f"|format(r.fantasy_points) }}</strong></td>
+      <td class="num" data-sort="{{ r.get(stat) or 0 }}"><strong>{{ r.stat_text }}</strong></td>
       <td class="num" data-sort="{{ r.games_played }}">{{ r.games_played }}</td>
+      {% if stat == "fantasy_points" %}
       <td class="small muted">
         {% for c in best[:2] %}{{ c.label }} ({{ "%+.1f"|format(c.vs_field) }}){% if not loop.last %}, {% endif %}{% endfor %}
       </td>
+      {% endif %}
     </tr>
   {% else %}
-    <tr><td colspan="4" class="muted">No players qualify yet.</td></tr>
+    <tr><td colspan="5" class="muted">Nobody to show with those filters.</td></tr>
   {% endfor %}
   </tbody>
 </table>
