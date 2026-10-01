@@ -280,7 +280,12 @@ async def season_page(request: web.Request):
     season = _season_or_404(request)
     tab = request.query.get("tab", "matchups")
     ctx: dict = {"season": season, "tab": tab, "title": season["label"]}
-    if tab == "matchups":
+    if tab == "playoffs":
+        ctx["bracket"] = store.playoff_bracket(season)
+        ctx["standings"] = store.season_teams(season)
+        ctx["round_name"] = store.round_name
+        ctx["notice"] = request.query.get("notice")
+    elif tab == "matchups":
         ctx["rounds"] = store.season_matchups(season)
     elif tab == "signups":
         ctx["signups"] = store.list_signups(season)
@@ -307,6 +312,58 @@ async def season_page(request: web.Request):
     if request.get("user"):
         ctx["my_signup"] = store.get_signup(season, request["user"]["account_id"])
     return render(request, "season.html", **ctx)
+
+
+@routes.post("/season/{season_id}/{division}/playoffs/start")
+async def playoffs_start(request: web.Request):
+    """Open a bracket. How many teams is a decision; who plays whom is the
+    next one, and that's made by dragging teams into the first round."""
+    season = _season_or_404(request)
+    _require_admin(request)
+    data = await request.post()
+    try:
+        size = int(data["size"])
+    except (KeyError, ValueError):
+        raise web.HTTPBadRequest(text="Pick how many teams are in the bracket.")
+    try:
+        db.start_playoffs(season["id"], season["division_id"], size=size,
+                          started_at=datetime.now(LEAGUE_TZ).isoformat(),
+                          created_by=request["user"]["account_id"])
+    except ValueError as e:
+        raise web.HTTPFound(f"{season_url(season)}?tab=playoffs&"
+                            + urlencode({"notice": str(e)}))
+    raise web.HTTPFound(f"{season_url(season)}?tab=playoffs&"
+                        + urlencode({"notice": "Bracket opened — place the first round."}))
+
+
+@routes.post("/season/{season_id}/{division}/playoffs/seed")
+async def playoffs_seed(request: web.Request):
+    """Place the first round. Seats can be left empty while captains pick."""
+    season = _season_or_404(request)
+    _require_admin(request)
+    bracket = db.get_playoff_bracket(season["id"], season["division_id"])
+    if not bracket:
+        raise web.HTTPFound(f"{season_url(season)}?tab=playoffs")
+    data = await request.post()
+    seats = [(data.get(f"seat{i}") or "").strip() or None for i in range(bracket["size"])]
+    known = {t["captain"] for t in store.season_teams(season, matches=[])}
+    if any(c and c not in known for c in seats):
+        raise web.HTTPBadRequest(text="That isn't a team in this season.")
+    try:
+        db.set_playoff_seats(season["id"], season["division_id"], seats)
+    except ValueError as e:
+        raise web.HTTPFound(f"{season_url(season)}?tab=playoffs&" + urlencode({"notice": str(e)}))
+    raise web.HTTPFound(f"{season_url(season)}?tab=playoffs&"
+                        + urlencode({"notice": "Bracket saved."}))
+
+
+@routes.post("/season/{season_id}/{division}/playoffs/delete")
+async def playoffs_delete(request: web.Request):
+    season = _season_or_404(request)
+    _require_admin(request)
+    db.delete_playoff_bracket(season["id"], season["division_id"])
+    raise web.HTTPFound(f"{season_url(season)}?tab=playoffs&"
+                        + urlencode({"notice": "Bracket removed."}))
 
 
 @routes.get("/season/{season_id}/{division}/team/{captain}")

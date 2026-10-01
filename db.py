@@ -401,6 +401,34 @@ def init_db():
                 PRIMARY KEY (season_id, division_id, captain)
             );
 
+            -- The playoff bracket for a season: how many teams are in it and
+            -- how long a series is. Who plays whom in the first round is a
+            -- judgement — the top seed picks their opponent — so it's placed
+            -- by hand (playoff_seeds). Everything after that is derived from
+            -- the games, the way a rating is: a winner isn't stored, it's
+            -- whoever won the series, and a bracket redraws itself when a
+            -- result is corrected.
+            CREATE TABLE IF NOT EXISTS playoff_brackets (
+                season_id   INTEGER NOT NULL,
+                division_id INTEGER NOT NULL,
+                size        INTEGER NOT NULL,          -- teams in the bracket
+                format      TEXT    NOT NULL DEFAULT 'single',
+                best_of     INTEGER NOT NULL DEFAULT 3,
+                started_at  TEXT    NOT NULL,          -- games before this are regular season
+                created_by  INTEGER,
+                PRIMARY KEY (season_id, division_id)
+            );
+
+            -- The first round's seats, in order: 0 plays 1, 2 plays 3, and so
+            -- on. A seat with no team yet is a bracket still being filled in.
+            CREATE TABLE IF NOT EXISTS playoff_seeds (
+                season_id   INTEGER NOT NULL,
+                division_id INTEGER NOT NULL,
+                position    INTEGER NOT NULL,
+                captain     TEXT,
+                PRIMARY KEY (season_id, division_id, position)
+            );
+
             -- Which team each side of a match belongs to, when the roster
             -- count can't say. A side is attributed automatically once three
             -- of a team's five played on it (get_match_team_captains), which
@@ -2648,6 +2676,70 @@ def add_manual_match(*, division_id: int, league_id: int, start_time: int,
     set_match_team_override(match_id, "dire", loser, set_by=set_by)
     logger.info("Manual result %d: %s beat %s in division %s", match_id, winner, loser, division_id)
     return match_id
+
+
+def get_playoff_bracket(season_id: int, division_id: int) -> dict | None:
+    """The bracket's shape and its seats, or None if playoffs haven't started."""
+    with _conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM playoff_brackets WHERE season_id = ? AND division_id = ?",
+            (season_id, division_id)).fetchone()
+        if not row:
+            return None
+        seats = {r["position"]: r["captain"] for r in conn.execute(
+            "SELECT position, captain FROM playoff_seeds WHERE season_id = ? AND division_id = ? "
+            "ORDER BY position", (season_id, division_id))}
+    bracket = dict(row)
+    bracket["seats"] = [seats.get(i) for i in range(bracket["size"])]
+    return bracket
+
+
+# Every playoff series is a best of three. Kept as a column rather than a
+# constant so a season that wants a longer final doesn't need a migration.
+PLAYOFF_BEST_OF = 3
+
+
+def start_playoffs(season_id: int, division_id: int, *, size: int,
+                   best_of: int = PLAYOFF_BEST_OF,
+                   started_at: str, created_by: int | None = None) -> None:
+    """Open a bracket of `size` teams. Replaces any bracket already there,
+    seats and all, since changing the size changes what a seat means."""
+    if size < 2 or size & (size - 1):
+        raise ValueError("a single-elimination bracket needs a power of two")
+    with _conn() as conn:
+        conn.execute("DELETE FROM playoff_seeds WHERE season_id = ? AND division_id = ?",
+                     (season_id, division_id))
+        conn.execute("""
+            INSERT INTO playoff_brackets (season_id, division_id, size, format, best_of,
+                                          started_at, created_by)
+            VALUES (?, ?, ?, 'single', ?, ?, ?)
+            ON CONFLICT(season_id, division_id) DO UPDATE SET
+                size = excluded.size, best_of = excluded.best_of,
+                started_at = excluded.started_at, created_by = excluded.created_by
+        """, (season_id, division_id, size, best_of, started_at, created_by))
+
+
+def set_playoff_seats(season_id: int, division_id: int, seats: list[str | None]) -> None:
+    """Place the first round. A team may sit in one seat only; an empty seat
+    is a bracket still being filled in, which is allowed — seeding happens
+    over a few minutes with captains picking in turn."""
+    placed = [c for c in seats if c]
+    if len(placed) != len(set(placed)):
+        raise ValueError("a team can only be in one seat")
+    with _conn() as conn:
+        conn.execute("DELETE FROM playoff_seeds WHERE season_id = ? AND division_id = ?",
+                     (season_id, division_id))
+        conn.executemany(
+            "INSERT INTO playoff_seeds (season_id, division_id, position, captain) VALUES (?, ?, ?, ?)",
+            [(season_id, division_id, i, c) for i, c in enumerate(seats)])
+
+
+def delete_playoff_bracket(season_id: int, division_id: int) -> None:
+    with _conn() as conn:
+        conn.execute("DELETE FROM playoff_seeds WHERE season_id = ? AND division_id = ?",
+                     (season_id, division_id))
+        conn.execute("DELETE FROM playoff_brackets WHERE season_id = ? AND division_id = ?",
+                     (season_id, division_id))
 
 
 def set_match_excluded(match_id: int, excluded: bool, *, reason: str | None = None,
