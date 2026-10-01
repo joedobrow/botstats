@@ -654,9 +654,14 @@ async def matches_page(request: web.Request):
         raw = re.sub(r"\D", "", q.get(name, ""))
         return int(raw) if raw else None
 
+    # Games an admin took out are an admin's business, and hiding the option
+    # isn't hiding them — the query string is right there.
+    kind = q.get("kind", "")
+    if kind == "excluded" and not request.get("is_admin"):
+        kind = ""
     result = store.search_matches(
         player=q.get("player", ""), season=number("season"), division=number("division"),
-        kind=q.get("kind", ""), date_from=q.get("from", ""), date_to=q.get("to", ""),
+        kind=kind, date_from=q.get("from", ""), date_to=q.get("to", ""),
         min_minutes=number("min_minutes"), max_minutes=number("max_minutes"),
         page=number("page") or 1,
     )
