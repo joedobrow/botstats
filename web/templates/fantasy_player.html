@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block content %}
+<p class="small"><a href="{{ back }}">← Fantasy</a></p>
+
+<div class="profile-head">
+  {% if player.avatar_url %}<img class="avatar big" src="{{ player.avatar_url }}" alt="">{% endif %}
+  <div>
+    <h1>{{ player.name }}</h1>
+    <div class="muted">
+      <strong class="rating">{{ "%.1f"|format(player.fantasy_points) }}</strong> fantasy points a game ·
+      {{ player.games_played }} game{{ "" if player.games_played == 1 else "s" }}
+      {% if season %} · {{ season.label }}{% endif %} ·
+      <a href="/player/{{ player.account_id }}">Full profile</a>
+    </div>
+  </div>
+</div>
+
+<p class="muted">Each component is what they average per game, what a unit of it is worth, and the
+  points that comes to — set against what everyone else here averages. Green is where they earn
+  more than the field, red is where they earn less.</p>
+
+<div class="scroll">
+<table class="sortable">
+  <thead><tr>
+    <th data-sort-type="text">Component</th>
+    <th class="num" data-sort-type="num" data-sort-first="desc">Their average</th>
+    <th class="num" data-sort-type="num" data-sort-first="desc">Field average</th>
+    <th class="num" data-sort-type="num">Worth</th>
+    <th class="num" data-sort-type="num" data-sort-first="desc">Points</th>
+    <th class="num" data-sort-type="num" data-sort-first="desc">vs the field</th>
+  </tr></thead>
+  <tbody>
+  {% for c in player.breakdown|sort(attribute="vs_field", reverse=true) %}
+    <tr>
+      <td>{{ c.label }}{% if c.unit %} <span class="muted small">{{ c.unit }}</span>{% endif %}</td>
+      <td class="num" data-sort="{{ c.value }}">{{ "%.2f"|format(c.value) }}</td>
+      <td class="num muted" data-sort="{{ field[c.key].value }}">{{ "%.2f"|format(field[c.key].value) }}</td>
+      <td class="num muted" data-sort="{{ c.weight }}">{{ "%+.3f"|format(c.weight) }}</td>
+      <td class="num" data-sort="{{ c.points }}">{{ "%+.2f"|format(c.points) }}</td>
+      <td class="num {{ 'win' if c.vs_field > 0.05 else ('loss' if c.vs_field < -0.05 else '') }}"
+          data-sort="{{ c.vs_field }}">{{ "%+.2f"|format(c.vs_field) }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+  <tfoot><tr>
+    <th>Total</th><td></td><td></td><td></td>
+    <td class="num"><strong>{{ "%.1f"|format(player.fantasy_points) }}</strong></td><td></td>
+  </tr></tfoot>
+</table>
+</div>
+
+<p class="muted small">A game is worth <strong>+3 to start</strong> and each death takes 0.2 of it
+  back, so fifteen deaths cancels it out. Longer games earn more of everything, so a score is
+  corrected for the length of the games it came from — {{ duration_mean }} minutes is the neutral
+  point, and a player whose games ran longer gives some back.</p>
+{% endblock %}
