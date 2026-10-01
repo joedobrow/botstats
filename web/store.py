@@ -1033,6 +1033,8 @@ def season_matchups(season: dict) -> list[dict]:
         return pairs
 
     standings = [t["captain"] for t in teams]     # season_teams sorts by record already
+    last_played = max((w["week_number"] for w in weeks if per_week.get(w["week_number"])),
+                      default=None)
     completed, upcoming = [], None
     for w in weeks:
         played = per_week.get(w["week_number"], {})
@@ -1042,12 +1044,14 @@ def season_matchups(season: dict) -> list[dict]:
                 a, b = p["a"], p["b"]
                 winner = a if p["wins"][a] > p["wins"][b] else (b if p["wins"][b] > p["wins"][a] else None)
                 pairs.append({"a": a, "b": b, "a_name": team_name(a), "b_name": team_name(b),
+                              "a_score": p["wins"][a], "b_score": p["wins"][b],
                               "a_record": record(a), "b_record": record(b), "winner": winner,
                               "match_ids": p["match_ids"], "rematch": False, "bye": False})
             pairs.sort(key=lambda p: p["a_name"].lower())
             completed.append({"week": w["week_number"], "label": f"Week {w['week_number']}",
                               "dates": w, "played": True, "pairs": pairs})
-        elif upcoming is None and len(standings) > 1:
+        elif (upcoming is None and len(standings) > 1
+              and (last_played is None or w["week_number"] > last_played)):
             upcoming = {"week": w["week_number"], "label": f"Week {w['week_number']}",
                         "dates": w, "played": False, "pairs": swiss(standings)}
     return ([upcoming] if upcoming else []) + completed[::-1]
