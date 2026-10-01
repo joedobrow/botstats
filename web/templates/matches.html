@@ -37,10 +37,6 @@
   </label>
   <label>Played from <input type="date" name="from" value="{{ q.get('from', '') }}"></label>
   <label>to <input type="date" name="to" value="{{ q.get('to', '') }}"></label>
-  <label>Shortest <span class="muted small">(minutes)</span>
-    <input type="number" name="min_minutes" min="0" max="200" value="{{ q.get('min_minutes', '') }}"></label>
-  <label>Longest <span class="muted small">(minutes)</span>
-    <input type="number" name="max_minutes" min="0" max="200" value="{{ q.get('max_minutes', '') }}"></label>
   <div class="actions">
     <button class="primary">Filter</button>
     {% if filters %}<a class="button" href="/matches">Clear</a>{% endif %}
