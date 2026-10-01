@@ -41,7 +41,11 @@
     </select>
   </label>
   <label>Player <input type="search" name="player" value="{{ q.get('player', '') }}" autocomplete="off"></label>
-  <label>Minimum games <input type="number" name="min_games" min="0" max="200" value="{{ q.get('min_games', '') }}"></label>
+  <label>Minimum games
+    <input type="number" name="min_games" min="0" max="200" value="{{ q.get('min_games', '') }}"
+           placeholder="{{ table.threshold }}"
+           title="Left blank, it's half the games the most active player has — {{ table.threshold }} of {{ table.max_games }}. 0 shows everyone.">
+  </label>
   <div class="actions"><button class="primary">Show</button>
     {% if q %}<a class="button" href="/fantasy">Clear</a>{% endif %}</div>
 </form>
