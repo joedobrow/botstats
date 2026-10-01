@@ -12,6 +12,7 @@ ranked badge only.
 from __future__ import annotations
 
 import json
+import re
 import secrets
 import sqlite3
 from datetime import datetime, timedelta, timezone
@@ -123,7 +124,26 @@ def init_site_tables() -> None:
                 key    TEXT PRIMARY KEY,
                 value  TEXT NOT NULL
             );
+
+            -- Who won a season, in one division: one row per player, in the
+            -- order they should be listed. Recorded rather than derived — a
+            -- season can be won before the site kept brackets (37, 38), or in
+            -- a division whose draft was never loaded here.
+            CREATE TABLE IF NOT EXISTS site_season_champions (
+                season_id   INTEGER NOT NULL REFERENCES seasons(id),
+                division_id INTEGER NOT NULL REFERENCES divisions(id),
+                position    INTEGER NOT NULL,
+                account_id  INTEGER,            -- NULL when only a name is known
+                name        TEXT NOT NULL,
+                PRIMARY KEY (season_id, division_id, position)
+            );
         """)
+        # The team they won as, and anything that needs saying about it, live
+        # beside the season's other site-only settings.
+        have = {r[1] for r in conn.execute("PRAGMA table_info(site_season_settings)")}
+        for col in ("champion_team", "champion_note"):
+            if col not in have:
+                conn.execute(f"ALTER TABLE site_season_settings ADD COLUMN {col} TEXT")
 
 
 
@@ -320,6 +340,110 @@ def set_status(season_id: int, division_id: int, status: str) -> None:
             INSERT INTO site_season_settings (season_id, division_id, status) VALUES (?, ?, ?)
             ON CONFLICT(season_id, division_id) DO UPDATE SET status = excluded.status
         """, (season_id, division_id, status))
+
+
+def season_champions(season: dict) -> dict | None:
+    """Who won this season, or None if nobody has yet.
+
+    A recorded result wins. Failing that, a finished playoff bracket names the
+    team, and its roster comes from the draft — so a season that plays out its
+    bracket here needs nobody to type anything in.
+    """
+    sid, did = season["id"], season["division_id"]
+    with _conn() as conn:
+        rows = [dict(r) for r in conn.execute(
+            "SELECT account_id, name FROM site_season_champions "
+            "WHERE season_id = ? AND division_id = ? ORDER BY position", (sid, did))]
+        meta = conn.execute(
+            "SELECT champion_team, champion_note FROM site_season_settings "
+            "WHERE season_id = ? AND division_id = ?", (sid, did)).fetchone()
+    if rows:
+        out = {"team": (meta["champion_team"] if meta else None),
+               "note": (meta["champion_note"] if meta else None),
+               "members": rows, "source": "recorded"}
+    else:
+        bracket = playoff_bracket(season)
+        if not (bracket and bracket.get("champion")):
+            return None
+        team = next((t for t in season_teams(season) if t["captain"] == bracket["champion"]), None)
+        if not team:
+            return None
+        out = {"team": team["name"], "note": None, "source": "bracket",
+               "members": [{"account_id": p["account_id"], "name": None} for p in
+                           sorted(team["roster"], key=lambda p: -(p["cost"] or 0))]}
+    # A name is only a fallback: whoever we can identify is shown as they are
+    # known now, not as they were called the season they won.
+    idents = player_identities([m["account_id"] for m in out["members"] if m["account_id"]])
+    for m in out["members"]:
+        ident = idents.get(m["account_id"]) or {}
+        m["name"] = ident.get("name") or m["name"] or str(m["account_id"] or "")
+        m["avatar_url"] = ident.get("avatar_url")
+    return out
+
+
+def set_season_champions(season_id: int, division_id: int, members: list[dict],
+                         team: str = "", note: str = "") -> None:
+    """Record (or, with an empty members list, clear) a season's winners."""
+    with _conn() as conn:
+        conn.execute("DELETE FROM site_season_champions WHERE season_id = ? AND division_id = ?",
+                     (season_id, division_id))
+        conn.executemany(
+            "INSERT INTO site_season_champions (season_id, division_id, position, account_id, name) "
+            "VALUES (?, ?, ?, ?, ?)",
+            [(season_id, division_id, i, m.get("account_id"), m["name"])
+             for i, m in enumerate(members)])
+        conn.execute("""
+            INSERT INTO site_season_settings (season_id, division_id, champion_team, champion_note)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(season_id, division_id) DO UPDATE SET
+                champion_team = excluded.champion_team, champion_note = excluded.champion_note
+        """, (season_id, division_id, team.strip() or None, note.strip() or None))
+
+
+def _squash(name: str) -> str:
+    """A name with its spacing and punctuation taken out, for matching only."""
+    return re.sub(r"[^a-z0-9]", "", name.lower())
+
+
+def resolve_champion_names(text: str) -> list[dict]:
+    """Turn a pasted list of winners into {account_id, name} rows.
+
+    Written for what a congratulations message looks like when it's pasted:
+    names separated by @, which is the only separator that survives a name
+    with a space in it ("grey poupon"). One per line, or comma-separated,
+    works too. A bare number is an account id. A name is matched against
+    everyone the site knows, exactly and ignoring case; anything left
+    unmatched is kept as text, so a winner who never played here still shows.
+    """
+    tokens: list[str] = []
+    for line in (text or "").replace("\r", "").split("\n"):
+        # Anything before the first @ is the sentence the names were in
+        # ("Congratulations to Season 38 winners!!"), not a winner.
+        parts = line.split("@")[1:] if "@" in line else line.split(",")
+        tokens += [p.strip(" \t,.!") for p in parts]
+    tokens = [t for t in tokens if t]
+    if not tokens:
+        return []
+    known: dict[str, int] = {}
+    squashed: dict[str, set] = {}
+    for p in search_players():
+        name = p["name"].strip()
+        known.setdefault(name.lower(), p["account_id"])
+        squashed.setdefault(_squash(name), set()).add(p["account_id"])
+
+    def match(token: str) -> int | None:
+        hit = known.get(token.lower())
+        if hit is not None:
+            return hit
+        # A Discord handle drops the spaces an in-game name keeps, so
+        # "LovesMuffins" is "loves muffins". Only when it's unambiguous.
+        also = squashed.get(_squash(token)) or set()
+        return next(iter(also)) if len(also) == 1 else None
+
+    out = []
+    for t in tokens:
+        out.append({"account_id": int(t) if t.isdigit() else match(t), "name": t})
+    return out
 
 
 def season_of_match(seasons: list[dict], match: dict) -> dict | None:
