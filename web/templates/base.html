@@ -146,7 +146,17 @@ document.addEventListener("pointerdown", function (e) {
   fromPicker = (t && t.matches && t.matches('input[type="date"]')) ? t : null;
 }, true);
 document.addEventListener("change", function (e) {
-  if (e.target === fromPicker) { e.target.blur(); fromPicker = null; }
+  if (e.target !== fromPicker) return;
+  fromPicker = null;
+  var field = e.target;
+  field.blur();
+  if (document.activeElement !== field) return;   // blur was enough
+  // Chromium keeps a date field focused through blur(), and the calendar with
+  // it, so focus has to land somewhere else. The button the form is heading
+  // for is where this was going anyway: pick a date, press Enter.
+  var next = field.form && field.form.querySelector(
+    'button[type="submit"], button.primary, button:not([type="button"])');
+  if (next) next.focus();
 });
 
 // Click-to-rename: swap a name for its edit form, and back on Cancel/Escape.
