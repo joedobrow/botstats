@@ -220,6 +220,12 @@ ul.plain { list-style: none; padding: 0; margin: 0; }
 ul.plain li { padding: 4px 0; border-bottom: 1px solid var(--border); }
 ul.plain li:last-child { border-bottom: 0; }
 
+/* A total row is the answer the table was adding up to, so it reads as one. */
+tfoot tr.total th, tfoot tr.total td {
+  border-top: 2px solid var(--border); font-weight: 700; font-size: 1.05rem;
+  background: var(--tag-bg); padding-top: 10px; padding-bottom: 10px;
+}
+
 /* Matches page: a wide filter bar, and a pager under the table. */
 .filters { align-items: end; }
 .filters label { min-width: 0; }
