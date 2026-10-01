@@ -539,8 +539,10 @@ def fantasy_table(season: dict | None, stat: str = "fantasy_points", week: int |
     if season and week is not None:
         rows = db.get_stats_for_season_week(season["id"], season["division_id"], week)
     elif season:
-        rows = db.ranked(db.get_all_time_stats(season["division_id"], season["id"],
-                                               cross_season=stat not in DRAFT_RELATIVE))
+        # That season's matches, not every season's. cross_season exists for
+        # the bot's "week -1 means all-time" case; here, choosing a season is
+        # the whole point of choosing it.
+        rows = db.ranked(db.get_all_time_stats(season["division_id"], season["id"]))
     else:
         rows = []
         for d in (only_divisions if only_divisions is not None else divisions()):
