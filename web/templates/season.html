@@ -140,7 +140,6 @@
   {% if champions %}
   <section class="panel champions">
     <h2 class="flush">🏆 {% if champions.team %}{{ champions.team }}{% else %}Champions{% endif %}</h2>
-    {% if champions.note %}<p class="muted small">{{ champions.note }}</p>{% endif %}
     <ul class="champion-list">
       {% for m in champions.members %}
       <li>
@@ -169,9 +168,6 @@
         one name per line works too. An account id links for certain.</p>
       <label>Team <input type="text" name="team" maxlength="80"
              value="{% if champions %}{{ champions.team or "" }}{% endif %}"></label>
-      <label>Note <span class="muted small">(optional)</span>
-        <input type="text" name="note" maxlength="200"
-               value="{% if champions %}{{ champions.note or "" }}{% endif %}"></label>
       <div class="actions"><button class="primary">Save</button></div>
     </form>
   </section>

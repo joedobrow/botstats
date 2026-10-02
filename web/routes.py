@@ -348,7 +348,7 @@ async def season_champions_set(request: web.Request):
     data = await request.post()
     members = store.resolve_champion_names(data.get("winners", ""))
     store.set_season_champions(season["id"], season["division_id"], members,
-                               team=data.get("team", ""), note=data.get("note", ""))
+                               team=data.get("team", ""))
     if not members:
         notice = "Champions cleared."
     else:

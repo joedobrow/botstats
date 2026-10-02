@@ -141,7 +141,7 @@ def init_site_tables() -> None:
         # The team they won as, and anything that needs saying about it, live
         # beside the season's other site-only settings.
         have = {r[1] for r in conn.execute("PRAGMA table_info(site_season_settings)")}
-        for col in ("champion_team", "champion_note"):
+        for col in ("champion_team", "champion_note"):   # note is legacy, never read
             if col not in have:
                 conn.execute(f"ALTER TABLE site_season_settings ADD COLUMN {col} TEXT")
 
@@ -355,11 +355,10 @@ def season_champions(season: dict) -> dict | None:
             "SELECT account_id, name FROM site_season_champions "
             "WHERE season_id = ? AND division_id = ? ORDER BY position", (sid, did))]
         meta = conn.execute(
-            "SELECT champion_team, champion_note FROM site_season_settings "
+            "SELECT champion_team FROM site_season_settings "
             "WHERE season_id = ? AND division_id = ?", (sid, did)).fetchone()
     if rows:
         out = {"team": (meta["champion_team"] if meta else None),
-               "note": (meta["champion_note"] if meta else None),
                "members": rows, "source": "recorded"}
     else:
         bracket = playoff_bracket(season)
@@ -368,7 +367,7 @@ def season_champions(season: dict) -> dict | None:
         team = next((t for t in season_teams(season) if t["captain"] == bracket["champion"]), None)
         if not team:
             return None
-        out = {"team": team["name"], "note": None, "source": "bracket",
+        out = {"team": team["name"], "source": "bracket",
                "members": [{"account_id": p["account_id"], "name": None} for p in
                            sorted(team["roster"], key=lambda p: -(p["cost"] or 0))]}
     # A name is only a fallback: whoever we can identify is shown as they are
@@ -408,7 +407,7 @@ def all_champions() -> list[dict]:
 
 
 def set_season_champions(season_id: int, division_id: int, members: list[dict],
-                         team: str = "", note: str = "") -> None:
+                         team: str = "") -> None:
     """Record (or, with an empty members list, clear) a season's winners."""
     global _champion_counts
     _champion_counts = None
@@ -422,10 +421,10 @@ def set_season_champions(season_id: int, division_id: int, members: list[dict],
              for i, m in enumerate(members)])
         conn.execute("""
             INSERT INTO site_season_settings (season_id, division_id, champion_team, champion_note)
-            VALUES (?, ?, ?, ?)
+            VALUES (?, ?, ?, NULL)
             ON CONFLICT(season_id, division_id) DO UPDATE SET
-                champion_team = excluded.champion_team, champion_note = excluded.champion_note
-        """, (season_id, division_id, team.strip() or None, note.strip() or None))
+                champion_team = excluded.champion_team, champion_note = NULL
+        """, (season_id, division_id, team.strip() or None))
 
 
 def _squash(name: str) -> str:
