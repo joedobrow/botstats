@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
+{% if mascot %}<img class="mascot" src="/static/mascot-confused.png?v={{ css_version }}" alt="">{% endif %}
 <h1>{{ title }}</h1>
 <p>{{ message }}</p>
 <p><a href="/">Back to home</a></p>

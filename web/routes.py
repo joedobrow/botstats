@@ -96,8 +96,10 @@ def render(request: web.Request, template: str, status: int = 200, **ctx) -> web
 
 
 def not_found(request: web.Request, what: str = "Page") -> web.Response:
+    # The only message page that gets the mascot: being lost is what he's for.
+    # A failed form or a closed signup is an answer, not a confusion.
     return render(request, "message.html", status=404, title="Not found",
-                  message=f"{what} not found.")
+                  message=f"{what} not found.", mascot=True)
 
 
 # ---------------------------------------------------------------------------
