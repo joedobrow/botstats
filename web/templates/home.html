@@ -1,6 +1,8 @@
 {% extends "base.html" %}
 {% from "macros.html" import tile %}
 {% block content %}
+<h1 class="wordmark"><img src="/static/adcl-logo.png"
+    alt="ADCL — Ability Draft Community League"></h1>
 <div class="tiles big">
   {{ tile("/signup", "Sign-Up", disabled=not signups_open) }}
   {{ tile("/seasons", "Seasons") }}
