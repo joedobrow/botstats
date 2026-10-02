@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block content %}
+<p class="small"><a href="/fantasy">← Fantasy</a></p>
+<h1>The fantasy formula</h1>
+
+<p class="muted">A score is a per-game average, so playing more games neither helps nor hurts.
+  Every component below is multiplied by its worth and the results are added up.</p>
+
+<div class="scroll">
+<table class="sortable">
+  <thead><tr>
+    <th data-sort-type="text">Component</th>
+    <th class="num" data-sort-type="num">Worth</th>
+    <th class="num" data-sort-type="num" data-sort-first="desc">League average</th>
+    <th class="num" data-sort-type="num" data-sort-first="desc">Points it gives</th>
+  </tr></thead>
+  <tbody>
+  {% for r in rows %}
+    <tr>
+      <td>{{ r.label }}{% if r.unit %} <span class="muted small">{{ r.unit }}</span>{% endif %}</td>
+      <td class="num" data-sort="{{ r.weight }}">{{ "%+g"|format(r.weight) }}</td>
+      <td class="num muted" data-sort="{{ r.value }}">{{ "%.2f"|format(r.value) }}</td>
+      <td class="num" data-sort="{{ r.points }}"><strong>{{ "%+.2f"|format(r.points) }}</strong></td>
+    </tr>
+  {% endfor %}
+  </tbody>
+  <tfoot><tr class="total">
+    <th>Average score</th><td></td><td></td>
+    <td class="num">{{ "%.1f"|format(rows|sum(attribute="points")) }}</td>
+  </tr></tfoot>
+</table>
+</div>
+<p class="muted small">League average over {{ players }} players, every season. Sorted by what each
+  part contributes, so the ones that decide a score sit at the top.</p>
+
+<h2>Two components that aren't a straight multiplication</h2>
+<p><strong>Staying alive.</strong> Every game starts at {{ "%+g"|format(death_base) }} and each death
+  takes {{ "%g"|format(-death_each) }} off it. {{ (death_base / -death_each)|round|int }} deaths
+  cancel it exactly; past that it goes negative. Dying is the only thing that can take points away.</p>
+<p><strong>Game length.</strong> Longer games hand out more of almost everything, so a raw score
+  rewards slow games. Across every match on record a game's length predicts its score at
+  {{ "%g"|format(duration_slope) }} points a minute, and that much is taken back out: a player whose
+  games average {{ "%g"|format(duration_mean) }} minutes is unaffected, longer loses, shorter gains.</p>
+
+<h2>What isn't counted</h2>
+<p>Winning, hero, position, who drafted whom, and which abilities were taken. Sentry wards placed
+  score nothing — they're already counted when a sentry kills a ward. Tower kills, first blood and
+  Roshan were dropped: building damage covers the same ground more finely.</p>
+{% endblock %}
