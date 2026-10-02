@@ -28,16 +28,37 @@
 })();
 
 // Experiment: ?look=inverted / ?look=classic, remembered while browsing.
+// The inverted look is an ivory palette of its own, so it can't also be dark:
+// an explicit ?theme= wins and the look stands down until ?theme=auto.
 (function () {
   var look = new URLSearchParams(location.search).get("look");
   try {
     if (look) localStorage.setItem("look", look); else look = localStorage.getItem("look");
   } catch (e) {}
-  if (look === "inverted") document.documentElement.classList.add("inverted");
+  if (look === "inverted" && !document.documentElement.getAttribute("data-theme"))
+    document.documentElement.classList.add("inverted");
 })();
 </script>
 </head>
 <body>
+<script>
+// With a theme forced, every same-origin link carries it, so the address bar
+// keeps saying which mode this is and a copied link arrives in it too.
+(function () {
+  var theme = document.documentElement.getAttribute("data-theme");
+  if (!theme) return;
+  document.addEventListener("DOMContentLoaded", function () {
+    document.querySelectorAll("a[href]").forEach(function (a) {
+      var href = a.getAttribute("href"), u;
+      if (!href || href.charAt(0) === "#") return;
+      try { u = new URL(href, location.href); } catch (e) { return; }
+      if (u.origin !== location.origin || u.searchParams.get("theme")) return;
+      u.searchParams.set("theme", theme);
+      a.setAttribute("href", u.pathname + u.search + u.hash);
+    });
+  });
+})();
+</script>
 <header class="topbar">
   <nav class="wrap">
     <a class="brand" href="/" title="Ability Draft Community League"><img src="/static/adcl-mark.png?v={{ css_version }}" alt="ADCL"></a>

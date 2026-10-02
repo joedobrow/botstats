@@ -769,7 +769,7 @@ async def matches_page(request: web.Request):
         page=number("page") or 1,
     )
     # Keep every filter but the page, so the pager can rebuild the URL.
-    filters = {k: v for k, v in q.items() if k != "page" and v}
+    filters = {k: v for k, v in q.items() if k not in ("page", "theme") and v}
     return render(request, "matches.html", title="Matches", result=result, filters=filters,
                   query=urlencode(filters), seasons=store.all_seasons(),
                   divisions=store.divisions(), q=q, kind=kind)
