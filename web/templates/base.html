@@ -13,6 +13,20 @@
 <link rel="apple-touch-icon" href="/static/favicon.png?v={{ css_version }}">
 <link rel="stylesheet" href="/static/style.css?v={{ css_version }}">
 <script>
+// ?theme=dark / ?theme=light / ?theme=auto, remembered while browsing, so
+// every link followed from here stays in the mode being tested. Runs in the
+// head, before the first paint, so the page never flashes the other one.
+(function () {
+  var q = new URLSearchParams(location.search).get("theme"), theme = q;
+  try {
+    if (q === "auto") localStorage.removeItem("theme");
+    else if (q) localStorage.setItem("theme", q);
+    if (!q || q === "auto") theme = localStorage.getItem("theme");
+  } catch (e) {}
+  if (theme === "dark" || theme === "light")
+    document.documentElement.setAttribute("data-theme", theme);
+})();
+
 // Experiment: ?look=inverted / ?look=classic, remembered while browsing.
 (function () {
   var look = new URLSearchParams(location.search).get("look");
