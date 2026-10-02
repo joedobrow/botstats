@@ -342,9 +342,13 @@ async def season_page(request: web.Request):
 
 @routes.get("/favicon.ico")
 async def favicon(request: web.Request):
-    """Browsers ask for this path whether or not the page links to it."""
+    """Browsers ask for this path whether or not the page links to it — and
+    without the version query the <link> carries, so a long max-age here undoes
+    the cache-busting everywhere else. no-cache means revalidate, not don't
+    store: the ETag makes that a 304 almost every time, and an icon that
+    changed arrives the next time the page is opened rather than tomorrow."""
     return web.FileResponse(STATIC_DIR / "favicon.ico",
-                            headers={"Cache-Control": "public, max-age=86400"})
+                            headers={"Cache-Control": "no-cache"})
 
 
 @routes.get("/hall-of-fame")
