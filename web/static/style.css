@@ -464,7 +464,11 @@ h1 .edit-form input[type=text] { font-size: 1.2rem; font-weight: 700; width: aut
   font-size: inherit;
 }
 .wordmark { flex: 0 0 var(--w); margin: 0; line-height: 0; }
-.wordmark img { width: 100%; height: auto; }
+/* <picture> and <img> are inline by default, and an inline replaced element
+   sits on a baseline with descender space beneath it — 18px of it here, which
+   is exactly how far the letters missed the mascot's feet by. As blocks they
+   have no baseline to sit on and the box is the picture. */
+.wordmark picture, .wordmark img { display: block; width: 100%; height: auto; }
 .hero-mascot { flex: 0 0 auto; width: calc(var(--w) * 0.44); height: auto;
                margin-bottom: calc(var(--w) * 0.102); }
 .hero-sub {
