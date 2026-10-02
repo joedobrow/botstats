@@ -345,6 +345,36 @@ def set_status(season_id: int, division_id: int, status: str) -> None:
         """, (season_id, division_id, status))
 
 
+def season_weeks(season: dict) -> list[dict]:
+    """A season's explicitly-defined weeks, each with its dates as YYYY-MM-DD
+    for a date input. Stored as unix seconds, UTC, the way the week boundary
+    helper builds them."""
+    out = []
+    for w in db.get_season_weeks(season["id"], season["division_id"]):
+        out.append({
+            "week_number": w["week_number"],
+            "start": datetime.fromtimestamp(w["start_ts"], timezone.utc).date().isoformat(),
+            "end": datetime.fromtimestamp(w["end_ts"], timezone.utc).date().isoformat(),
+        })
+    return out
+
+
+def set_season_week(season_id: int, division_id: int, week_number: int,
+                    start: str, end: str) -> None:
+    """Define one week by its dates, inclusive at both ends (ValueError on a
+    bad or backwards range)."""
+    try:
+        s_dt = datetime.strptime(start, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        e_dt = datetime.strptime(end, "%Y-%m-%d").replace(
+            hour=23, minute=59, second=59, tzinfo=timezone.utc)
+    except ValueError:
+        raise ValueError("Dates must be YYYY-MM-DD.")
+    if e_dt <= s_dt:
+        raise ValueError("The end of a week has to come after its start.")
+    db.upsert_season_week(season_id, division_id, week_number,
+                          int(s_dt.timestamp()), int(e_dt.timestamp()))
+
+
 def season_champions(season: dict) -> dict | None:
     """Who won this season, or None if nobody has yet.
 

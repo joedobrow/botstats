@@ -14,7 +14,6 @@ A multi-guild Discord bot that pulls match data from the [OpenDota API](https://
 | **SQLite caching** | Match data is stored locally on a persistent fly.io volume. |
 | **Ability Draft replays** | A bundled Go parser (`parser/`) extracts pick order from Source 2 replays; OpenDota fills in ability/hero names. |
 | **Fantasy points** | A tunable per-game scoring formula with duration normalization. See `fantasy.py`. |
-| **Draft order images** | `/draftorder <match_id>` renders the full pick sequence with ability icons. |
 | **Chat quotes** | `/quote` pulls a random non-boring in-game chat message. |
 | **Scold channel** | Optional channel where any user post gets deleted with a snarky reply. |
 
@@ -30,7 +29,6 @@ A multi-guild Discord bot that pulls match data from the [OpenDota API](https://
 ├── fetcher.py        # OpenDota API calls, filtering, persistence
 ├── fantasy.py        # Fantasy points formula (tunable weights)
 ├── formatters.py     # Builds Discord Embed objects
-├── draftorder.py     # PIL image rendering for AD pick order
 ├── replay.py         # Replay download + Go parser shell-out
 ├── opendota_lookup.py# Resolve picks → ability/hero names via OpenDota
 ├── parser/           # Go (manta) replay parser binary source
@@ -109,7 +107,12 @@ is required the first time a league is seen). Rolling a division over to a new
 league — its weeks, drafted rosters, and team names and logos — is **Admin →
 Season setup** on the site, which previews everything before it writes
 (`season_setup.roll_over`). It was the `/start_new_season` command until that
-setup grew past what a slash command with a CSV attachment could show you. Every `season:` option in Discord accepts the
+setup grew past what a slash command with a CSV attachment could show you.
+A season's weeks are laid out and adjusted on the season page's Matchups tab,
+which is where the week filters they drive are read — they were
+`/generate_weeks`, `/set_week`, `/delete_week` and `/list_weeks` until it
+became silly to fix in Discord something that only shows up on the site.
+Every `season:` option in Discord accepts the
 league id, the start date, or the season's name. The stats API endpoints take
 `?season_id=<league_id>` (plus `&division=<slug>` when several divisions play
 in it), or the older `?guild_id=...&season_start=YYYY-MM-DD`.
@@ -172,20 +175,30 @@ DISCORD_TOKEN=dev DB_PATH=/path/to/copy.db SITE_UBERADMIN_STEAM_IDS=<your id> py
 
 | Command | Description |
 |---|---|
-| `/config` | *(Admin)* Configure this server's league, region, mode, season start, scold channel. |
-| `/leaderboard <stat> [week] [pos]` | Top players sorted by the chosen stat. Optional season week and positional filter. |
-| `/player <name> [week]` | Full stat breakdown for one player. Partial name matching. |
-| `/playerdiff <name> [week]` | Compare a player's fantasy points to the average of their same-side teammates. |
-| `/roles [week]` | Best fantasy-points player at each position (1–5). |
-| `/matches [week] [player]` | Match list with team names and Dotabuff/Windrun links; optional player filter. |
-| `/summary` | Compact fantasy-pts leaderboard per position for latest week + all-time. |
-| `/quote` | Random in-game chat message from a parsed match. |
-| `/draftorder <match_id>` | Render the AD pick order as an image. Triggers an on-demand replay parse if needed. |
-| `/tipjar` | Venmo link for the bot creator. |
-| `/refresh` | *(Admin)* Manually trigger a data fetch right now. |
-| `/nuke` | *(Admin)* Wipe all data for this server and re-fetch from scratch. |
+| `/config [league] [region] [mode] [season_start] [scold_channel] [name]` | [Admin] Point this server's division at a league (divisions are made on the site) |
+| `/h2h_card team1 team2 [season]` | Render a head-to-head PNG card for two teams |
+| `/h2h_player player1 player2 [season]` | Render a head-to-head PNG card comparing two players |
+| `/hall_of_fame [public]` | Show every season that has been won, and who won it |
+| `/hi_vs_low players [public]` | Split 10 players into hi-MMR vs lo-MMR teams and set random requirements |
+| `/leaderboard stat [week] [pos] [all] [season] [min_games] [debug] [public]` | Show the leaderboard sorted by a stat |
+| `/lookup query [force_refresh] [public]` | Diagnostic lookup — full rating breakdown (in the admin/bot channels) |
+| `/matches [week] [player] [season] [public]` | Show matches with Dotabuff links |
+| `/nuke` | [Admin] Wipe all data for this server and re-fetch |
+| `/player name [week] [season] [public]` | Show detailed stats for a specific player |
+| `/player_card name [season]` | Render a stream-friendly PNG card for a player |
+| `/players [show_all] [debug] [public]` | Show all guild players ordered by rating |
+| `/quote [public]` | Display a random chat message from league matches |
+| `/refresh_leaderboard` | [Admin] Manually trigger a data fetch from OpenDota |
+| `/refresh_ratings` | [Owner] Refresh the internal rating cache for all players in this guild |
+| `/set_player name [nickname] [windrun] [badge] [rank] [rating] [add_account] [alt_account_for] [discord_handle] [note] [hide_avatar] [clear] [delete] [restore]` | [Owner] Override a player's nickname, windrun, badge/rank used by /lookup and /players |
+| `/standings [season] [public]` | Show the season's table — record and tiebreaker, the way the site ranks them |
+| `/summary [season] [public]` | Show 10 fantasy-points leaderboards: each position × latest-week and all-time |
+| `/sync_roles_channels [players_url] [captains_url] [players_role] [captains_role] [category] [dry_run]` | [Owner] Sync players/captains roles + rebuild Captain Rooms voice channels from RD2L |
+| `/team_card name [season]` | Render a stream-friendly PNG card for a player's team |
+| `/team_stats name [season] [public]` | Show strengths/weaknesses of a player's team vs the rest of the league |
+| `/tipjar` | Support the bot creator |
 
-Stat, match and quote commands post their result in the channel. Pass `public:False` to any of them (`/leaderboard`, `/player`, `/players`, `/matches`, `/summary`, `/team_stats`, `/hi_vs_low`, `/quote`, `/lookup`) to get the reply as a whisper only you can see. Image cards (`/player_card`, `/team_card`, `/h2h_card`, `/h2h_player`) and `/draftorder` always post in the channel. Owner-only commands (`/set_player`, `/sync_roles_channels`, `/nuke`) always reply privately.
+Stat, match and quote commands post their result in the channel. Pass `public:False` to any of them (`/leaderboard`, `/player`, `/players`, `/matches`, `/summary`, `/team_stats`, `/hi_vs_low`, `/quote`, `/lookup`) to get the reply as a whisper only you can see. Image cards (`/player_card`, `/team_card`, `/h2h_card`, `/h2h_player`) always post in the channel. Owner-only commands (`/set_player`, `/sync_roles_channels`, `/nuke`) always reply privately.
 
 ---
 
