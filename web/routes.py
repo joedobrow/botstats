@@ -302,6 +302,7 @@ async def season_page(request: web.Request):
         ctx["signups"] = store.list_signups(season)
     elif tab == "champions":
         ctx["champions"] = store.season_champions(season)
+        ctx["season_team_names"] = sorted(t["name"] for t in store.season_teams(season))
         ctx["notice"] = request.query.get("notice")
     elif tab == "leaders":
         ctx["leaders"], ctx["min_games"], ctx["max_games"] = store.season_leaders(season)

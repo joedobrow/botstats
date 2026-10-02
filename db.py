@@ -1834,7 +1834,8 @@ def get_stats_for_season_week(season_id: int, division_id: int, week_number: int
     costs = get_player_costs(season_id, division_id)
     results = _attach_costs(results, costs)
     _compute_value(results)
-    attendance_map = _compute_attendance(scope, costs)
+    attendance_map = _compute_attendance(scope, costs,
+                                         get_captain_account_ids(season_id, division_id))
     for s in results:
         s["attendance"] = attendance_map.get(s["account_id"])
     return _apply_override_nicknames(results)
@@ -1858,7 +1859,9 @@ def get_all_time_stats(division_id: int, season_id: int | None = None,
         # Attendance is "what share of your team's season did you show up
         # for", so it always uses the season's matches even when the stat
         # rows above were widened to every season by cross_season.
-        attendance_map = _compute_attendance(season_scope(season_id, division_id), costs)
+        attendance_map = _compute_attendance(
+            season_scope(season_id, division_id), costs,
+            get_captain_account_ids(season_id, division_id))
         for s in results:
             s["attendance"] = attendance_map.get(s["account_id"])
     else:
@@ -3175,17 +3178,21 @@ def upsert_player_costs(season_id: int, division_id: int, costs: list[dict]):
         } for c in costs])
 
 
-def _compute_attendance(scope: MatchScope, costs: dict[int, dict]) -> dict[int, float]:
-    """Return {account_id: attendance_ratio} for drafted players only.
+def _compute_attendance(scope: MatchScope, costs: dict[int, dict],
+                        captain_aids: dict[str, int] | None = None) -> dict[int, float]:
+    """Return {account_id: attendance_ratio} for a team's players.
 
-    Captain-agnostic: we never need to identify the captain's account_id.
-    The captain field in `costs` is used only as a grouping label.
+    Denominator (per captain): matches where >= 2 of that team shared a
+        team_side — matches the team actually played as a team, rather than a
+        lone stand-in appearance.
+    Numerator (per player): matches where >= 1 of their team-mates was on
+        their side.
 
-    Denominator (per captain): matches where ≥2 of that captain's drafted
-        players were on the same team_side — i.e. matches the team actually
-        played as a team. Excludes lone-standin appearances.
-    Numerator (per drafted player): matches where ≥1 of their fellow
-        drafted teammates (same captain) was on their team_side.
+    A captain is on the team they drafted but has no row in player_costs,
+    since they did the drafting rather than being drafted. captain_aids puts
+    them back. Without it every captain's attendance comes out missing, and a
+    night a captain played alongside one of their own picks doesn't count as a
+    game the team played at all.
     """
     if not costs:
         return {}
@@ -3202,40 +3209,39 @@ def _compute_attendance(scope: MatchScope, costs: dict[int, dict]) -> dict[int, 
     if not rows:
         return {}
 
-    # captain_name → set of account_ids drafted by them
-    drafted_by_captain: dict[str, set] = {}
-    for aid, info in costs.items():
-        cap = info.get("captain")
-        if cap:
-            drafted_by_captain.setdefault(cap, set()).add(aid)
+    # account_id → the captain naming their team, and the reverse.
+    team_of: dict[int, str] = {aid: info["captain"] for aid, info in costs.items()
+                               if info.get("captain")}
+    members: dict[str, set] = {}
+    for aid, cap in team_of.items():
+        members.setdefault(cap, set()).add(aid)
+    for cap, aid in (captain_aids or {}).items():
+        if aid and cap in members:
+            members[cap].add(aid)
+            team_of[aid] = cap
 
-    # Index account_ids present per (match, side)
+    # Who was on each side of each match.
     match_side_aids: dict[tuple, set] = {}
     for r in rows:
         match_side_aids.setdefault((r["match_id"], r["team_side"]), set()).add(r["account_id"])
 
-    # Denominator per captain: matches where ≥2 of their drafted players share a side
     captain_team_games: dict[str, int] = {}
     for aids in match_side_aids.values():
-        for captain, drafted in drafted_by_captain.items():
-            if len(aids & drafted) >= 2:
+        for captain, team in members.items():
+            if len(aids & team) >= 2:
                 captain_team_games[captain] = captain_team_games.get(captain, 0) + 1
 
-    # Numerator per player: matches where they had ≥1 fellow drafted teammate on their side
     player_team_games: dict[int, int] = {}
     for r in rows:
-        info = costs.get(r["account_id"])
-        if not info or not info.get("captain"):
+        cap = team_of.get(r["account_id"])
+        if not cap:
             continue
-        teammates = drafted_by_captain[info["captain"]] - {r["account_id"]}
-        if match_side_aids[(r["match_id"], r["team_side"])] & teammates:
+        if match_side_aids[(r["match_id"], r["team_side"])] & (members[cap] - {r["account_id"]}):
             player_team_games[r["account_id"]] = player_team_games.get(r["account_id"], 0) + 1
 
-    # Ratio
     attendance: dict[int, float] = {}
     for aid, num in player_team_games.items():
-        cap = (costs.get(aid) or {}).get("captain")
-        denom = captain_team_games.get(cap, 0)
+        denom = captain_team_games.get(team_of[aid], 0)
         if denom > 0:
             attendance[aid] = num / denom
     return attendance

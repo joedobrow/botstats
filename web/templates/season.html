@@ -7,7 +7,7 @@
     <div class="muted small">{{ season.division }} ·
       <a href="https://www.dotabuff.com/esports/leagues/{{ season.id }}" rel="noopener"
          title="This season's Dota league on Dotabuff">League {{ season.id }}</a></div>
-    <div class="muted small">Starts {{ season_start(season, csrf, is_uberadmin, path) }} · {{ season_status(season) }}</div>
+    <div class="muted small">{{ "Started" if season.started else "Starts" }} {{ season_start(season, csrf, is_uberadmin, path) }} · {{ season_status(season) }}</div>
   </div>
   <div>{{ signup_button(season, my_signup) }}</div>
 </div>
@@ -172,8 +172,20 @@
       </label>
       <p class="muted small">Names split on @, so one with a space in it survives; a line of commas or
         one name per line works too. An account id links for certain.</p>
-      <label>Team <input type="text" name="team" maxlength="80"
-             value="{% if champions %}{{ champions.team or "" }}{% endif %}"></label>
+      {% set recorded = champions.team if champions else "" %}
+      <label>Team
+        <select name="team">
+          <option value="">No team name</option>
+          {% for t in season_team_names %}
+          <option value="{{ t }}"{% if t == recorded %} selected{% endif %}>{{ t }}</option>
+          {% endfor %}
+          {# A season drafted elsewhere has no teams on record, so whatever is
+             already written down stays on offer. #}
+          {% if recorded and recorded not in season_team_names %}
+          <option value="{{ recorded }}" selected>{{ recorded }}</option>
+          {% endif %}
+        </select>
+      </label>
       <div class="actions"><button class="primary">Save</button></div>
     </form>
   </section>
