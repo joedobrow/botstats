@@ -41,6 +41,7 @@
   --bar-shadow: 0 3px 10px rgba(60, 45, 20, 0.18);
   --bar-text-shadow: 0 1px 0 rgba(255, 250, 238, 0.5);
   --brand-ink: #1f1b15;
+  --hero-sub-ink: var(--accent);
 
   /* Book-cover tiles */
   --tile-hi: #93291f;
@@ -92,6 +93,7 @@
     --bar-shadow: 0 3px 12px rgba(0, 0, 0, 0.45);
     --bar-text-shadow: none;
     --brand-ink: #ece2cf;
+    --hero-sub-ink: var(--tile-ink);
     --tile-hi: #a3301f;
     --tile-lo: #8a2619;
     --tile-edge: #5e1a13;
@@ -131,6 +133,7 @@
   --bar-shadow: 0 3px 12px rgba(0, 0, 0, 0.45);
   --bar-text-shadow: none;
   --brand-ink: #ece2cf;
+  --hero-sub-ink: var(--tile-ink);
   --tile-hi: #a3301f;
   --tile-lo: #8a2619;
   --tile-edge: #5e1a13;
@@ -474,7 +477,7 @@ h1 .edit-form input[type=text] { font-size: 1.2rem; font-weight: 700; width: aut
   font-size: clamp(0.85rem, 2.6vw, 1.6rem);
   line-height: 1.15;
   letter-spacing: 0.01em;
-  color: var(--accent);
+  color: var(--hero-sub-ink);
 }
 
 /* Tiles: the big links on the home and info pages. Flat deep red with a faint
