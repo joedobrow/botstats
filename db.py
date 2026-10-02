@@ -1888,12 +1888,13 @@ def get_all_time_stats(division_id: int, season_id: int | None = None,
     return _apply_override_nicknames(results)
 
 
-def qualified(stats: list[dict]) -> tuple[list[dict], int, int]:
-    """Players with enough games to rank: at least half as many as the most
-    active player (rounded down), so stand-ins don't top a leaderboard.
-    Returns (rows, threshold, max_games)."""
+def qualified(stats: list[dict], min_games: int | None = None) -> tuple[list[dict], int, int]:
+    """Players with enough games to rank, so stand-ins don't top a
+    leaderboard. The default bar is half as many games as the most active
+    player (rounded down); min_games sets it outright instead, and 0 ranks
+    everyone. Returns (rows, threshold, max_games)."""
     max_games = max((s.get("games_played") or 0 for s in stats), default=0)
-    threshold = max_games // 2
+    threshold = max_games // 2 if min_games is None else max(0, min_games)
     return [s for s in stats if (s.get("games_played") or 0) >= threshold], threshold, max_games
 
 

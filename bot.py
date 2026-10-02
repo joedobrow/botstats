@@ -95,6 +95,8 @@ def _resolve_season(interaction: discord.Interaction, season: str | None) -> tup
     return None, f"\u26a0\ufe0f Unknown season `{season}`. Known seasons: {opts}"
 
 
+SEASON_PARAM_DESCRIPTION = "Which season — defaults to the division's current one"
+
 _REGION_NAMES = {"us_west": "US West", "us_east": "US East", "europe": "Europe", "any": "Any Region"}
 
 
@@ -236,121 +238,6 @@ def _slug(name: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") or "division"
 
 
-def _can_manage_weeks(interaction: discord.Interaction) -> bool:
-    is_admin = interaction.user.guild_permissions.administrator
-    is_owner = ADMIN_USER_ID and interaction.user.id == ADMIN_USER_ID
-    return bool(is_admin or is_owner)
-
-
-@tree.command(name="generate_weeks", description="[Admin] Bulk-create season week boundaries as standard 7-day blocks")
-@app_commands.describe(weeks="Number of weeks to generate (starting from week 1)")
-async def generate_weeks(interaction: discord.Interaction, weeks: int):
-    if not _can_manage_weeks(interaction):
-        await interaction.response.send_message("⚠️ Only server admins can manage season weeks.", ephemeral=True)
-        return
-
-    division = _require_division(interaction)
-    if not division:
-        await interaction.response.send_message("⚠️ No division configured. Run `/config` first.", ephemeral=True)
-        return
-    if weeks < 1 or weeks > 30:
-        await interaction.response.send_message("⚠️ weeks must be between 1 and 30.", ephemeral=True)
-        return
-
-    from db import generate_season_weeks
-    generate_season_weeks(division["current_season_id"], division["id"], weeks)
-    await interaction.response.send_message(
-        f"✅ Generated weeks 1–{weeks} as standard 7-day blocks from season start "
-        f"`{get_season(division['current_season_id'])['season_start']}`.\n"
-        f"Use `/set_week` to adjust any individual week (e.g. a bye), and `/list_weeks` to review.",
-        ephemeral=True,
-    )
-
-
-@tree.command(name="set_week", description="[Admin] Define or override one season week's date range")
-@app_commands.describe(
-    week="Week number (0 = pre-season, 1+ = normal weeks)",
-    start="Start date, YYYY-MM-DD (inclusive)",
-    end="End date, YYYY-MM-DD (inclusive)",
-)
-async def set_week(interaction: discord.Interaction, week: int, start: str, end: str):
-    if not _can_manage_weeks(interaction):
-        await interaction.response.send_message("⚠️ Only server admins can manage season weeks.", ephemeral=True)
-        return
-
-    division = _require_division(interaction)
-    if not division:
-        await interaction.response.send_message("⚠️ No division configured. Run `/config` first.", ephemeral=True)
-        return
-
-    try:
-        start_dt = datetime.strptime(start, "%Y-%m-%d").replace(hour=0, minute=0, second=0, tzinfo=timezone.utc)
-        end_dt = datetime.strptime(end, "%Y-%m-%d").replace(hour=23, minute=59, second=59, tzinfo=timezone.utc)
-    except ValueError:
-        await interaction.response.send_message("⚠️ Invalid date format. Use YYYY-MM-DD.", ephemeral=True)
-        return
-    if end_dt <= start_dt:
-        await interaction.response.send_message("⚠️ end must be after start.", ephemeral=True)
-        return
-
-    from db import upsert_season_week
-    upsert_season_week(division["current_season_id"], division["id"], week,
-        int(start_dt.timestamp()), int(end_dt.timestamp()),
-    )
-    await interaction.response.send_message(f"✅ Week {week} set to `{start}` → `{end}`.", ephemeral=True)
-
-
-@tree.command(name="delete_week", description="[Admin] Remove one season week's explicit definition")
-@app_commands.describe(week="Week number to remove")
-async def delete_week(interaction: discord.Interaction, week: int):
-    if not _can_manage_weeks(interaction):
-        await interaction.response.send_message("⚠️ Only server admins can manage season weeks.", ephemeral=True)
-        return
-
-    division = _require_division(interaction)
-    if not division:
-        await interaction.response.send_message("⚠️ No division configured. Run `/config` first.", ephemeral=True)
-        return
-
-    from db import delete_season_week
-    removed = delete_season_week(division["current_season_id"], division["id"], week)
-    if removed:
-        await interaction.response.send_message(f"✅ Removed week {week}'s explicit definition.", ephemeral=True)
-    else:
-        await interaction.response.send_message(f"⚠️ Week {week} wasn't explicitly defined.", ephemeral=True)
-
-
-@tree.command(name="list_weeks", description="Show every explicitly-defined season week and its date range")
-async def list_weeks(interaction: discord.Interaction):
-    division = _require_division(interaction)
-    if not division:
-        await interaction.response.send_message("⚠️ No division configured. Run `/config` first.", ephemeral=True)
-        return
-
-    from db import get_season_weeks, get_current_season_week
-    weeks = get_season_weeks(division["current_season_id"], division["id"])
-    if not weeks:
-        await interaction.response.send_message(
-            "No explicit weeks defined yet — week boundaries are calculated automatically from season_start.\n"
-            "Run `/generate_weeks weeks:<N>` to define them explicitly (needed to handle bye weeks).",
-            ephemeral=True,
-        )
-        return
-
-    current = get_current_season_week(division["current_season_id"], division["id"])
-    lines = []
-    for w in weeks:
-        # Week boundaries are stored as UTC midnight Monday -> UTC Sunday
-        # 23:59, so their date label is only correct rendered in UTC. Match
-        # timestamps (real moments) are shown in LEAGUE_TZ elsewhere.
-        start_d = datetime.fromtimestamp(w["start_ts"], tz=timezone.utc).strftime("%Y-%m-%d")
-        end_d = datetime.fromtimestamp(w["end_ts"], tz=timezone.utc).strftime("%Y-%m-%d")
-        marker = " ← current" if w["week_number"] == current else ""
-        lines.append(f"Week {w['week_number']}: `{start_d}` → `{end_d}`{marker}")
-
-    await interaction.response.send_message("**Season Weeks**\n" + "\n".join(lines), ephemeral=True)
-
-
 @tree.command(name="leaderboard", description="Show the leaderboard sorted by a stat")
 @app_commands.describe(
     season="Which season to look at (defaults to the current one)",
@@ -358,6 +245,7 @@ async def list_weeks(interaction: discord.Interaction):
     stat="Which stat to sort by",
     pos="Filter by position (1-5, optional)",
     all="Show every player (no top-10 cap, no min-games threshold)",
+    min_games="Games needed to rank. Defaults to half the most active player's; 0 ranks everyone.",
     debug="[Owner only] expose value components (cost, diff)",
     public=PUBLIC_BY_DEFAULT_PARAM_DESCRIPTION,
 )
@@ -395,7 +283,7 @@ async def list_weeks(interaction: discord.Interaction):
     app_commands.Choice(name="Position 5 (Hard Support)", value=5),
 ])
 @app_commands.autocomplete(season=_season_autocomplete)
-async def leaderboard(interaction: discord.Interaction, stat: app_commands.Choice[str], week: int = None, pos: int = None, all: bool = False, season: str = None, debug: bool = False, public: bool = True):
+async def leaderboard(interaction: discord.Interaction, stat: app_commands.Choice[str], week: int = None, pos: int = None, all: bool = False, season: str = None, min_games: int = None, debug: bool = False, public: bool = True):
     await interaction.response.defer(ephemeral=not public)
 
     is_owner = ADMIN_USER_ID and interaction.user.id == ADMIN_USER_ID
@@ -437,12 +325,14 @@ async def leaderboard(interaction: discord.Interaction, stat: app_commands.Choic
             stats = [s for s in stats if s.get("cost") is not None]
             threshold = None
             max_games = None
-        elif all:
+        elif all and min_games is None:
             threshold = None
             max_games = None
         else:
-            # Min-games qualification: 50% of the most-active player's games, rounded down
-            stats, threshold, max_games = qualified(stats)
+            # The bar is half the most active player's games unless min_games
+            # names one; all=True with a min_games still means "no top ten",
+            # not "no bar".
+            stats, threshold, max_games = qualified(stats, min_games)
 
         limit = None if all else 10
 
@@ -721,12 +611,18 @@ def _clean_card_line(line: str) -> str:
 
 
 @tree.command(name="player_card", description="Render a stream-friendly PNG card for a player")
-@app_commands.describe(name="Player name (partial), override nickname, or numeric account ID")
-async def player_card(interaction: discord.Interaction, name: str):
+@app_commands.describe(name="Player name (partial), override nickname, or numeric account ID",
+                       season=SEASON_PARAM_DESCRIPTION)
+@app_commands.autocomplete(season=_season_autocomplete)
+async def player_card(interaction: discord.Interaction, name: str, season: str = None):
     await interaction.response.defer()
     division = _require_division(interaction)
     if not division:
         await interaction.followup.send("⚠️ No division configured.", ephemeral=True)
+        return
+    season_id, err = _resolve_season(interaction, season)
+    if err:
+        await interaction.followup.send(err, ephemeral=True)
         return
 
     account_id, resolved_name, err = await _resolve_player_query(interaction, name)
@@ -740,7 +636,7 @@ async def player_card(interaction: discord.Interaction, name: str):
     from formatters import _compute_strengths_weaknesses
     from streamcards import render_player_card, fetch_avatar
 
-    stats = get_all_time_stats(division["id"], division["current_season_id"])
+    stats = get_all_time_stats(division["id"], season_id)
     target = next((s for s in stats if s.get("account_id") == account_id), None)
     if target is None:
         await interaction.followup.send(
@@ -755,7 +651,7 @@ async def player_card(interaction: discord.Interaction, name: str):
     cache_row = get_rating_cache_row(account_id)
     if cache_row and cache_row.get("internal_rating") is not None:
         rating = cache_row["internal_rating"]
-        adjustments = compute_fantasy_adjusted_ratings(division["current_season_id"], division["id"])
+        adjustments = compute_fantasy_adjusted_ratings(season_id, division["id"])
         effective_id = cache_row.get("alt_account_for") or account_id
         adj = adjustments.get(effective_id)
         if adj:
@@ -797,12 +693,18 @@ async def player_card(interaction: discord.Interaction, name: str):
 
 
 @tree.command(name="team_card", description="Render a stream-friendly PNG card for a player's team")
-@app_commands.describe(name="Any player on the team — partial name, override nickname, or numeric account ID")
-async def team_card(interaction: discord.Interaction, name: str):
+@app_commands.describe(name="Any player on the team — partial name, override nickname, or numeric account ID",
+                       season=SEASON_PARAM_DESCRIPTION)
+@app_commands.autocomplete(season=_season_autocomplete)
+async def team_card(interaction: discord.Interaction, name: str, season: str = None):
     await interaction.response.defer()
     division = _require_division(interaction)
     if not division:
         await interaction.followup.send("⚠️ No division configured.", ephemeral=True)
+        return
+    season_id, err = _resolve_season(interaction, season)
+    if err:
+        await interaction.followup.send(err, ephemeral=True)
         return
 
     account_id, resolved_name, err = await _resolve_player_query(interaction, name)
@@ -818,13 +720,13 @@ async def team_card(interaction: discord.Interaction, name: str):
     from streamcards import render_team_card, fetch_avatar
     import asyncio
 
-    costs = get_player_costs(division["current_season_id"], division["id"])
+    costs = get_player_costs(season_id, division["id"])
     target_cost = costs.get(account_id)
     captain: str | None = None
     if target_cost and target_cost.get("captain"):
         captain = target_cost["captain"]
     else:
-        cap_aids = get_captain_account_ids(division["current_season_id"], division["id"])
+        cap_aids = get_captain_account_ids(season_id, division["id"])
         for cap_name, cap_aid in cap_aids.items():
             if cap_aid == account_id:
                 captain = cap_name
@@ -836,14 +738,14 @@ async def team_card(interaction: discord.Interaction, name: str):
         )
         return
 
-    team_aggs = get_team_match_aggregates(division["current_season_id"], division["id"])
+    team_aggs = get_team_match_aggregates(season_id, division["id"])
     target_agg = team_aggs.get(captain)
     if not target_agg:
         await interaction.followup.send(f"⚠️ Team `{captain}` has no game data yet.", ephemeral=True)
         return
 
     # Build member list (in roster order: drafted players then captain).
-    cap_aids = get_captain_account_ids(division["current_season_id"], division["id"])
+    cap_aids = get_captain_account_ids(season_id, division["id"])
     captain_aid = cap_aids.get(captain)
     drafted_aids = [aid for aid, c in costs.items() if c.get("captain") == captain]
     roster_aids = drafted_aids + ([captain_aid] if captain_aid else [])
@@ -851,7 +753,7 @@ async def team_card(interaction: discord.Interaction, name: str):
     # Per-player role_position comes from the stats query.
     stats_by_aid = {
         s["account_id"]: s
-        for s in get_all_time_stats(division["id"], division["current_season_id"])
+        for s in get_all_time_stats(division["id"], season_id)
     }
 
     # Pull cache rows for names + avatars in one go.
@@ -886,7 +788,7 @@ async def team_card(interaction: discord.Interaction, name: str):
     losses = games - wins
 
     from team_metadata import get_team_info
-    info = get_team_info(captain, division["current_season_id"], division["id"])
+    info = get_team_info(captain, season_id, division["id"])
     team_label = info.get("team_name") or captain
     # Logo URL: RD2L first, captain avatar as fallback.
     logo_url = info.get("logo_url")
@@ -1038,12 +940,18 @@ async def h2h_card(interaction: discord.Interaction, team1: str, team2: str, sea
 @app_commands.describe(
     player1="First player (partial name, override nickname, or numeric account ID)",
     player2="Second player (partial name, override nickname, or numeric account ID)",
+    season=SEASON_PARAM_DESCRIPTION,
 )
-async def h2h_player(interaction: discord.Interaction, player1: str, player2: str):
+@app_commands.autocomplete(season=_season_autocomplete)
+async def h2h_player(interaction: discord.Interaction, player1: str, player2: str, season: str = None):
     await interaction.response.defer()
     division = _require_division(interaction)
     if not division:
         await interaction.followup.send("⚠️ No division configured.", ephemeral=True)
+        return
+    season_id, err = _resolve_season(interaction, season)
+    if err:
+        await interaction.followup.send(err, ephemeral=True)
         return
 
     from db import (
@@ -1063,7 +971,7 @@ async def h2h_player(interaction: discord.Interaction, player1: str, player2: st
     if aid_a == aid_b:
         await interaction.followup.send("⚠️ Same player on both sides.", ephemeral=True); return
 
-    stats = get_all_time_stats(division["id"], division["current_season_id"])
+    stats = get_all_time_stats(division["id"], season_id)
     row_a = next((s for s in stats if s.get("account_id") == aid_a), None)
     row_b = next((s for s in stats if s.get("account_id") == aid_b), None)
     if row_a is None or row_b is None:
@@ -1084,7 +992,7 @@ async def h2h_player(interaction: discord.Interaction, player1: str, player2: st
     stat_rows = compute_h2h_stat_rows(row_a, row_b, pool, top_n=8)
 
     # Ratings: prefer fantasy-adjusted, fall back to raw internal_rating.
-    adjustments = compute_fantasy_adjusted_ratings(division["current_season_id"], division["id"])
+    adjustments = compute_fantasy_adjusted_ratings(season_id, division["id"])
 
     def _rating_for(aid: int) -> int | None:
         cr = get_rating_cache_row(aid) or {}
@@ -1916,6 +1824,65 @@ async def summary(interaction: discord.Interaction, season: str = None, public: 
         await interaction.followup.send(f"❌ Error loading summary: {str(e)}", ephemeral=True)
 
 
+@tree.command(name="standings", description="Show the season's table — record and tiebreaker, the way the site ranks them")
+@app_commands.autocomplete(season=_season_autocomplete)
+@app_commands.describe(season=SEASON_PARAM_DESCRIPTION, public=PUBLIC_BY_DEFAULT_PARAM_DESCRIPTION)
+async def standings(interaction: discord.Interaction, season: str = None, public: bool = True):
+    await interaction.response.defer(ephemeral=not public)
+
+    division = _require_division(interaction)
+    if not division:
+        await interaction.followup.send("\u26a0\ufe0f No division configured. Ask an admin to run `/config` first.", ephemeral=True)
+        return
+    season_id, season_err = _resolve_season(interaction, season)
+    if season_err:
+        await interaction.followup.send(season_err, ephemeral=True)
+        return
+
+    # The website's own standings, so the two can't disagree about who is top
+    # or how a tie is broken.
+    from web import store
+    from db import get_season, season_label
+
+    teams = store.season_teams({"id": season_id, "division_id": division["id"]})
+    if not teams:
+        await interaction.followup.send(
+            "\u26a0\ufe0f No teams yet \u2014 standings appear once the draft is in.", ephemeral=True)
+        return
+
+    lines = []
+    for i, t in enumerate(teams, 1):
+        lines.append(f"**{i}. {t['name']}** \u2014 {t['wins']}\u2013{t['losses']} "
+                     f"\u00b7 {t['buchholz']} tb")
+    embed = discord.Embed(
+        title=f"{season_label(get_season(season_id))} standings",
+        description="\n".join(lines),
+        color=0x9A2A1E,
+    )
+    embed.set_footer(text="Sorted by record, then the combined wins of everyone a team has played (tb).")
+    await interaction.followup.send(embed=embed, ephemeral=not public)
+
+
+@tree.command(name="hall_of_fame", description="Show every season that has been won, and who won it")
+@app_commands.describe(public=PUBLIC_BY_DEFAULT_PARAM_DESCRIPTION)
+async def hall_of_fame(interaction: discord.Interaction, public: bool = True):
+    await interaction.response.defer(ephemeral=not public)
+
+    from web import store
+
+    champions = store.all_champions()
+    if not champions:
+        await interaction.followup.send("\u26a0\ufe0f No season has been won yet.", ephemeral=True)
+        return
+
+    embed = discord.Embed(title="\U0001F3C6 Hall of Fame", color=0x9A2A1E)
+    for c in champions[:25]:          # an embed takes 25 fields
+        who = ", ".join(m["name"] for m in c["members"])
+        embed.add_field(name=f"{c['season']['label']} \u2014 {c['team'] or 'Champions'}",
+                        value=who or "\u2014", inline=False)
+    await interaction.followup.send(embed=embed, ephemeral=not public)
+
+
 @tree.command(name="quote", description="Display a random chat message from league matches")
 @app_commands.describe(public=PUBLIC_BY_DEFAULT_PARAM_DESCRIPTION)
 async def quote(interaction: discord.Interaction, public: bool = True):
@@ -1948,39 +1915,6 @@ async def quote(interaction: discord.Interaction, public: bool = True):
         f"— *{player_name}* at {time_str} ([match]({dotabuff_link}))",
         ephemeral=not public,
     )
-
-
-@tree.command(name="draftorder", description="Show the Ability Draft pick order for a match")
-@app_commands.describe(match_id="The Dota 2 match ID (from Windrun or Dotabuff)")
-async def draftorder(interaction: discord.Interaction, match_id: str):
-    await interaction.response.defer()
-
-    try:
-        mid = int(match_id.strip())
-    except ValueError:
-        await interaction.followup.send("⚠️ Invalid match ID. Please provide a numeric match ID.", ephemeral=True)
-        return
-
-    from windrun import fetch_match
-    from draftorder import generate_draft_image
-
-    try:
-        data = await fetch_match(mid)
-        if not data or not data.get("picks") or not data.get("radiant") or not data.get("dire"):
-            await interaction.followup.send(
-                f"⏳ Match `{mid}` hasn't been parsed by [windrun.io](https://windrun.io) yet. "
-                "Check back in a few minutes — league games are parsed with priority, but there's "
-                "still some lag on fresh matches.",
-                ephemeral=True,
-            )
-            return
-
-        image_bytes = await generate_draft_image(data)
-        file = discord.File(image_bytes, filename=f"draft_{mid}.png")
-        await interaction.followup.send(file=file)
-    except Exception as e:
-        logger.exception("Error in draftorder command for match %s", match_id)
-        await interaction.followup.send(f"❌ Error generating draft order: {e}", ephemeral=True)
 
 
 @tree.command(name="hi_vs_low", description="Split 10 players into hi-MMR vs lo-MMR teams and set random requirements")

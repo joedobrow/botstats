@@ -141,6 +141,57 @@
   <p class="muted">Matchups appear here once the season has weeks and teams.</p>
   {% endif %}
 
+  {% if is_admin %}
+  <section class="panel">
+    <h2>Weeks</h2>
+    {% if weeks %}
+    {# The parser hoists a <form> out of a table, so each week's form lives
+       here and its fields point at it by id. #}
+    {% for w in weeks %}
+    <form method="post" action="{{ season_url(season) }}/weeks/set" id="week-{{ w.week_number }}">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <input type="hidden" name="week" value="{{ w.week_number }}">
+    </form>
+    {% endfor %}
+    <div class="scroll">
+    <table>
+      <thead><tr><th>Week</th><th>From</th><th>To</th><th></th></tr></thead>
+      <tbody>
+      {% for w in weeks %}
+        <tr>
+          <td><strong>{{ w.week_number }}</strong></td>
+          <td><input type="date" name="start" value="{{ w.start }}" form="week-{{ w.week_number }}" required></td>
+          <td><input type="date" name="end" value="{{ w.end }}" form="week-{{ w.week_number }}" required></td>
+          <td class="row-actions">
+            <button class="linklike" form="week-{{ w.week_number }}">Save</button>
+            <form method="post" action="{{ season_url(season) }}/weeks/delete" class="inline"
+                  onsubmit="return confirm('Remove week {{ w.week_number }}? Its games keep counting; only the dates go.')">
+              <input type="hidden" name="csrf" value="{{ csrf }}">
+              <input type="hidden" name="week" value="{{ w.week_number }}">
+              <button class="linklike danger">Remove</button>
+            </form>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% endif %}
+    <form method="post" action="{{ season_url(season) }}/weeks/generate" class="form grid">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <label>Lay out <input type="number" name="weeks" min="1" max="30" value="{{ 1 if weeks else 8 }}" required>
+        <span class="muted small">seven-day weeks from the season's start</span></label>
+      <label>First one is
+        <select name="first_week">
+          <option value="1">Week 1</option>
+          <option value="0">Week 0 — the season opens with a scrim week</option>
+        </select>
+      </label>
+      <div class="actions"><button class="primary">{{ "Add" if weeks else "Lay out the weeks" }}</button></div>
+    </form>
+  </section>
+  {% endif %}
+
 {% elif tab == "champions" %}
   {% if notice %}<div class="errors"><p>{{ notice }}</p></div>{% endif %}
   {% if champions %}

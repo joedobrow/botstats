@@ -298,6 +298,8 @@ async def season_page(request: web.Request):
         ctx["notice"] = request.query.get("notice")
     elif tab == "matchups":
         ctx["rounds"] = store.season_matchups(season)
+        ctx["weeks"] = store.season_weeks(season)
+        ctx["notice"] = request.query.get("notice")
     elif tab == "signups":
         ctx["signups"] = store.list_signups(season)
     elif tab == "champions":
@@ -340,6 +342,62 @@ async def favicon(request: web.Request):
 async def hall_of_fame(request: web.Request):
     return render(request, "hall_of_fame.html", title="Hall of Fame",
                   champions=store.all_champions())
+
+
+def _weeks_redirect(season: dict, notice: str):
+    return web.HTTPFound(f"{season_url(season)}?tab=matchups&" + urlencode({"notice": notice}))
+
+
+@routes.post("/season/{season_id}/{division}/weeks/generate")
+async def season_weeks_generate(request: web.Request):
+    """Lay out N weeks as plain seven-day blocks. Which number the first one
+    takes matters: a season that opens with a scrim week calls it week 0, so
+    that week 1 is the first that counts."""
+    season = _season_or_404(request)
+    _require_admin(request)
+    data = await request.post()
+    try:
+        weeks = int(data["weeks"])
+        first = int(data.get("first_week", 1))
+    except (KeyError, ValueError):
+        raise _weeks_redirect(season, "How many weeks?")
+    if not 1 <= weeks <= 30 or first not in (0, 1):
+        raise _weeks_redirect(season, "Between 1 and 30 weeks, numbered from 0 or 1.")
+    db.generate_season_weeks(season["id"], season["division_id"], weeks, first_week=first)
+    raise _weeks_redirect(season, f"Weeks {first}–{first + weeks - 1} laid out from the season's start.")
+
+
+@routes.post("/season/{season_id}/{division}/weeks/set")
+async def season_weeks_set(request: web.Request):
+    """Define or move one week — a bye, a reschedule, a week that ran long."""
+    season = _season_or_404(request)
+    _require_admin(request)
+    data = await request.post()
+    try:
+        week = int(data["week"])
+    except (KeyError, ValueError):
+        raise _weeks_redirect(season, "Which week?")
+    try:
+        store.set_season_week(season["id"], season["division_id"], week,
+                              data.get("start", ""), data.get("end", ""))
+    except ValueError as e:
+        raise _weeks_redirect(season, str(e))
+    raise _weeks_redirect(season, f"Week {week} set.")
+
+
+@routes.post("/season/{season_id}/{division}/weeks/delete")
+async def season_weeks_delete(request: web.Request):
+    """Drop one week's definition. The calendar formula takes over again."""
+    season = _season_or_404(request)
+    _require_admin(request)
+    data = await request.post()
+    try:
+        week = int(data["week"])
+    except (KeyError, ValueError):
+        raise _weeks_redirect(season, "Which week?")
+    removed = db.delete_season_week(season["id"], season["division_id"], week)
+    raise _weeks_redirect(season, f"Week {week} removed." if removed
+                          else f"Week {week} wasn't defined.")
 
 
 @routes.post("/season/{season_id}/{division}/champions")
