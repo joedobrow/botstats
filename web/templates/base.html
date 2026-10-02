@@ -26,15 +26,6 @@
   if (theme === "dark" || theme === "light")
     document.documentElement.setAttribute("data-theme", theme);
 })();
-
-// Experiment: ?look=inverted / ?look=classic, remembered while browsing.
-(function () {
-  var look = new URLSearchParams(location.search).get("look");
-  try {
-    if (look) localStorage.setItem("look", look); else look = localStorage.getItem("look");
-  } catch (e) {}
-  if (look === "inverted") document.documentElement.classList.add("inverted");
-})();
 </script>
 </head>
 <body>
