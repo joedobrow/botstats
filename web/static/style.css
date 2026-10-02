@@ -438,6 +438,12 @@ h1 .edit-form input[type=text] { font-size: 1.2rem; font-weight: 700; width: aut
   .mascot { float: none; display: block; width: 60%; margin: 8px auto 0; }
 }
 
+/* The home page's name block: the wordmark with the mascot beside it, the
+   two centred as one lockup rather than the mascot hanging off an edge. */
+.hero { display: flex; align-items: center; justify-content: center; gap: clamp(8px, 3vw, 36px); }
+.hero .wordmark { margin: 24px 0 18px; flex: 0 1 420px; min-width: 0; }
+.hero-mascot { flex: 0 0 auto; width: clamp(96px, 17vw, 190px); height: auto; }
+
 /* The wordmark over the home page. Full-colour artwork, so unlike the
    masthead mark it can't be one file painted through a mask — there is a
    drawing for each paper, and only the one in use is displayed. */
