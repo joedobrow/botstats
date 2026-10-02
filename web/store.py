@@ -15,6 +15,7 @@ import json
 import re
 import secrets
 import sqlite3
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -383,12 +384,20 @@ def season_champions(season: dict) -> dict | None:
 # Rings are drawn next to a name on nearly every page, so the counts are read
 # once and kept until they change.
 _champion_counts: dict[int, int] | None = None
+_champion_counts_at = 0.0
+_CHAMPION_TTL = 60.0
 
 
 def champion_counts() -> dict[int, int]:
-    """{account_id: seasons won}, for the ring after a player's name."""
-    global _champion_counts
-    if _champion_counts is None:
+    """{account_id: seasons won}, for the ring after a player's name.
+
+    Cached because a page asks for it once per name. The cache is this
+    process's own, so it expires on a timer as well as on a write here —
+    otherwise a change made on another machine would never show.
+    """
+    global _champion_counts, _champion_counts_at
+    if _champion_counts is None or time.monotonic() - _champion_counts_at > _CHAMPION_TTL:
+        _champion_counts_at = time.monotonic()
         with _conn() as conn:
             _champion_counts = {r["account_id"]: r["n"] for r in conn.execute(
                 "SELECT account_id, COUNT(*) AS n FROM site_season_champions "
@@ -451,21 +460,27 @@ def resolve_champion_names(text: str) -> list[dict]:
     tokens = [t for t in tokens if t]
     if not tokens:
         return []
-    known: dict[str, int] = {}
+    known: dict[str, set] = {}
     squashed: dict[str, set] = {}
     for p in search_players():
         name = p["name"].strip()
-        known.setdefault(name.lower(), p["account_id"])
+        known.setdefault(name.lower(), set()).add(p["account_id"])
         squashed.setdefault(_squash(name), set()).add(p["account_id"])
 
     def match(token: str) -> int | None:
-        hit = known.get(token.lower())
-        if hit is not None:
-            return hit
-        # A Discord handle drops the spaces an in-game name keeps, so
-        # "LovesMuffins" is "loves muffins". Only when it's unambiguous.
-        also = squashed.get(_squash(token)) or set()
-        return next(iter(also)) if len(also) == 1 else None
+        # Two people can be called the same thing — there are two Space
+        # Cowboys — and a name can move between them, so a name that fits
+        # more than one account resolves to none of them. Better an
+        # unresolved winner the notice names than a confident wrong one.
+        for index in (known, squashed):
+            # A Discord handle drops the spaces an in-game name keeps, so
+            # "LovesMuffins" finds "loves muffins" on the second pass.
+            hit = index.get(token.lower() if index is known else _squash(token)) or set()
+            if len(hit) == 1:
+                return next(iter(hit))
+            if hit:
+                return None          # ambiguous: don't fall through and guess
+        return None
 
     out = []
     for t in tokens:
