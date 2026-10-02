@@ -85,12 +85,21 @@ env.globals.update(season_url=season_url, team_url=team_url, hero=store.hero, ri
                    POSITION_NAMES=POSITION_NAMES, SEASON_STATUSES=store.SEASON_STATUSES)
 
 
+def _asset_version() -> int:
+    """The newest mtime in static/, as the cache-busting query for every asset
+    the pages link to. A dozen stats per render, against a deploy that would
+    otherwise be invisible to a browser holding the old file."""
+    return int(max((p.stat().st_mtime for p in STATIC_DIR.iterdir() if p.is_file()), default=0))
+
+
 def render(request: web.Request, template: str, status: int = 200, **ctx) -> web.Response:
     ctx.update(user=request.get("user"), is_admin=request.get("is_admin", False),
                is_uberadmin=request.get("is_uberadmin", False),
                csrf=request.get("csrf", ""), path=request.path,
-               # Changes whenever the stylesheet does, so browsers never keep a stale copy.
-               css_version=int((STATIC_DIR / "style.css").stat().st_mtime))
+               # Changes whenever any static file does. Keying it to the
+               # stylesheet alone meant a new favicon or logo kept the old
+               # query, so browsers went on serving the copy they had.
+               asset_version=_asset_version())
     html = env.get_template(template).render(**ctx)
     return web.Response(text=html, content_type="text/html", status=status)
 
