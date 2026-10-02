@@ -431,6 +431,13 @@ h1 .edit-form input[type=text] { font-size: 1.2rem; font-weight: 700; width: aut
 .dialog { border: 1px solid var(--border); border-radius: 10px; background: var(--surface); color: var(--text); padding: 20px 24px; max-width: 420px; width: calc(100% - 32px); }
 .dialog::backdrop { background: rgba(0, 0, 0, 0.45); }
 
+/* The mascot, for a page that isn't there. Floated so the message reads
+   beside him rather than under him, and centred out of the way on a phone. */
+.mascot { float: right; width: 42%; max-width: 300px; height: auto; margin: 0 0 12px 24px; }
+@media (max-width: 600px) {
+  .mascot { float: none; display: block; width: 60%; margin: 8px auto 0; }
+}
+
 /* The wordmark over the home page. Full-colour artwork, so unlike the
    masthead mark it can't be one file painted through a mask — there is a
    drawing for each paper, and only the one in use is displayed. */
