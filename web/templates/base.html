@@ -28,15 +28,12 @@
 })();
 
 // Experiment: ?look=inverted / ?look=classic, remembered while browsing.
-// The inverted look is an ivory palette of its own, so it can't also be dark:
-// an explicit ?theme= wins and the look stands down until ?theme=auto.
 (function () {
   var look = new URLSearchParams(location.search).get("look");
   try {
     if (look) localStorage.setItem("look", look); else look = localStorage.getItem("look");
   } catch (e) {}
-  if (look === "inverted" && !document.documentElement.getAttribute("data-theme"))
-    document.documentElement.classList.add("inverted");
+  if (look === "inverted") document.documentElement.classList.add("inverted");
 })();
 </script>
 </head>
