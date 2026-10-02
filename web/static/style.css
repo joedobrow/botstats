@@ -431,9 +431,18 @@ h1 .edit-form input[type=text] { font-size: 1.2rem; font-weight: 700; width: aut
 .dialog { border: 1px solid var(--border); border-radius: 10px; background: var(--surface); color: var(--text); padding: 20px 24px; max-width: 420px; width: calc(100% - 32px); }
 .dialog::backdrop { background: rgba(0, 0, 0, 0.45); }
 
-/* The wordmark over the home page */
+/* The wordmark over the home page. Full-colour artwork, so unlike the
+   masthead mark it can't be one file painted through a mask — there is a
+   drawing for each paper, and only the one in use is displayed. */
 .wordmark { margin: 30px 0 26px; text-align: center; }
 .wordmark img { width: 100%; max-width: 420px; height: auto; }
+.wordmark .on-dark { display: none; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .wordmark .on-light { display: none; }
+  :root:not([data-theme="light"]) .wordmark .on-dark { display: inline; }
+}
+:root[data-theme="dark"] .wordmark .on-light { display: none; }
+:root[data-theme="dark"] .wordmark .on-dark { display: inline; }
 
 /* Tiles: the big links on the home and info pages. Flat deep red with a faint
    grain, a fine inset frame and a centred label in woodtype slab — a strike
