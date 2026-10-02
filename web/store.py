@@ -276,9 +276,11 @@ def all_seasons() -> list[dict]:
         })
     out.sort(key=lambda s: (s["season_start"], -s["division_id"]), reverse=True)
     _fill_default_statuses(out)
+    today = datetime.now(timezone.utc).date().isoformat()
     for s in out:
         s["status_label"] = SEASON_STATUSES[s["status"]]
         s["signups_open"] = s["status"] == "signups"
+        s["started"] = s["season_start"] <= today
     return out
 
 

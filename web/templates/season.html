@@ -13,7 +13,13 @@
 </div>
 
 <nav class="tabs">
-  {% for key, label in [("matchups", "Matchups"), ("signups", "Signups (" ~ season.signup_count ~ ")"), ("teams", "Teams"), ("matches", "Matches"), ("playoffs", "Playoffs"), ("champions", "Champions"), ("leaders", "Leaders")] %}
+  {# Signing up is over once the season is under way, so the tab goes with it
+     — unless an admin has deliberately left signups open past the start. #}
+  {% set tabs = [("matchups", "Matchups")] %}
+  {% if season.signups_open or not season.started %}
+  {% set tabs = tabs + [("signups", "Signups (" ~ season.signup_count ~ ")")] %}
+  {% endif %}
+  {% for key, label in tabs + [("teams", "Teams"), ("matches", "Matches"), ("playoffs", "Playoffs"), ("champions", "Champions"), ("leaders", "Leaders")] %}
   <a href="?tab={{ key }}" {% if tab == key %}class="active"{% endif %}>{{ label }}</a>
   {% endfor %}
 </nav>
