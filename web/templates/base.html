@@ -30,6 +30,22 @@
 </head>
 <body>
 <script>
+// The hero's <picture> chooses by media query, which knows nothing of
+// ?theme=. When a theme is forced against the system's own setting, point the
+// logo at the other drawing — the only case where a second one is fetched.
+(function () {
+  var theme = document.documentElement.getAttribute("data-theme");
+  if (!theme) return;
+  document.addEventListener("DOMContentLoaded", function () {
+    var img = document.getElementById("hero-logo");
+    if (!img || (theme === "dark") === matchMedia("(prefers-color-scheme: dark)").matches) return;
+    var source = img.parentNode.querySelector("source");
+    if (source) source.remove();      // a <source> outranks the img's own src
+    img.src = img.getAttribute("src").replace(/adcl-logo-(light|dark)/, "adcl-logo-" + theme);
+  });
+})();
+</script>
+<script>
 // With a theme forced, every same-origin link carries it, so the address bar
 // keeps saying which mode this is and a copied link arrives in it too.
 (function () {

@@ -444,18 +444,40 @@ h1 .edit-form input[type=text] { font-size: 1.2rem; font-weight: 700; width: aut
 .hero .wordmark { margin: 24px 0 18px; flex: 0 1 420px; min-width: 0; }
 .hero-mascot { flex: 0 0 auto; width: clamp(96px, 17vw, 190px); height: auto; }
 
-/* The wordmark over the home page. Full-colour artwork, so unlike the
-   masthead mark it can't be one file painted through a mask — there is a
-   drawing for each paper, and only the one in use is displayed. */
-.wordmark { margin: 30px 0 26px; text-align: center; }
-.wordmark img { width: 100%; max-width: 420px; height: auto; }
-.wordmark .on-dark { display: none; }
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) .wordmark .on-light { display: none; }
-  :root:not([data-theme="light"]) .wordmark .on-dark { display: inline; }
+/* The home page's name block: the wordmark, the mascot and the league's name
+   centred as one lockup.
+
+   The artwork carries its own drop shadow, which is 25.8% of the image's
+   height of empty space below the letters — so bottom-aligning the boxes left
+   the letters floating well above the mascot's feet. Both are sized from one
+   width, which makes that gap a number rather than a guess: the image is
+   376/952 as tall as it is wide, and 0.258 of that is the shadow, so the
+   mascot comes up by 0.258 x 0.395 = 0.102 of the wordmark's width. */
+.hero {
+  --w: clamp(190px, 44vw, 420px);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 0 clamp(6px, 2.5vw, 30px);
+  margin: 24px 0 26px;
+  font-size: inherit;
 }
-:root[data-theme="dark"] .wordmark .on-light { display: none; }
-:root[data-theme="dark"] .wordmark .on-dark { display: inline; }
+.wordmark { flex: 0 0 var(--w); margin: 0; line-height: 0; }
+.wordmark img { width: 100%; height: auto; }
+.hero-mascot { flex: 0 0 auto; width: calc(var(--w) * 0.44); height: auto;
+               margin-bottom: calc(var(--w) * 0.102); }
+.hero-sub {
+  flex: 0 0 100%;
+  text-align: center;
+  margin-top: clamp(4px, 1.2vw, 12px);
+  font-family: "Alfa Slab One", Rockwell, "Roboto Slab", Georgia, serif;
+  font-weight: 400;          /* the face has one weight, and it is heavy */
+  font-size: clamp(0.85rem, 2.6vw, 1.6rem);
+  line-height: 1.15;
+  letter-spacing: 0.01em;
+  color: var(--accent);
+}
 
 /* Tiles: the big links on the home and info pages. Flat deep red with a faint
    grain, a fine inset frame and a centred label in woodtype slab — a strike
