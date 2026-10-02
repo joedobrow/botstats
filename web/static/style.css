@@ -27,8 +27,12 @@
   --open-bg: #dcf2e3;
   --open-text: #155d2b;
 }
+/* Dark is the system's choice unless ?theme= has overridden it. The same
+   values appear twice because a media query and a plain rule can't share a
+   selector list — keep them in step. */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
     --bg: #14161a;
     --surface: #1c1f24;
     --text: #e6e8eb;
@@ -45,6 +49,24 @@
     --open-text: #8fdca6;
   }
 }
+:root[data-theme="dark"] {
+  color-scheme: dark;
+    --bg: #14161a;
+    --surface: #1c1f24;
+    --text: #e6e8eb;
+    --muted: #979ea8;
+    --border: #2e333a;
+    --accent: #d9463d;
+    --link: #7fb0f5;
+    --win: #5cc47c;
+    --loss: #f07a72;
+    --radiant: #5cc47c;
+    --dire: #f07a72;
+    --tag-bg: #2a2e35;
+    --open-bg: #1d3b27;
+    --open-text: #8fdca6;
+}
+:root[data-theme="light"] { color-scheme: light; }
 
 * { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; }
