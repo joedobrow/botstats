@@ -326,6 +326,13 @@ async def season_page(request: web.Request):
     return render(request, "season.html", **ctx)
 
 
+@routes.get("/favicon.ico")
+async def favicon(request: web.Request):
+    """Browsers ask for this path whether or not the page links to it."""
+    return web.FileResponse(STATIC_DIR / "favicon.ico",
+                            headers={"Cache-Control": "public, max-age=86400"})
+
+
 @routes.get("/hall-of-fame")
 async def hall_of_fame(request: web.Request):
     return render(request, "hall_of_fame.html", title="Hall of Fame",
