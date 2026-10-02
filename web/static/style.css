@@ -396,7 +396,7 @@ h1 .edit-form input[type=text] { font-size: 1.2rem; font-weight: 700; width: aut
 /* Champions, and the rings they earn */
 .champion-list { list-style: none; padding: 0; margin: 10px 0 0; display: flex; flex-wrap: wrap; gap: 8px 18px; }
 .champion-list li { display: flex; align-items: center; gap: 7px; }
-.card.champions .champion-list { gap: 6px 14px; }
+.card.champions .champion-list { flex-direction: column; gap: 6px; }
 .panel.champions h2 { margin-bottom: 0; }
 /* A ring for each season won, wherever a name is written. */
 .rings { margin-left: 4px; font-size: 0.85em; letter-spacing: -1px; white-space: nowrap; }

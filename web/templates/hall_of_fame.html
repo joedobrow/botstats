@@ -8,7 +8,6 @@
   <section class="card champions">
     <div class="muted small">{{ c.season.division }} · <a href="{{ season_url(c.season) }}">{{ c.season.label }}</a></div>
     <h3 class="flush">🏆 {% if c.team %}{{ c.team }}{% else %}Champions{% endif %}</h3>
-    {% if c.note %}<div class="muted small">{{ c.note }}</div>{% endif %}
     <ul class="champion-list">
       {% for m in c.members %}
       <li>
