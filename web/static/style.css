@@ -299,11 +299,9 @@ td input.short { max-width: 110px; }
 
 /* Tiles: the big links on the home and info pages. Loosely domino-like —
    a raised, rounded pearl-ivory tile with dark lettering. */
-/* The artwork carries its own drop shadow, which reads as space below
-   the letters — so the margin under it is small and the one above isn't. */
-.wordmark { margin: 34px 0 6px; text-align: center; }
+.wordmark { margin: 30px 0 26px; text-align: center; }
 .wordmark img { width: 100%; max-width: 420px; height: auto; }
-@media (max-width: 600px) { .wordmark img { max-width: 280px; } .wordmark { margin: 22px 0 2px; } }
+@media (max-width: 600px) { .wordmark img { max-width: 280px; } .wordmark { margin: 20px 0 18px; } }
 .tiles {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
