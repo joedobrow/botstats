@@ -717,6 +717,23 @@ async def fantasy_page(request: web.Request):
                   labels=fantasy.LABELS, duration_mean=fantasy.DURATION_MEAN_MIN)
 
 
+@routes.get("/fantasy/formula")
+async def fantasy_formula_page(request: web.Request):
+    """The whole scoring formula, with what each part is worth and what the
+    league actually earns from it. Declared above /fantasy/{account_id} so the
+    word "formula" isn't read as an account id."""
+    import fantasy
+
+    table = store.fantasy_table(None)
+    rows = sorted(table["field"].values(), key=lambda f: -abs(f["points"]))
+    return render(request, "fantasy_formula.html", title="The fantasy formula",
+                  rows=rows, players=len(table["rows"]),
+                  duration_slope=fantasy.DURATION_SLOPE,
+                  duration_mean=fantasy.DURATION_MEAN_MIN,
+                  death_base=fantasy.WEIGHTS["death_base"],
+                  death_each=fantasy.WEIGHTS["deaths_per_game"])
+
+
 @routes.get("/fantasy/{account_id}")
 async def fantasy_player_page(request: web.Request):
     """One player's fantasy score, taken apart. Its own page: the filters and
