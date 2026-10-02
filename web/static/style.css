@@ -1,78 +1,157 @@
-:root {
-  /* Pearl ivory: the tiles and the top bar, the same in light and dark mode. */
-  --pearl-hi: #dcd2be;
-  --pearl-lo: #c3b79e;
-  --pearl-edge: #aa9e84;
-  --pearl-face:
-    linear-gradient(115deg, rgba(255, 228, 236, 0.22), rgba(222, 238, 255, 0.18) 45%, rgba(232, 255, 238, 0.14)),
-    radial-gradient(110% 80% at 15% 0%, rgba(255, 252, 244, 0.38), rgba(255, 252, 244, 0) 60%),
-    linear-gradient(165deg, var(--pearl-hi), var(--pearl-lo));
-  --control-h: 36px;
-  --ink: #1f1b15;
-  --ink-soft: #5c5446;
+/* ADCL — one printed look, in day and night.
+ *
+ * The design is a sheet of paper: ivory stock, dark ink, a masthead ruled in
+ * red, and deep red book-cover tiles set in woodtype slab. Night is the same
+ * press run on ink-stained stock — the red and the slab carry over, only the
+ * paper and the ink swap. Nothing here keeps a palette of its own: every
+ * colour is a token below, so the two modes can't drift apart.
+ */
 
-  --bg: #f6f7f9;
-  --surface: #ffffff;
-  --text: #1c1f24;
-  --muted: #69707a;
-  --border: #dfe2e7;
-  --accent: #b3261e;
-  --accent-text: #ffffff;
-  --link: #1d5fb8;
-  --win: #1e7d3a;
-  --loss: #b3261e;
-  --radiant: #1e7d3a;
-  --dire: #b3261e;
-  --tag-bg: #eceef2;
-  --open-bg: #dcf2e3;
-  --open-text: #155d2b;
+:root {
+  color-scheme: light;
+  --control-h: 36px;
+
+  /* The paper itself */
+  --page-bg:
+    radial-gradient(120% 70% at 20% 0%, rgba(255, 252, 244, 0.35), rgba(255, 252, 244, 0) 60%),
+    linear-gradient(170deg, #e2d9c6, #d2c7b0);
+  --bg: #d9cfbb;
+  --surface: #e6dece;
+  --text: #1f1b15;
+  --muted: #6b6254;
+  --border: #bdb198;
+
+  /* Ink */
+  --accent: #9a2a1e;
+  --accent-text: #f3ecdf;
+  --link: #6a2f10;
+  --win: #2e6b35;
+  --loss: #9a2a1e;
+  --radiant: #2e6b35;
+  --dire: #9a2a1e;
+  --tag-bg: #cfc4ac;
+  --open-bg: #c9dcbd;
+  --open-text: #2d5a28;
+
+  /* The masthead: a deeper band of the same paper, ruled in red */
+  --bar-bg:
+    radial-gradient(120% 140% at 15% 0%, rgba(255, 252, 244, 0.35), rgba(255, 252, 244, 0) 60%),
+    linear-gradient(175deg, #d3c8b0, #c8bca1);
+  --bar-edge: #b3a687;
+  --bar-shadow: 0 3px 10px rgba(60, 45, 20, 0.18);
+  --bar-text-shadow: 0 1px 0 rgba(255, 250, 238, 0.5);
+
+  /* Book-cover tiles */
+  --tile-hi: #93291f;
+  --tile-lo: #84241b;
+  --tile-edge: #6e1e17;
+  --tile-ink: #f6ecdc;
+  --tile-ink-soft: rgba(244, 226, 200, 0.75);
+  --tile-frame: rgba(244, 226, 200, 0.28);
+  --tile-shadow: 0 1px 2px rgba(40, 15, 10, 0.25), 0 10px 24px -10px rgba(60, 20, 10, 0.45);
+  --tile-shadow-hover: 0 1px 2px rgba(40, 15, 10, 0.25), 0 18px 32px -12px rgba(60, 20, 10, 0.5);
+  --tile-off-edge: rgba(147, 41, 31, 0.35);
+  --tile-off-frame: rgba(147, 41, 31, 0.2);
+  --tile-off-ink: rgba(90, 40, 30, 0.45);
+  --tile-off-ink-soft: rgba(90, 40, 30, 0.55);
+
+  /* A select's chevron is drawn in a data URI, which can't read a token — so
+     the stroke colour is written into the URL and swapped for night. */
+  --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5 6 6.5l5-5' fill='none' stroke='%236b6254' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
 }
-/* Dark is the system's choice unless ?theme= has overridden it. The same
-   values appear twice because a media query and a plain rule can't share a
-   selector list — keep them in step. */
+
+/* Night: the same press run on ink-stained stock. Written twice because a
+   media query and a plain rule can't share a selector list — once for the
+   system's choice, once for ?theme=dark. Keep the two identical. */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     color-scheme: dark;
-    --bg: #14161a;
-    --surface: #1c1f24;
-    --text: #e6e8eb;
-    --muted: #979ea8;
-    --border: #2e333a;
-    --accent: #d9463d;
-    --link: #7fb0f5;
-    --win: #5cc47c;
-    --loss: #f07a72;
-    --radiant: #5cc47c;
-    --dire: #f07a72;
-    --tag-bg: #2a2e35;
-    --open-bg: #1d3b27;
-    --open-text: #8fdca6;
+    --page-bg:
+      radial-gradient(120% 70% at 20% 0%, rgba(255, 238, 208, 0.06), rgba(255, 238, 208, 0) 60%),
+      linear-gradient(170deg, #1e1813, #14100c);
+    --bg: #1a1510;
+    --surface: #241d17;
+    --text: #ece2cf;
+    --muted: #a1947f;
+    --border: #3b3026;
+    --accent: #c4392b;
+    --accent-text: #f7eee0;
+    --link: #e0a368;
+    --win: #74b566;
+    --loss: #d2574a;
+    --radiant: #74b566;
+    --dire: #d2574a;
+    --tag-bg: #2f261e;
+    --open-bg: #24361f;
+    --open-text: #a3cf92;
+    --bar-bg:
+      radial-gradient(120% 140% at 15% 0%, rgba(255, 238, 208, 0.07), rgba(255, 238, 208, 0) 60%),
+      linear-gradient(175deg, #272019, #1c1611);
+    --bar-edge: #3b3026;
+    --bar-shadow: 0 3px 12px rgba(0, 0, 0, 0.45);
+    --bar-text-shadow: none;
+    --tile-hi: #a3301f;
+    --tile-lo: #8a2619;
+    --tile-edge: #5e1a13;
+    --tile-shadow: 0 1px 2px rgba(0, 0, 0, 0.5), 0 10px 24px -10px rgba(0, 0, 0, 0.7);
+    --tile-shadow-hover: 0 1px 2px rgba(0, 0, 0, 0.5), 0 18px 32px -12px rgba(0, 0, 0, 0.75);
+    --tile-off-edge: rgba(196, 57, 43, 0.4);
+    --tile-off-frame: rgba(196, 57, 43, 0.22);
+    --tile-off-ink: rgba(236, 226, 207, 0.4);
+    --tile-off-ink-soft: rgba(236, 226, 207, 0.5);
+    --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5 6 6.5l5-5' fill='none' stroke='%23a1947f' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
   }
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
-    --bg: #14161a;
-    --surface: #1c1f24;
-    --text: #e6e8eb;
-    --muted: #979ea8;
-    --border: #2e333a;
-    --accent: #d9463d;
-    --link: #7fb0f5;
-    --win: #5cc47c;
-    --loss: #f07a72;
-    --radiant: #5cc47c;
-    --dire: #f07a72;
-    --tag-bg: #2a2e35;
-    --open-bg: #1d3b27;
-    --open-text: #8fdca6;
+  --page-bg:
+    radial-gradient(120% 70% at 20% 0%, rgba(255, 238, 208, 0.06), rgba(255, 238, 208, 0) 60%),
+    linear-gradient(170deg, #1e1813, #14100c);
+  --bg: #1a1510;
+  --surface: #241d17;
+  --text: #ece2cf;
+  --muted: #a1947f;
+  --border: #3b3026;
+  --accent: #c4392b;
+  --accent-text: #f7eee0;
+  --link: #e0a368;
+  --win: #74b566;
+  --loss: #d2574a;
+  --radiant: #74b566;
+  --dire: #d2574a;
+  --tag-bg: #2f261e;
+  --open-bg: #24361f;
+  --open-text: #a3cf92;
+  --bar-bg:
+    radial-gradient(120% 140% at 15% 0%, rgba(255, 238, 208, 0.07), rgba(255, 238, 208, 0) 60%),
+    linear-gradient(175deg, #272019, #1c1611);
+  --bar-edge: #3b3026;
+  --bar-shadow: 0 3px 12px rgba(0, 0, 0, 0.45);
+  --bar-text-shadow: none;
+  --tile-hi: #a3301f;
+  --tile-lo: #8a2619;
+  --tile-edge: #5e1a13;
+  --tile-shadow: 0 1px 2px rgba(0, 0, 0, 0.5), 0 10px 24px -10px rgba(0, 0, 0, 0.7);
+  --tile-shadow-hover: 0 1px 2px rgba(0, 0, 0, 0.5), 0 18px 32px -12px rgba(0, 0, 0, 0.75);
+  --tile-off-edge: rgba(196, 57, 43, 0.4);
+  --tile-off-frame: rgba(196, 57, 43, 0.22);
+  --tile-off-ink: rgba(236, 226, 207, 0.4);
+  --tile-off-ink-soft: rgba(236, 226, 207, 0.5);
+  --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5 6 6.5l5-5' fill='none' stroke='%23a1947f' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
 }
 :root[data-theme="light"] { color-scheme: light; }
 
+/* Base */
 * { box-sizing: border-box; }
-html { -webkit-text-size-adjust: 100%; }
+html {
+  -webkit-text-size-adjust: 100%;
+  background: var(--page-bg);
+  background-color: var(--bg);   /* under the gradient: overscroll, and a fallback */
+  background-attachment: fixed;
+}
 body {
   margin: 0;
-  background: var(--bg);
+  background: transparent;
   color: var(--text);
   font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
@@ -88,23 +167,26 @@ main.wrap { padding-bottom: 48px; min-height: 70vh; }
 footer.wrap { padding-top: 16px; padding-bottom: 32px; font-size: 0.85rem; border-top: 1px solid var(--border); }
 .muted { color: var(--muted); }
 .small { font-size: 0.85rem; }
+.nowrap { white-space: nowrap; }
 
-/* Top bar */
+/* The masthead */
 .topbar {
-  background: var(--pearl-face);
-  border-bottom: 1px solid var(--pearl-edge);
-  box-shadow: inset 0 1px 0 rgba(255, 250, 238, 0.6), inset 0 -3px 0 rgba(90, 72, 44, 0.16), 0 4px 16px rgba(0, 0, 0, 0.28);
+  background: var(--bar-bg);
+  border-bottom: 1px solid var(--bar-edge);
+  box-shadow: inset 0 -3px 0 var(--accent), var(--bar-shadow);
   position: relative;  /* keeps its shadow above the page */
 }
 .topbar nav { display: flex; align-items: center; gap: 4px 18px; flex-wrap: wrap; min-height: 56px; padding-top: 6px; padding-bottom: 6px; }
-.topbar a { color: var(--ink); font-weight: 600; text-shadow: 0 1px 0 rgba(255, 250, 238, 0.5); }
-.topbar a:hover { text-decoration: none; color: var(--ink-soft); }
-.topbar a.active { box-shadow: inset 0 -2px 0 var(--ink); }
-.brand { display: flex; align-items: center; gap: 8px; font-weight: 800; font-size: 1.2rem; letter-spacing: 0.02em; }
+.topbar a { color: var(--text); font-weight: 600; text-shadow: var(--bar-text-shadow); }
+.topbar a:hover { text-decoration: none; color: var(--accent); }
+.topbar a.active { color: var(--accent); box-shadow: inset 0 -2px 0 var(--accent); }
+.brand { display: flex; align-items: center; gap: 8px; font-weight: 800; font-size: 1.2rem; letter-spacing: 0.02em; color: var(--accent); }
 .brand img { width: auto; height: 26px; display: block; }
-.topbar a.whoami { display: inline-flex; align-items: center; gap: 7px; max-width: 14rem; }
+.topbar a.whoami {
+  display: inline-flex; align-items: center; gap: 7px; max-width: 14rem;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 .topbar a.whoami img { width: 22px; height: 22px; border-radius: 50%; }
-.topbar a.whoami { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .spacer { flex: 1; }
 
 /* Buttons and forms */
@@ -141,18 +223,19 @@ td input[type=text], td select, h1 .edit-form input[type=text] { height: auto; }
 /* A select sizes itself by the browser's own metrics and draws the browser's
    own arrow, so beside an input of identical padding it still came out a
    different height and a different style. Dropping the native appearance
-   makes it the same box as everything else; the chevron is ours, in a grey
-   that reads on both the light and the dark surface. */
+   makes it the same box as everything else; the chevron is ours. */
 select {
   appearance: none; -webkit-appearance: none; -moz-appearance: none;
   padding-right: 30px;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5 6 6.5l5-5' fill='none' stroke='%238a8a8a' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-image: var(--chevron);
   background-repeat: no-repeat;
   background-position: right 10px center;
   background-size: 11px 8px;
 }
 select::-ms-expand { display: none; }
 td input[type=text] { width: auto; max-width: 220px; padding: 3px 6px; }
+td select { width: auto; padding: 3px 26px 3px 6px; background-position: right 7px center; }
+td input.short { max-width: 110px; }
 fieldset { border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; margin: 0; display: flex; flex-direction: column; gap: 4px; }
 legend { font-weight: 500; padding: 0 4px; }
 .actions { display: flex; gap: 10px; flex-wrap: wrap; }
@@ -180,9 +263,31 @@ img.avatar { width: 24px; height: 24px; border-radius: 50%; }
 img.avatar.big { width: 72px; height: 72px; border-radius: 8px; margin: 0; }
 img.hero { width: 24px; height: 24px; }
 
+/* Sortable table headers */
+th[data-sort-type] { cursor: pointer; user-select: none; }
+th[data-sort-type]:hover { color: var(--text); }
+th.sorted-asc::after { content: " ▲"; font-size: 0.7em; }
+th.sorted-desc::after { content: " ▼"; font-size: 0.7em; }
+
+/* A total row is the answer the table was adding up to, so it reads as one. */
+tfoot tr.total th, tfoot tr.total td {
+  border-top: 2px solid var(--border); font-weight: 700; font-size: 1.05rem;
+  background: var(--tag-bg); padding-top: 10px; padding-bottom: 10px;
+}
+
+/* A cell holding a link and an action next to it: tags collapse to a single
+   space, which isn't enough to tell them apart. */
+.row-actions > form.inline { margin-left: 14px; }
+/* Whatever sits before Remove — a Details link or a "By hand" tag — takes the
+   same width, so the Remove buttons line up down the column. */
+.row-actions > .action-slot { display: inline-block; min-width: 4.8em; }
+
 /* Tags and tabs */
 .tag { display: inline-block; font-size: 0.75rem; font-weight: 600; padding: 1px 7px; border-radius: 10px; background: var(--tag-bg); color: var(--muted); }
 .tag.open { background: var(--open-bg); color: var(--open-text); }
+.tag.status-signups { background: var(--open-bg); color: var(--open-text); }
+a.tag.status-signups:hover { text-decoration: underline; }
+.tag.status-active { background: var(--accent); color: var(--accent-text); }
 .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin: 18px 0; overflow-x: auto; }
 .tabs a { padding: 8px 14px; color: var(--muted); border-bottom: 2px solid transparent; white-space: nowrap; font-weight: 500; }
 .tabs a.active { color: var(--text); border-bottom-color: var(--accent); }
@@ -200,6 +305,7 @@ img.hero { width: 24px; height: 24px; }
 /* Page headers */
 .page-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap; margin-top: 16px; }
 .profile-head { display: flex; align-items: center; gap: 16px; margin-top: 20px; }
+.profile-head .rating { color: var(--text); }
 .stat-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin-top: 20px; }
 .stat-row > div { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; }
 .stat { display: block; font-size: 1.4rem; font-weight: 700; font-variant-numeric: tabular-nums; }
@@ -210,6 +316,12 @@ h2.side { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 h2.side.radiant { color: var(--radiant); }
 h2.side.dire { color: var(--dire); }
 h2.side .score { color: var(--text); }
+h2.flush { margin: 0; }
+/* A heading with an admin action on it, e.g. Matches + */
+h2.with-action { display: flex; align-items: center; gap: 10px; }
+.add-button { line-height: 1; padding: 2px 10px; font-size: 1.1rem; font-weight: 700; }
+
+/* Prose: the rules and about pages */
 .prose { max-width: 720px; }
 .prose h2 { font-size: 1.25rem; margin: 1.6em 0 0.5em; }
 .prose h3 { font-size: 1.05rem; margin: 1.4em 0 0.4em; }
@@ -224,9 +336,6 @@ h2.side .score { color: var(--text); }
 .prose hr { border: 0; border-top: 1px solid var(--border); margin: 1.8em 0; }
 .prose code { background: var(--tag-bg); padding: 1px 5px; border-radius: 4px; font-size: 0.92em; }
 .prose > :first-child { margin-top: 0; }
-.nowrap { white-space: nowrap; }
-
-h2.flush { margin: 0; }
 
 /* Admin pages: each area is its own card, so the eye can tell where one job
    ends and the next begins — a form sitting right under a table used to read
@@ -244,6 +353,14 @@ h2.flush { margin: 0; }
 ul.plain { list-style: none; padding: 0; margin: 0; }
 ul.plain li { padding: 4px 0; border-bottom: 1px solid var(--border); }
 ul.plain li:last-child { border-bottom: 0; }
+
+/* Click-to-rename */
+.edit-view { cursor: pointer; border-bottom: 1px dashed var(--muted); }
+.edit-view:hover { color: var(--accent); }
+.edit-form { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.edit-form[hidden] { display: none; }
+.edit-form input[type=date] { width: auto; }
+h1 .edit-form input[type=text] { font-size: 1.2rem; font-weight: 700; width: auto; min-width: 16ch; }
 
 /* Playoffs: rounds as columns, each match a pair of seats. */
 .bracket { display: flex; gap: 28px; overflow-x: auto; padding-bottom: 8px; align-items: stretch; }
@@ -264,18 +381,13 @@ ul.plain li:last-child { border-bottom: 0; }
 .team-chip.dragging { opacity: 0.5; }
 .champion { font-size: 1.1rem; }
 
-/* A cell holding a link and an action next to it: tags collapse to a single
-   space, which isn't enough to tell them apart. */
-.row-actions > form.inline { margin-left: 14px; }
-/* Whatever sits before Remove — a Details link or a "By hand" tag — takes the
-   same width, so the Remove buttons line up down the column. */
-.row-actions > .action-slot { display: inline-block; min-width: 4.8em; }
-
-/* A total row is the answer the table was adding up to, so it reads as one. */
-tfoot tr.total th, tfoot tr.total td {
-  border-top: 2px solid var(--border); font-weight: 700; font-size: 1.05rem;
-  background: var(--tag-bg); padding-top: 10px; padding-bottom: 10px;
-}
+/* Champions, and the rings they earn */
+.champion-list { list-style: none; padding: 0; margin: 10px 0 0; display: flex; flex-wrap: wrap; gap: 8px 18px; }
+.champion-list li { display: flex; align-items: center; gap: 7px; }
+.card.champions .champion-list { gap: 6px 14px; }
+.panel.champions h2 { margin-bottom: 0; }
+/* A ring for each season won, wherever a name is written. */
+.rings { margin-left: 4px; font-size: 0.85em; letter-spacing: -1px; white-space: nowrap; }
 
 /* Matches page: a wide filter bar, and a pager under the table. */
 .filters { align-items: end; }
@@ -285,202 +397,19 @@ tfoot tr.total th, tfoot tr.total td {
 
 /* Matchups: two teams a row. Every week's table lays out the same, so a week
    with no games to link still lines up with the ones that have. */
+.matchups { table-layout: fixed; }
 .matchup-side { white-space: nowrap; }
 .matchup-score { display: inline-block; min-width: 1.5em; margin-left: 8px;
                  font-variant-numeric: tabular-nums; font-weight: 600; }
-.matchups { table-layout: fixed; }
 .matchups td.matchup-side { width: 40%; }
 .matchups td.matchup-games { width: 16%; white-space: nowrap; }
-/* A ring for each season won, wherever a name is written. */
-.rings { margin-left: 4px; font-size: 0.85em; letter-spacing: -1px; white-space: nowrap; }
-.card.champions .champion-list { gap: 6px 14px; }
-.champion-list { list-style: none; padding: 0; margin: 10px 0 0; display: flex; flex-wrap: wrap; gap: 8px 18px; }
-.champion-list li { display: flex; align-items: center; gap: 7px; }
-.panel.champions h2 { margin-bottom: 0; }
 .matchups td.matchup-vs { width: 4%; text-align: center; color: var(--muted);
   font-size: 0.68rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.65; }
-
-/* A heading with an admin action on it, e.g. Matches + */
-h2.with-action { display: flex; align-items: center; gap: 10px; }
-.add-button { line-height: 1; padding: 2px 10px; font-size: 1.1rem; font-weight: 700; }
-
-/* Click-to-rename */
-.edit-view { cursor: pointer; border-bottom: 1px dashed var(--muted); }
-.edit-view:hover { color: var(--accent); }
-.edit-form { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
-.edit-form[hidden] { display: none; }
-h1 .edit-form input[type=text] { font-size: 1.2rem; font-weight: 700; width: auto; min-width: 16ch; }
-
-/* Season status tags */
-.tag.status-signups { background: var(--open-bg); color: var(--open-text); }
-a.tag.status-signups:hover { text-decoration: underline; }
-.tag.status-active { background: var(--accent); color: var(--accent-text); }
-td select { width: auto; padding: 3px 26px 3px 6px; background-position: right 7px center; }
-.edit-form input[type=date] { width: auto; }
-td input.short { max-width: 110px; }
-
-/* Tiles: the big links on the home and info pages. Loosely domino-like —
-   a raised, rounded pearl-ivory tile with dark lettering. */
-.wordmark { margin: 30px 0 26px; text-align: center; }
-.wordmark img { width: 100%; max-width: 420px; height: auto; }
-@media (max-width: 600px) { .wordmark img { max-width: 280px; } .wordmark { margin: 20px 0 18px; } }
-.tiles {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: clamp(14px, 2.5vw, 28px);
-  margin: clamp(20px, 5vh, 48px) 0;
-}
-.tiles.big { grid-template-columns: repeat(2, 1fr); }
-.tile {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  aspect-ratio: 2 / 1;
-  padding: 6%;
-  text-align: center;
-  border-radius: clamp(12px, 1.8vw, 20px);
-  color: var(--ink);
-  background: var(--pearl-face);   /* a faint pearl shimmer over warm ivory */
-  border: 1px solid var(--pearl-edge);
-  box-shadow:
-    inset 0 2px 0 rgba(255, 250, 238, 0.7),     /* lit top edge */
-    inset 0 -4px 0 rgba(90, 72, 44, 0.18),      /* bevel along the bottom */
-    0 1px 0 rgba(0, 0, 0, 0.35),
-    0 10px 24px rgba(0, 0, 0, 0.3);
-  transition: transform 0.18s ease, box-shadow 0.18s ease;
-}
-a.tile:hover, a.tile:focus-visible {
-  text-decoration: none;
-  transform: translateY(-3px);
-  box-shadow:
-    inset 0 2px 0 rgba(255, 250, 238, 0.7),
-    inset 0 -4px 0 rgba(90, 72, 44, 0.18),
-    0 1px 0 rgba(0, 0, 0, 0.35),
-    0 18px 32px rgba(0, 0, 0, 0.36);
-}
-a.tile:focus-visible { outline: 3px solid var(--accent); outline-offset: 4px; }
-.tile-label {
-  font-size: clamp(1.25rem, 2.6vw, 2.2rem);
-  font-weight: 800;
-  letter-spacing: 0.01em;
-  color: var(--ink);
-  text-shadow: 0 1px 0 rgba(255, 250, 238, 0.55);
-}
-.tiles:not(.big) .tile-label { font-size: 1.25rem; }
-.tile-sub { font-size: 0.85rem; color: var(--ink-soft); }
-.tile.disabled {
-  cursor: not-allowed;
-  filter: saturate(0.5) brightness(0.62);
-  box-shadow: inset 0 2px 0 rgba(255, 250, 238, 0.35), 0 4px 10px rgba(0, 0, 0, 0.25);
-}
-@media (max-width: 600px) {
-  .tiles.big { grid-template-columns: 1fr; }
-}
-
-/* Experiment: the inverted look — ivory paper page, book-cover tiles, red-ruled top bar.
-   Turned on with ?look=inverted (see base.html); ?look=classic turns it off. */
-html.inverted {
-  --bg: #d9cfbb;
-  --surface: #e6dece;
-  --text: #1f1b15;
-  --muted: #6b6254;
-  --border: #bdb198;
-  --accent: #9a2a1e;
-  --accent-text: #f3ecdf;
-  --link: #6a2f10;
-  --win: #2e6b35;
-  --loss: #9a2a1e;
-  --radiant: #2e6b35;
-  --dire: #9a2a1e;
-  --tag-bg: #cfc4ac;
-  --open-bg: #c9dcbd;
-  --open-text: #2d5a28;
-  /* tiles: lighter ivory cards with dark ink */
-  --pearl-edge: #b9ac90;
-  --pearl-face: #ebe4d5;
-  --ink: #1f1b15;
-  --ink-soft: #6b6254;
-  background:
-    radial-gradient(120% 70% at 20% 0%, rgba(255, 252, 244, 0.35), rgba(255, 252, 244, 0) 60%),
-    linear-gradient(170deg, #e2d9c6, #d2c7b0);
-  background-attachment: fixed;
-}
-html.inverted body { background: transparent; }
-/* book-cover tiles: flat deep red with a faint grain, a fine inset frame
-   and a centered label in Alfa Slab One — heavy woodtype slab, like a
-   strike poster */
-html.inverted .tile {
-  position: relative;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-  padding: clamp(18px, 3vw, 30px);
-  border-radius: 6px;
-  border: 1px solid #6e1e17;
-  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 .07 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"), linear-gradient(180deg, #93291f, #84241b);
-  box-shadow: 0 1px 2px rgba(40, 15, 10, 0.25), 0 10px 24px -10px rgba(60, 20, 10, 0.45);
-  transition: transform 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
-}
-html.inverted .tile::before {       /* the inset frame */
-  content: "";
-  position: absolute;
-  inset: 8px;
-  border: 1px solid rgba(244, 226, 200, 0.28);
-  border-radius: 3px;
-  pointer-events: none;
-}
-html.inverted a.tile:hover, html.inverted a.tile:focus-visible {
-  transform: translateY(-2px);
-  box-shadow: 0 1px 2px rgba(40, 15, 10, 0.25), 0 18px 32px -12px rgba(60, 20, 10, 0.5);
-}
-html.inverted .tile-label {
-  font-family: "Alfa Slab One", Rockwell, "Roboto Slab", Georgia, serif;
-  font-weight: 400;   /* the face is already heavy; there is only one weight */
-  font-size: clamp(1.5rem, 2.9vw, 2.4rem);
-  letter-spacing: 0.01em;
-  line-height: 1.05;
-  color: #f6ecdc;
-  text-shadow: none;
-}
-html.inverted .tiles:not(.big) .tile-label { font-size: 1.4rem; }
-html.inverted .tile-sub { color: rgba(244, 226, 200, 0.75); font-size: 0.85rem; }
-/* Sign-Up while signups are closed: the frame alone, printed but not filled in */
-html.inverted .tile.disabled {
-  filter: none;
-  background: transparent;
-  border: 1px solid rgba(147, 41, 31, 0.35);
-  box-shadow: none;
-}
-html.inverted .tile.disabled::before { border-color: rgba(147, 41, 31, 0.2); }
-html.inverted .tile.disabled .tile-label { color: rgba(90, 40, 30, 0.45); }
-html.inverted .tile.disabled .tile-sub { color: rgba(90, 40, 30, 0.55); }
-/* the top bar: a deeper band of the same paper, ruled in red like a masthead */
-html.inverted .topbar {
-  background:
-    radial-gradient(120% 140% at 15% 0%, rgba(255, 252, 244, 0.35), rgba(255, 252, 244, 0) 60%),
-    linear-gradient(175deg, #d3c8b0, #c8bca1);
-  border-bottom: 1px solid #b3a687;
-  box-shadow: inset 0 -3px 0 var(--accent), 0 3px 10px rgba(60, 45, 20, 0.18);
-}
-html.inverted .topbar a { color: var(--text); text-shadow: 0 1px 0 rgba(255, 250, 238, 0.5); }
-html.inverted .topbar a:hover { color: var(--accent); }
-html.inverted .topbar a.active { color: var(--accent); box-shadow: inset 0 -2px 0 var(--accent); }
-html.inverted .topbar .brand { color: var(--accent); }
-html.inverted table { background: var(--surface); }
-
-/* Sortable table headers */
-th[data-sort-type] { cursor: pointer; user-select: none; }
-th[data-sort-type]:hover { color: var(--text); }
-th.sorted-asc::after { content: " ▲"; font-size: 0.7em; }
-th.sorted-desc::after { content: " ▼"; font-size: 0.7em; }
 
 /* Ability Draft picks on the match page: the hero model, then abilities */
 .draft { display: inline-flex; align-items: center; gap: 4px; vertical-align: middle; }
 .draft img { width: 30px; height: 30px; border-radius: 4px; margin: 0; }
 .draft img.draft-model { width: 34px; height: 34px; object-fit: contain; margin-right: 4px; }
-.profile-head .rating { color: var(--text); }
 .draft .draft-unknown { display: inline-grid; place-items: center; width: 30px; height: 30px; border-radius: 4px; background: var(--tag-bg); color: var(--muted); font-size: 0.8rem; }
 
 /* Team logo: clickable for admins and the captain */
@@ -489,3 +418,76 @@ th.sorted-desc::after { content: " ▼"; font-size: 0.7em; }
 .logo-empty { display: inline-grid; place-items: center; width: 80px; height: 80px; border: 2px dashed var(--border); border-radius: 8px; color: var(--muted); font-size: 0.8rem; }
 .dialog { border: 1px solid var(--border); border-radius: 10px; background: var(--surface); color: var(--text); padding: 20px 24px; max-width: 420px; width: calc(100% - 32px); }
 .dialog::backdrop { background: rgba(0, 0, 0, 0.45); }
+
+/* The wordmark over the home page */
+.wordmark { margin: 30px 0 26px; text-align: center; }
+.wordmark img { width: 100%; max-width: 420px; height: auto; }
+
+/* Tiles: the big links on the home and info pages. Flat deep red with a faint
+   grain, a fine inset frame and a centred label in woodtype slab — a strike
+   poster, or a shelf of book spines. */
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: clamp(14px, 2.5vw, 28px);
+  margin: clamp(20px, 5vh, 48px) 0;
+}
+.tiles.big { grid-template-columns: repeat(2, 1fr); }
+.tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  aspect-ratio: 2 / 1;
+  padding: clamp(18px, 3vw, 30px);
+  text-align: center;
+  border-radius: 6px;
+  border: 1px solid var(--tile-edge);
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 .07 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"),
+    linear-gradient(180deg, var(--tile-hi), var(--tile-lo));
+  box-shadow: var(--tile-shadow);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+.tile::before {       /* the inset frame */
+  content: "";
+  position: absolute;
+  inset: 8px;
+  border: 1px solid var(--tile-frame);
+  border-radius: 3px;
+  pointer-events: none;
+}
+a.tile:hover, a.tile:focus-visible {
+  text-decoration: none;
+  transform: translateY(-2px);
+  box-shadow: var(--tile-shadow-hover);
+}
+a.tile:focus-visible { outline: 3px solid var(--accent); outline-offset: 4px; }
+.tile-label {
+  font-family: "Alfa Slab One", Rockwell, "Roboto Slab", Georgia, serif;
+  font-weight: 400;   /* the face is already heavy; there is only one weight */
+  font-size: clamp(1.5rem, 2.9vw, 2.4rem);
+  letter-spacing: 0.01em;
+  line-height: 1.05;
+  color: var(--tile-ink);
+}
+.tiles:not(.big) .tile-label { font-size: 1.4rem; }
+.tile-sub { font-size: 0.85rem; color: var(--tile-ink-soft); }
+/* Sign-Up while signups are closed: the frame alone, printed but not filled in */
+.tile.disabled {
+  cursor: not-allowed;
+  background: transparent;
+  border: 1px solid var(--tile-off-edge);
+  box-shadow: none;
+}
+.tile.disabled::before { border-color: var(--tile-off-frame); }
+.tile.disabled .tile-label { color: var(--tile-off-ink); }
+.tile.disabled .tile-sub { color: var(--tile-off-ink-soft); }
+
+@media (max-width: 600px) {
+  .tiles.big { grid-template-columns: 1fr; }
+  .wordmark { margin: 20px 0 18px; }
+  .wordmark img { max-width: 280px; }
+}
