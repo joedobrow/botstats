@@ -34,7 +34,7 @@
   <tbody>
   {% for r in season_rows %}
     <tr>
-      <td><a href="{{ season_url(r.season) }}">{{ r.season.label }}</a><div class="muted small">{{ r.season.division }}</div></td>
+      <td class="nowrap"><a href="{{ season_url(r.season) }}">{{ r.season.label }}</a><div class="muted small">{{ r.season.division }}</div></td>
       <td>{% if r.captain %}<a href="{{ team_url(r.season, r.captain) }}">{{ r.team_name }}</a>{% else %}<span class="muted">—</span>{% endif %}</td>
       <td class="num">{% if r.is_captain %}<span class="tag">Captain</span>{% elif r.cost %}${{ r.cost }}{% endif %}</td>
       <td class="num">{{ r.stats.games_played }}</td>
