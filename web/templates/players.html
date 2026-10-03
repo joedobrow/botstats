@@ -9,6 +9,7 @@
   <button title="Go straight to this player's page, by account id, Steam64 id, or an exact name">Look up</button>
 </form>
 <p class="muted small">Can look up external players here.</p>
+<div class="scroll">
 <table id="players-table" class="sortable">
   <thead><tr>
     <th data-sort-type="text">Player</th>
@@ -28,4 +29,5 @@
     <tr class="no-results"{% if players %} hidden{% endif %}><td colspan="4" class="muted">No players found.</td></tr>
   </tbody>
 </table>
+</div>
 {% endblock %}

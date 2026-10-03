@@ -86,7 +86,8 @@
   <p class="muted small">Admins only — the same working the bot prints for
     <code>/lookup</code>. Checked
     {% if breakdown.age_days is not none %}{{ breakdown.age_days }} days ago{% else %}never{% endif %}{% if breakdown.stale %}, which is past the seven-day limit, so the next look at this player will refresh it{% endif %}.</p>
-  <table>
+  <div class="scroll">
+<table>
     <tbody>
       <tr><th>Internal rating</th><td><strong class="rating">{{ breakdown.rating if breakdown.rating is not none else "—" }}</strong>
         {% if breakdown.group_rating is not none %}<span class="muted small">pooled across their accounts; this one alone is {{ breakdown.own_rating }}</span>{% endif %}</td></tr>
@@ -116,6 +117,7 @@
       {% endif %}
     </tbody>
   </table>
+</div>
   {% if not breakdown.reproduced %}
   <p class="muted small">⚠️ Re-resolving the stored inputs doesn't reproduce the stored rating, so
     one of them has changed meaning since it was written. A Recheck settles it.</p>

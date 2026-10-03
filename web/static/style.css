@@ -431,7 +431,9 @@ h1 .edit-form input[type=text] { font-size: 1.2rem; font-weight: 700; width: aut
 .matchups td.matchup-side { width: 40%; }
 .matchups td.matchup-games { width: 16%; white-space: nowrap; }
 .matchups td.matchup-vs { width: 4%; text-align: center; color: var(--muted);
-  font-size: 0.68rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.65; }
+  /* 0.68rem is under 11px, which is below what a phone should be asked to
+     render; the separator is quiet enough at 12. */
+  font-size: 0.75rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.65; }
 
 /* Ability Draft picks on the match page: the hero model, then abilities */
 .draft { display: inline-flex; align-items: center; gap: 4px; vertical-align: middle; }
