@@ -351,6 +351,14 @@ async def favicon(request: web.Request):
                             headers={"Cache-Control": "no-cache"})
 
 
+@routes.get("/robots.txt")
+async def robots(request: web.Request):
+    """Served from the root, which is the only place a crawler looks."""
+    return web.FileResponse(STATIC_DIR / "robots.txt",
+                            headers={"Content-Type": "text/plain; charset=utf-8",
+                                     "Cache-Control": "no-cache"})
+
+
 @routes.get("/hall-of-fame")
 async def hall_of_fame(request: web.Request):
     return render(request, "hall_of_fame.html", title="Hall of Fame",
