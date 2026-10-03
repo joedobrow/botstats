@@ -485,8 +485,9 @@ async def player(interaction: discord.Interaction, name: str, week: int = None, 
             await interaction.followup.send(embed=embed, ephemeral=not public)
             return
 
-        # Pool of league players with enough games to give meaningful percentiles.
-        qualified_pool = [s for s in ranked(stats) if (s.get("games_played") or 0) >= 5]
+        # Who this player is being measured against (db.comparison_pool).
+        from db import comparison_pool
+        qualified_pool = comparison_pool(stats, include=[account_id])
         embed = format_player_stats(
             match_row, week_label=week_label, debug=debug, rating=rating,
             qualified_pool=qualified_pool,
@@ -657,8 +658,9 @@ async def player_card(interaction: discord.Interaction, name: str, season: str =
         if adj:
             rating = adj["adjusted_rating"]
 
-    # Strengths/weaknesses (max 3 each)
-    pool = [s for s in ranked(stats) if (s.get("games_played") or 0) >= 5]
+    # Strengths/weaknesses (max 3 each), against the rest of the league.
+    from db import comparison_pool
+    pool = comparison_pool(stats, include=[account_id])
     strengths, weaknesses = _compute_strengths_weaknesses(target, pool)
     strengths = [_clean_card_line(s) for s in strengths[:3]]
     weaknesses = [_clean_card_line(s) for s in weaknesses[:3]]
@@ -981,14 +983,11 @@ async def h2h_player(interaction: discord.Interaction, player1: str, player2: st
         )
         return
 
-    # Rank stats by |z-diff| across a 5-game-minimum pool. Both target players
-    # are included in the pool regardless of games played so we never miss
-    # a stat because they're new.
-    pool = [s for s in ranked(stats) if (s.get("games_played") or 0) >= 5]
-    pool_ids = {s["account_id"] for s in pool}
-    for r in (row_a, row_b):
-        if r["account_id"] not in pool_ids:
-            pool.append(r)
+    # Rank stats by |z-diff| across the league (db.comparison_pool). Both
+    # players are in the pool whatever they have played, so a stat is never
+    # missing just because one of them is new.
+    from db import comparison_pool
+    pool = comparison_pool(stats, include=[row_a["account_id"], row_b["account_id"]])
     stat_rows = compute_h2h_stat_rows(row_a, row_b, pool, top_n=8)
 
     # Ratings: prefer fantasy-adjusted, fall back to raw internal_rating.
