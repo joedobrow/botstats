@@ -1298,7 +1298,9 @@ async def crawler_middleware(request: web.Request, handler):
     people it is actually for.
     """
     ua = request.headers.get("User-Agent", "").lower()
-    if ua and any(name in ua for name in BLOCKED_AGENTS):
+    # robots.txt is how a crawler learns to stay away of its own accord, so it
+    # is the one thing a blocked crawler must still be able to read.
+    if request.path != "/robots.txt" and ua and any(name in ua for name in BLOCKED_AGENTS):
         return web.Response(status=403, content_type="text/plain",
                             text="Not open to crawlers. See /robots.txt.\n")
     return await handler(request)
