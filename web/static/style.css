@@ -460,6 +460,10 @@ h1 .edit-form input[type=text] { font-size: 1.2rem; font-weight: 700; width: aut
   margin: 24px 0 26px;
   font-size: inherit;
 }
+/* A themed <picture> is a wrapper for the media query, not a box: its img
+   keeps whatever layout role it had — flex item, float. */
+picture.themed { display: contents; }
+
 .wordmark { flex: 0 0 var(--w); margin: 0; line-height: 0; }
 /* <picture> and <img> are inline by default, and an inline replaced element
    sits on a baseline with descender space beneath it — 18px of it here, which

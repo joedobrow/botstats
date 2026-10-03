@@ -1,6 +1,11 @@
 {% extends "base.html" %}
 {% block content %}
-{% if mascot %}<img class="mascot" src="/static/mascot-confused.png?v={{ asset_version }}" alt="">{% endif %}
+{% if mascot %}
+<picture class="themed">
+  <source media="(prefers-color-scheme: dark)" srcset="/static/mascot-dark.png?v={{ asset_version }}">
+  <img class="mascot" src="/static/mascot-light.png?v={{ asset_version }}" alt="">
+</picture>
+{% endif %}
 <h1>{{ title }}</h1>
 <p>{{ message }}</p>
 <p><a href="/">Back to home</a></p>

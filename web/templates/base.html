@@ -30,18 +30,23 @@
 </head>
 <body>
 <script>
-// The hero's <picture> chooses by media query, which knows nothing of
-// ?theme=. When a theme is forced against the system's own setting, point the
-// logo at the other drawing — the only case where a second one is fetched.
+// A <picture> chooses by media query, which knows nothing of ?theme=. When a
+// theme is forced against the system's own setting, point each themed picture
+// at the other drawing — the only case where a second one is fetched. The
+// pairs are named <thing>-light.png and <thing>-dark.png, so one rule finds
+// them all.
 (function () {
   var theme = document.documentElement.getAttribute("data-theme");
   if (!theme) return;
   document.addEventListener("DOMContentLoaded", function () {
-    var img = document.getElementById("hero-logo");
-    if (!img || (theme === "dark") === matchMedia("(prefers-color-scheme: dark)").matches) return;
-    var source = img.parentNode.querySelector("source");
-    if (source) source.remove();      // a <source> outranks the img's own src
-    img.src = img.getAttribute("src").replace(/adcl-logo-(light|dark)/, "adcl-logo-" + theme);
+    if ((theme === "dark") === matchMedia("(prefers-color-scheme: dark)").matches) return;
+    document.querySelectorAll("picture.themed > img").forEach(function (img) {
+      var src = img.getAttribute("src");
+      if (!/-(light|dark)\.png/.test(src)) return;
+      var source = img.parentNode.querySelector("source");
+      if (source) source.remove();      // a <source> outranks the img's own src
+      img.src = src.replace(/-(light|dark)\.png/, "-" + theme + ".png");
+    });
   });
 })();
 </script>
