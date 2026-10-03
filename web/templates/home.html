@@ -4,13 +4,16 @@
 <h1 class="hero">
   <span class="wordmark">
     {# <picture> picks by media query, so only the drawing in use is fetched. #}
-    <picture>
+    <picture class="themed">
       <source media="(prefers-color-scheme: dark)" srcset="/static/adcl-logo-dark.png?v={{ asset_version }}">
-      <img id="hero-logo" src="/static/adcl-logo-light.png?v={{ asset_version }}" alt="ADCL">
+      <img src="/static/adcl-logo-light.png?v={{ asset_version }}" alt="ADCL">
     </picture>
   </span>
-  <img class="hero-mascot" src="/static/mascot-confused.png?v={{ asset_version }}" alt=""
-       title="Ability Draft, in one picture">
+  <picture class="themed">
+    <source media="(prefers-color-scheme: dark)" srcset="/static/mascot-dark.png?v={{ asset_version }}">
+    <img class="hero-mascot" src="/static/mascot-light.png?v={{ asset_version }}" alt=""
+         title="Ability Draft, in one picture">
+  </picture>
   <span class="hero-sub">Ability Draft Community League</span>
 </h1>
 <div class="tiles big">
