@@ -78,7 +78,7 @@
     {% set won = (m.radiant_win and on_radiant) or (not m.radiant_win and not on_radiant) %}
     {% set opp = m.dire_team if on_radiant else m.radiant_team %}
     <tr>
-      <td>{{ m.start_time|date("%b %-d") }}</td>
+      <td class="nowrap">{{ m.start_time|date("%b %-d") }}</td>
       <td>
         {% if is_admin %}
         <span class="editable">
