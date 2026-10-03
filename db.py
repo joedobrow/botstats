@@ -130,6 +130,13 @@ CREATE TABLE IF NOT EXISTS players (
     player_slot               INTEGER DEFAULT -1,  -- 0-4 radiant, 128-132 dire
     defensive_item_uses       INTEGER DEFAULT 0,   -- pipe/crimson/lotus/glimmer/force/pavise/solar/halberd/sphere activations
     building_damage           INTEGER DEFAULT 0,   -- damage dealt to enemy buildings (OpenDota tower_damage)
+    -- Observer ward uptime, as a sum and a count rather than an average: a
+    -- game with one ward shouldn't weigh the same as a game with seven when
+    -- these are added up across a season. Only wards whose end we saw are
+    -- counted; one still standing at the final horn didn't survive, the game
+    -- just stopped.
+    obs_uptime_total          INTEGER DEFAULT 0,   -- seconds, summed over resolved wards
+    obs_uptime_count          INTEGER DEFAULT 0,   -- how many wards that sum covers
     UNIQUE (match_id, player_slot)                 -- one row per seat; re-fetches update it
 );"""
 
@@ -209,6 +216,8 @@ def init_db():
             ("player_slot",               "INTEGER DEFAULT -1"),  # 0-4 radiant, 128-132 dire
             ("defensive_item_uses",       "INTEGER DEFAULT 0"),   # sum of activations across pipe/crimson/lotus/glimmer/force/pavise/solar/halberd/sphere
             ("building_damage",           "INTEGER DEFAULT 0"),   # damage dealt to enemy buildings (towers + barracks + throne)
+            ("obs_uptime_total",          "INTEGER DEFAULT 0"),   # seconds summed over wards whose end we saw
+            ("obs_uptime_count",          "INTEGER DEFAULT 0"),   # how many wards that sum covers
         ]
         for col, col_type in new_player_cols:
             if player_columns and col not in player_columns:
@@ -1247,6 +1256,7 @@ def upsert_players(players: list[dict]):
                  tower_kills, roshans_killed, firstblood_claimed,
                  teamfight_participation, stuns, camps_stacked, rune_pickups,
                  tormentor_kills, watcher_captures, team_first_tormentor_time,
+                 obs_uptime_total, obs_uptime_count,
                  player_slot, defensive_item_uses, building_damage)
             VALUES
                 (:match_id, :account_id, :name, :hero_id, :team_side, :role_position,
@@ -1256,6 +1266,7 @@ def upsert_players(players: list[dict]):
                  :tower_kills, :roshans_killed, :firstblood_claimed,
                  :teamfight_participation, :stuns, :camps_stacked, :rune_pickups,
                  :tormentor_kills, :watcher_captures, :team_first_tormentor_time,
+                 :obs_uptime_total, :obs_uptime_count,
                  :player_slot, :defensive_item_uses, :building_damage)
             ON CONFLICT(match_id, player_slot) DO UPDATE SET
                 account_id = excluded.account_id,
@@ -1289,6 +1300,8 @@ def upsert_players(players: list[dict]):
                 tormentor_kills = excluded.tormentor_kills,
                 watcher_captures = excluded.watcher_captures,
                 team_first_tormentor_time = excluded.team_first_tormentor_time,
+                obs_uptime_total = excluded.obs_uptime_total,
+                obs_uptime_count = excluded.obs_uptime_count,
                 defensive_item_uses = excluded.defensive_item_uses,
                 building_damage = excluded.building_damage
         """, players)
@@ -1799,6 +1812,8 @@ def _player_stats(scope: MatchScope) -> list[dict]:
                 AVG(p.camps_stacked)            AS camps_stacked,
                 AVG(p.rune_pickups)             AS rune_pickups,
                 AVG(p.tormentor_kills)          AS tormentor_kills,
+                SUM(p.obs_uptime_total) * 1.0 / NULLIF(SUM(p.obs_uptime_count), 0)
+                                                AS obs_uptime,
                 AVG(p.watcher_captures)         AS watcher_captures,
                 AVG(p.defensive_item_uses)      AS defensive_item_uses,
                 AVG(p.building_damage)          AS building_damage,
@@ -3159,7 +3174,7 @@ def get_team_aggregates(season_id: int, division_id: int) -> dict[str, dict]:
     # Per-game stats — weight by games_played.
     AVG_KEYS = (
         "gpm", "xpm", "last_hits", "denies", "hero_damage", "hero_healing",
-        "avg_pct_damage", "teamfight_participation", "stuns_per_min",
+        "avg_pct_damage", "teamfight_participation", "stuns_per_min", "obs_uptime",
         "tower_kills", "observer_kills", "roshans_killed", "camps_stacked",
         "rune_pickups", "defensive_item_uses", "tormentor_kills",
         "watcher_captures", "building_damage", "firstblood_claimed",

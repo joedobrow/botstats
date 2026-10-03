@@ -509,6 +509,7 @@ H2H_PLAYER_CANDIDATE_STATS: list[tuple[str, str, callable]] = [
     ("Stuns/Min",        "stuns_per_min",           lambda v: f"{v:.2f}"),
     ("Def Item Uses",    "defensive_item_uses",     lambda v: f"{v:.1f}"),
     ("Watcher Caps",     "watcher_captures",        lambda v: f"{v:.2f}"),
+    ("Obs Uptime",       "obs_uptime",              lambda v: f"{int(v//60)}:{int(v%60):02d}"),
     ("Fantasy Pts/Game", "fantasy_points",          lambda v: f"{v:.1f}"),
 ]
 
