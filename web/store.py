@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
 import secrets
 import sqlite3
@@ -23,6 +24,8 @@ from pathlib import Path
 import db
 from config import LEAGUE_TZ
 from db import _conn
+
+logger = logging.getLogger(__name__)
 
 SESSION_DAYS = 30
 # Season status: key -> label. "signups" is the only one that takes signups.
@@ -127,29 +130,6 @@ def init_site_tables() -> None:
                 value  TEXT NOT NULL
             );
 
-            -- One row per page view. No IP address and no user agent are
-            -- kept: `visitor` is a hash of them with a salt that changes
-            -- daily, which counts a person once a day without recording who
-            -- they are, and cannot be worked backwards once the day's salt is
-            -- dropped.
-            CREATE TABLE IF NOT EXISTS site_views (
-                ts          TEXT NOT NULL,       -- ISO, UTC
-                day         TEXT NOT NULL,       -- YYYY-MM-DD, for grouping
-                path        TEXT NOT NULL,
-                referrer    TEXT,                -- host only, never the full URL
-                visitor     TEXT NOT NULL,
-                account_id  INTEGER              -- NULL unless logged in
-            );
-            CREATE INDEX IF NOT EXISTS site_views_day ON site_views (day);
-
-            -- The daily salt. Kept in the database rather than in memory so a
-            -- restart doesn't split one person into two visitors, and deleted
-            -- with the day it belongs to.
-            CREATE TABLE IF NOT EXISTS site_view_salts (
-                day   TEXT PRIMARY KEY,
-                salt  TEXT NOT NULL
-            );
-
             -- Who won a season, in one division: one row per player, in the
             -- order they should be listed. Recorded rather than derived — a
             -- season can be won before the site kept brackets (37, 38), or in
@@ -163,6 +143,7 @@ def init_site_tables() -> None:
                 PRIMARY KEY (season_id, division_id, position)
             );
         """)
+    init_view_tables()
     prune_views()
     with _conn() as conn:
         # The team they won as, and anything that needs saying about it, live
@@ -380,9 +361,77 @@ _BOTS = ("bot", "crawl", "spider", "slurp", "curl/", "wget", "python-requests",
 VIEW_RETENTION_DAYS = 400
 
 
+# Page views live in their own database file. They are written on every
+# request, and the derived-stat cache invalidates whenever the league's
+# database changes — so keeping them together meant every page view threw away
+# the cache that every page depends on, and nothing was ever cached at all.
+VIEWS_DB = str(Path(db.DB_PATH).with_name("site_views.db"))
+
+
+def _views_conn() -> sqlite3.Connection:
+    conn = sqlite3.connect(VIEWS_DB)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL;")
+    return conn
+
+
+def init_view_tables() -> None:
+    with _views_conn() as conn:
+        conn.executescript("""
+            -- One row per page view. No IP address and no user agent are
+            -- kept: `visitor` is a hash of them with a salt that changes
+            -- daily, which counts a person once a day without recording who
+            -- they are, and cannot be worked backwards once the day's salt is
+            -- dropped.
+            CREATE TABLE IF NOT EXISTS site_views (
+                ts          TEXT NOT NULL,       -- ISO, UTC
+                day         TEXT NOT NULL,       -- YYYY-MM-DD, for grouping
+                path        TEXT NOT NULL,
+                referrer    TEXT,                -- host only, never the full URL
+                visitor     TEXT NOT NULL,
+                account_id  INTEGER              -- NULL unless logged in
+            );
+            CREATE INDEX IF NOT EXISTS site_views_day ON site_views (day);
+
+            -- The daily salt. Kept in the database rather than in memory so a
+            -- restart doesn't split one person into two visitors, and deleted
+            -- with the day it belongs to.
+            CREATE TABLE IF NOT EXISTS site_view_salts (
+                day   TEXT PRIMARY KEY,
+                salt  TEXT NOT NULL
+            );
+
+        """)
+    _migrate_views_out_of_main_db()
+
+
+def _migrate_views_out_of_main_db() -> None:
+    """Carry across what was recorded while views lived in the league's own
+    database, then drop them from it. One-time; a no-op afterwards."""
+    with _conn() as main:
+        tables = {r[0] for r in main.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'site_view%'")}
+        if not tables:
+            return
+        views = main.execute("SELECT ts, day, path, referrer, visitor, account_id "
+                             "FROM site_views").fetchall() if "site_views" in tables else []
+        salts = main.execute("SELECT day, salt FROM site_view_salts").fetchall() \
+            if "site_view_salts" in tables else []
+    with _views_conn() as conn:
+        if conn.execute("SELECT COUNT(*) FROM site_views").fetchone()[0] == 0 and views:
+            conn.executemany("INSERT INTO site_views (ts, day, path, referrer, visitor, account_id) "
+                             "VALUES (?, ?, ?, ?, ?, ?)", [tuple(r) for r in views])
+        conn.executemany("INSERT OR IGNORE INTO site_view_salts (day, salt) VALUES (?, ?)",
+                         [tuple(r) for r in salts])
+    with _conn() as main:
+        for t in tables:
+            main.execute(f"DROP TABLE IF EXISTS {t}")
+    logger.info("moved %d page views into %s", len(views), VIEWS_DB)
+
+
 def _visitor_salt(day: str) -> str:
     """The day's salt, made once and shared by every process."""
-    with _conn() as conn:
+    with _views_conn() as conn:
         row = conn.execute("SELECT salt FROM site_view_salts WHERE day = ?", (day,)).fetchone()
         if row:
             return row["salt"]
@@ -410,7 +459,7 @@ def record_view(path: str, *, ip: str, user_agent: str, referrer: str,
             host = "" if netloc.endswith("adcl.gg") or "dota-bot.fly.dev" in netloc else netloc[:120]
         except Exception:
             host = ""
-    with _conn() as conn:
+    with _views_conn() as conn:
         conn.execute("INSERT INTO site_views (ts, day, path, referrer, visitor, account_id) "
                      "VALUES (?, ?, ?, ?, ?, ?)",
                      (now.isoformat(timespec="seconds"), day, path[:200], host or None,
@@ -420,7 +469,7 @@ def record_view(path: str, *, ip: str, user_agent: str, referrer: str,
 def prune_views() -> None:
     """Drop views and salts past the retention window."""
     cutoff = (datetime.now(timezone.utc) - timedelta(days=VIEW_RETENTION_DAYS)).date().isoformat()
-    with _conn() as conn:
+    with _views_conn() as conn:
         conn.execute("DELETE FROM site_views WHERE day < ?", (cutoff,))
         conn.execute("DELETE FROM site_view_salts WHERE day < ?", (cutoff,))
 
@@ -429,7 +478,7 @@ def traffic(days: int = 30) -> dict:
     """Views and visitors by day, plus the busiest pages and where people came
     from, over the last `days` days."""
     since = (datetime.now(timezone.utc) - timedelta(days=days - 1)).date().isoformat()
-    with _conn() as conn:
+    with _views_conn() as conn:
         by_day = [dict(r) for r in conn.execute(
             "SELECT day, COUNT(*) AS views, COUNT(DISTINCT visitor) AS visitors "
             "FROM site_views WHERE day >= ? GROUP BY day ORDER BY day", (since,))]
