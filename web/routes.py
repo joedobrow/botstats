@@ -1271,6 +1271,39 @@ async def admin_signups_csv(request: web.Request):
 
 # ---------------------------------------------------------------------------
 
+# Crawlers that identify themselves and are not wanted here. robots.txt asks
+# them to stay out, but a crawler caches that file for hours, so asking does
+# nothing about the one already walking the site. These are refused outright,
+# before any work is done. Everything here names itself honestly in its user
+# agent — a scanner pretending to be Chrome is a different problem, and not one
+# a list of names can solve.
+BLOCKED_AGENTS = (
+    "gptbot", "oai-searchbot", "chatgpt-user",     # OpenAI
+    "claudebot", "claude-web", "anthropic-ai",     # Anthropic
+    "ccbot",                                       # Common Crawl
+    "bytespider",                                  # ByteDance
+    "google-extended", "applebot-extended",        # the AI-training arms
+    "perplexitybot", "amazonbot", "meta-external",
+    "dataforseo", "semrush", "ahrefs", "mj12bot", "dotbot",   # SEO crawlers
+)
+
+
+@web.middleware
+async def crawler_middleware(request: web.Request, handler):
+    """Refuse the crawlers robots.txt already asks to stay away.
+
+    A page here is computed from the whole league's stats, so a crawler
+    walking every player is the heaviest load the site can be put under —
+    which is exactly what happened, and it made the site unusable for the
+    people it is actually for.
+    """
+    ua = request.headers.get("User-Agent", "").lower()
+    if ua and any(name in ua for name in BLOCKED_AGENTS):
+        return web.Response(status=403, content_type="text/plain",
+                            text="Not open to crawlers. See /robots.txt.\n")
+    return await handler(request)
+
+
 @web.middleware
 async def canonical_host_middleware(request: web.Request, handler):
     """www.adcl.gg and adcl.gg are the same site, but only one of them is the
@@ -1326,6 +1359,7 @@ async def error_middleware(request: web.Request, handler):
 def setup(app: web.Application) -> None:
     """Add the website's routes to the bot's aiohttp app."""
     store.init_site_tables()
+    app.middlewares.append(crawler_middleware)
     app.middlewares.append(canonical_host_middleware)
     app.middlewares.append(error_middleware)
     app.middlewares.append(session_middleware)
