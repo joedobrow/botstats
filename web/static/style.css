@@ -577,6 +577,12 @@ a.tile:focus-visible { outline: 3px solid var(--accent); outline-offset: 4px; }
    becomes a block — the two teams on their own lines, the games under them —
    and the separator goes, since the grouping already says they met. */
 @media (max-width: 600px) {
+  /* Seven tabs don't fit across a phone, and a sideways-scrolling row gives no
+     sign that Champions and Leaders are off the end of it. They wrap onto a
+     second line instead, where they can be seen. */
+  .tabs { flex-wrap: wrap; overflow-x: visible; gap: 0 2px; }
+  .tabs a { padding: 8px 10px; }
+
   .matchups, .matchups tbody, .matchups tr, .matchups td { display: block; width: auto; }
   .matchups { table-layout: auto; }
   .matchups tr { padding: 8px 2px; border-bottom: 1px solid var(--border); }
