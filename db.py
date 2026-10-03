@@ -1950,6 +1950,27 @@ def qualified(stats: list[dict], min_games: int | None = None) -> tuple[list[dic
     return [s for s in stats if (s.get("games_played") or 0) >= threshold], threshold, max_games
 
 
+def comparison_pool(stats: list[dict], *, include=()) -> list[dict]:
+    """Who to rank somebody against: anyone who has played at least a third of
+    the season so far, rounded down.
+
+    The season's length is taken from whoever has played the most of it, so the
+    bar moves with the season. A flat number can't: five games was most of the
+    league in week two and will be almost nobody by playoffs, and six weeks in
+    it was cutting 22 of 71 rostered players.
+
+    `include` names accounts that belong in the pool whatever they have
+    played. The person being looked at is one of them — ranking someone
+    against a group they are not in is not a ranking.
+    """
+    rows = ranked(stats)
+    season_games = max((s.get("games_played") or 0 for s in rows), default=0)
+    threshold = season_games // 3
+    wanted = set(include)
+    return [s for s in rows
+            if (s.get("games_played") or 0) >= threshold or s.get("account_id") in wanted]
+
+
 def ranked(stats: list[dict]) -> list[dict]:
     """Stat rows with one row per person, for anything that ranks or pools
     players (leaderboards, percentile pools). Drops the copies
