@@ -407,15 +407,26 @@ def _compute_strengths_weaknesses(
             better_count = sum(1 for v in pool_vals if v > target_val)
         else:
             better_count = sum(1 for v in pool_vals if v < target_val)
-        rank = better_count + 1
+        tied = sum(1 for v in pool_vals if v == target_val)
         total = len(pool_vals)
+        # Ties share the places they span, so a stat nobody managed — fourteen
+        # supports on no tormentor kills — sits mid-table instead of making
+        # everyone joint best at it. Counting only who beat you made "0.00
+        # (rank 1/14)" a strength.
+        rank = better_count + (tied + 1) / 2
         # 1.0 = best in pool, 0.0 = worst
         percentile = 1 - (rank - 1) / max(1, total - 1)
         try:
             val_str = fmt(target_val)
         except Exception:
             val_str = str(target_val)
-        line = f"**{label}**: {val_str} (rank {rank}/{total})"
+        place = f"{'tied ' if tied > 1 else ''}{better_count + 1}/{total}"
+        line = f"**{label}**: {val_str} (rank {place})"
+        # Doing none of something is not a way of being good at it. Zero is a
+        # real achievement the other way round, so this only guards the stats
+        # where more is better.
+        if higher_is_better and not target_val and percentile >= 0.5:
+            continue
         if percentile >= 0.5:
             strengths.append((percentile, line))
         else:
