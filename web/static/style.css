@@ -416,6 +416,17 @@ h1 .edit-form input[type=text] { font-size: 1.2rem; font-weight: 700; width: aut
 /* A ring for each season won, wherever a name is written. */
 .rings { margin-left: 4px; font-size: 0.85em; letter-spacing: -1px; white-space: nowrap; }
 
+/* On a phone six stacked dropdowns are a screenful before any data, so the
+   filter bar folds behind a button — open already if anything is filtering,
+   since a hidden filter that is changing the table is a trap. The button
+   doesn't exist on a desktop, where the bar costs one row. */
+.filter-toggle { display: none; }
+@media (max-width: 600px) {
+  .filter-toggle { display: inline-block; margin: 0 0 14px; }
+  form.filters.collapsible { display: none; }
+  form.filters.collapsible.open { display: grid; }
+}
+
 /* Matches page: a wide filter bar, and a pager under the table. */
 .filters { align-items: end; }
 .filters label { min-width: 0; }

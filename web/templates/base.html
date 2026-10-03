@@ -185,6 +185,16 @@ document.querySelectorAll("form[data-live-filter]").forEach(function (form) {
   });
 })();
 
+// The filter bar folds away on a phone; the button is only rendered there.
+document.querySelectorAll("[data-toggle-filters]").forEach(function (b) {
+  var form = b.nextElementSibling;
+  if (!form) return;
+  b.setAttribute("aria-expanded", form.classList.contains("open") ? "true" : "false");
+  b.addEventListener("click", function () {
+    b.setAttribute("aria-expanded", form.classList.toggle("open") ? "true" : "false");
+  });
+});
+
 // Dialogs: a [data-open-dialog="id"] button opens <dialog id="id">;
 // [data-close-dialog] inside it closes it.
 document.querySelectorAll("[data-open-dialog]").forEach(function (b) {
