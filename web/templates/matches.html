@@ -9,7 +9,9 @@
 {% block content %}
 <h1>Matches</h1>
 
-<form method="get" class="form grid filters">
+<button type="button" class="filter-toggle" data-toggle-filters aria-expanded="false">
+  Filters{% if filters %} ({{ filters|length }}){% endif %}</button>
+<form method="get" class="form grid filters collapsible{% if filters %} open{% endif %}">
   <label>Player <span class="muted small">(name or account id)</span>
     <input type="search" name="player" value="{{ q.get('player', '') }}" autocomplete="off"></label>
   <label>Season

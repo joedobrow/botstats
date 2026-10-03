@@ -2,7 +2,10 @@
 {% from "macros.html" import player_link %}
 {% block content %}
 <h1>Fantasy</h1>
-<form method="get" class="form grid filters">
+{% set active = q.keys()|reject("in", ["stat", "page"])|select|list|length %}
+<button type="button" class="filter-toggle" data-toggle-filters aria-expanded="false">
+  Filters{% if active %} ({{ active }}){% endif %}</button>
+<form method="get" class="form grid filters collapsible{% if active %} open{% endif %}">
   <label>Season
     <select name="season">
       {% if not draft_relative %}<option value=""{% if not season %} selected{% endif %}>Every season</option>{% endif %}
