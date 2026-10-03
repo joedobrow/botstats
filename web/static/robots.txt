@@ -1,0 +1,7 @@
+# The league site isn't announced yet, so nothing here is for indexing.
+# When it goes public, allow the pages worth finding and keep the costly
+# derived ones out: /fantasy/<id> and /season/*/team/* are computed per
+# request from the whole league's stats, and a crawler walking every player
+# is the heaviest load this site can be put under.
+User-agent: *
+Disallow: /
