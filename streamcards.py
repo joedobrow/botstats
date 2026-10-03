@@ -97,9 +97,13 @@ def render_player_card(
     weaknesses: list[str],
     avatar: Image.Image | None = None,
     account_id: int | None = None,  # kept for API compatibility; not shown
+    compared_to: str | None = None,
 ) -> io.BytesIO:
     """Render a player card. Strengths/weaknesses are pre-formatted one-liners
-    (e.g., "KDA: 4.32 (2/35)"). Pass at most 3 of each."""
+    (e.g., "KDA: 4.32 (2/35)"). Pass at most 3 of each.
+
+    compared_to names the field those rankings were taken against, when it
+    isn't the whole league — a "2/13" means nothing without it."""
     W, H = 900, 520
 
     img  = Image.new("RGBA", (W, H), BG_COLOR)
@@ -134,6 +138,8 @@ def render_player_card(
 
     meta_y = rating_y + 56
     record_text = f"{wins}W–{losses}L · {role}"
+    if compared_to:
+        record_text += f" · vs {compared_to}"
     draw.text((name_x, meta_y), record_text, font=f_meta, fill=TEXT_SECONDARY)
 
     # --- Divider ---
