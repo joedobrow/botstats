@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "macros.html" import player_link %}
 {% block content %}
 <p class="small"><a href="/admin">← Admin</a></p>
 <h1>Traffic</h1>
@@ -48,6 +49,31 @@
   </tbody>
 </table>
 </div>
+
+<h2>Members</h2>
+<div class="scroll">
+<table class="sortable">
+  <thead><tr><th data-sort-type="text">Player</th>
+    <th class="num" data-sort-type="num" data-sort-first="desc">Views</th>
+    <th class="num" data-sort-type="num" data-sort-first="desc">Days here</th>
+    <th data-sort-type="text">Last seen</th></tr></thead>
+  <tbody>
+  {% for m in traffic.members %}
+    <tr>
+      <td class="with-avatar" data-sort="{{ m.name|lower }}">
+        {% if m.avatar_url %}<img class="avatar" src="{{ m.avatar_url }}" alt="">{% endif %}
+        {{ player_link(m.account_id, m.name) }}</td>
+      <td class="num">{{ m.views }}</td>
+      <td class="num">{{ m.days }}</td>
+      <td class="small" data-sort="{{ m.last_seen }}">{{ m.last_seen[:16]|replace("T", " ") }}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="4" class="muted">Nobody has browsed while signed in yet.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+<p class="muted small">Signed-in visits only — most traffic is anonymous, so this is a floor, not a count.</p>
 
 <h2>Came from</h2>
 <div class="scroll">
