@@ -65,8 +65,8 @@
   <tbody>
   {% for m in result.rows %}
     <tr>
-      <td>{{ m.start_time|date("%b %-d, %Y") }}</td>
-      <td class="small">{% if m.season %}<a href="{{ season_url(m.season) }}">{{ m.season.label }}</a>
+      <td class="nowrap">{{ m.start_time|date("%b %-d, %Y") }}</td>
+      <td class="small nowrap">{% if m.season %}<a href="{{ season_url(m.season) }}">{{ m.season.label }}</a>
         {% elif m.by_hand %}<span class="tag">By hand</span>
         {% else %}<span class="muted">—</span>{% endif %}
         {% if m.division_name %}<div class="muted small">{{ m.division_name }}</div>{% endif %}</td>
