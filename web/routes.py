@@ -1040,6 +1040,20 @@ async def admin_page(request: web.Request):
                   about=store.get_text("about"), rules=store.get_text("rules"))
 
 
+@routes.get("/admin/traffic")
+async def admin_traffic(request: web.Request):
+    """Who is reading the site. Admin-only: it is the league's data, not the
+    public's."""
+    if not request.get("is_admin"):
+        return render(request, "admin_denied.html", title="Admin")
+    days = 30
+    raw = re.sub(r"\D", "", request.query.get("days", ""))
+    if raw and 1 <= int(raw) <= 365:
+        days = int(raw)
+    return render(request, "admin_traffic.html", title="Traffic",
+                  traffic=store.traffic(days), days=days)
+
+
 @routes.post("/admin/season/rename")
 async def admin_rename_season(request: web.Request):
     _require_admin(request)
@@ -1268,6 +1282,32 @@ async def canonical_host_middleware(request: web.Request, handler):
 
 
 @web.middleware
+async def view_middleware(request: web.Request, handler):
+    """Count page views, after the fact and never at the cost of the page.
+
+    Only GETs that returned a rendered HTML page count — not assets, not the
+    API, not a redirect, not a 404. Recording is wrapped because a counter
+    failing is not a reason for a visitor to see an error.
+    """
+    response = await handler(request)
+    try:
+        if (request.method == "GET" and response.status == 200
+                and response.content_type == "text/html"):
+            user = request.get("user")
+            # Fly puts the real address in Fly-Client-IP; the socket is its proxy.
+            ip = (request.headers.get("Fly-Client-IP")
+                  or request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+                  or (request.remote or ""))
+            store.record_view(request.path, ip=ip,
+                              user_agent=request.headers.get("User-Agent", ""),
+                              referrer=request.headers.get("Referer", ""),
+                              account_id=user["account_id"] if user else None)
+    except Exception:
+        logger.exception("failed to record a page view")
+    return response
+
+
+@web.middleware
 async def error_middleware(request: web.Request, handler):
     try:
         return await handler(request)
@@ -1281,6 +1321,7 @@ def setup(app: web.Application) -> None:
     app.middlewares.append(canonical_host_middleware)
     app.middlewares.append(error_middleware)
     app.middlewares.append(session_middleware)
+    app.middlewares.append(view_middleware)
     app.router.add_routes(routes)
     app.router.add_static("/static/", path=str(STATIC_DIR), show_index=False)
     uploads.UPLOAD_DIR.mkdir(parents=True, exist_ok=True)

@@ -11,6 +11,7 @@ ranked badge only.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import secrets
@@ -126,6 +127,29 @@ def init_site_tables() -> None:
                 value  TEXT NOT NULL
             );
 
+            -- One row per page view. No IP address and no user agent are
+            -- kept: `visitor` is a hash of them with a salt that changes
+            -- daily, which counts a person once a day without recording who
+            -- they are, and cannot be worked backwards once the day's salt is
+            -- dropped.
+            CREATE TABLE IF NOT EXISTS site_views (
+                ts          TEXT NOT NULL,       -- ISO, UTC
+                day         TEXT NOT NULL,       -- YYYY-MM-DD, for grouping
+                path        TEXT NOT NULL,
+                referrer    TEXT,                -- host only, never the full URL
+                visitor     TEXT NOT NULL,
+                account_id  INTEGER              -- NULL unless logged in
+            );
+            CREATE INDEX IF NOT EXISTS site_views_day ON site_views (day);
+
+            -- The daily salt. Kept in the database rather than in memory so a
+            -- restart doesn't split one person into two visitors, and deleted
+            -- with the day it belongs to.
+            CREATE TABLE IF NOT EXISTS site_view_salts (
+                day   TEXT PRIMARY KEY,
+                salt  TEXT NOT NULL
+            );
+
             -- Who won a season, in one division: one row per player, in the
             -- order they should be listed. Recorded rather than derived — a
             -- season can be won before the site kept brackets (37, 38), or in
@@ -139,6 +163,8 @@ def init_site_tables() -> None:
                 PRIMARY KEY (season_id, division_id, position)
             );
         """)
+    prune_views()
+    with _conn() as conn:
         # The team they won as, and anything that needs saying about it, live
         # beside the season's other site-only settings.
         have = {r[1] for r in conn.execute("PRAGMA table_info(site_season_settings)")}
@@ -343,6 +369,93 @@ def set_status(season_id: int, division_id: int, status: str) -> None:
             INSERT INTO site_season_settings (season_id, division_id, status) VALUES (?, ?, ?)
             ON CONFLICT(season_id, division_id) DO UPDATE SET status = excluded.status
         """, (season_id, division_id, status))
+
+
+# Paths that aren't a page someone read: assets, the API, the stream cards.
+_NOT_A_PAGE = ("/static/", "/api/", "/card/", "/uploads/", "/favicon", "/auth/")
+# Substrings that mark a crawler. Not exhaustive, and not meant to be — it
+# keeps the obvious robots out of a human count.
+_BOTS = ("bot", "crawl", "spider", "slurp", "curl/", "wget", "python-requests",
+         "headless", "lighthouse", "monitor", "preview", "scanner", "facebookexternalhit")
+VIEW_RETENTION_DAYS = 400
+
+
+def _visitor_salt(day: str) -> str:
+    """The day's salt, made once and shared by every process."""
+    with _conn() as conn:
+        row = conn.execute("SELECT salt FROM site_view_salts WHERE day = ?", (day,)).fetchone()
+        if row:
+            return row["salt"]
+        salt = secrets.token_hex(16)
+        conn.execute("INSERT OR IGNORE INTO site_view_salts (day, salt) VALUES (?, ?)", (day, salt))
+        row = conn.execute("SELECT salt FROM site_view_salts WHERE day = ?", (day,)).fetchone()
+    return row["salt"]
+
+
+def record_view(path: str, *, ip: str, user_agent: str, referrer: str,
+                account_id: int | None) -> None:
+    """Record one page view, if it looks like a person reading a page."""
+    if any(path.startswith(p) for p in _NOT_A_PAGE):
+        return
+    ua = (user_agent or "").lower()
+    if not ua or any(b in ua for b in _BOTS):
+        return
+    now = datetime.now(timezone.utc)
+    day = now.date().isoformat()
+    visitor = hashlib.sha256(f"{_visitor_salt(day)}|{ip}|{user_agent}".encode()).hexdigest()[:16]
+    host = ""
+    if referrer:
+        try:
+            netloc = referrer.split("//", 1)[-1].split("/", 1)[0].lower()
+            host = "" if netloc.endswith("adcl.gg") or "dota-bot.fly.dev" in netloc else netloc[:120]
+        except Exception:
+            host = ""
+    with _conn() as conn:
+        conn.execute("INSERT INTO site_views (ts, day, path, referrer, visitor, account_id) "
+                     "VALUES (?, ?, ?, ?, ?, ?)",
+                     (now.isoformat(timespec="seconds"), day, path[:200], host or None,
+                      visitor, account_id))
+
+
+def prune_views() -> None:
+    """Drop views and salts past the retention window."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=VIEW_RETENTION_DAYS)).date().isoformat()
+    with _conn() as conn:
+        conn.execute("DELETE FROM site_views WHERE day < ?", (cutoff,))
+        conn.execute("DELETE FROM site_view_salts WHERE day < ?", (cutoff,))
+
+
+def traffic(days: int = 30) -> dict:
+    """Views and visitors by day, plus the busiest pages and where people came
+    from, over the last `days` days."""
+    since = (datetime.now(timezone.utc) - timedelta(days=days - 1)).date().isoformat()
+    with _conn() as conn:
+        by_day = [dict(r) for r in conn.execute(
+            "SELECT day, COUNT(*) AS views, COUNT(DISTINCT visitor) AS visitors "
+            "FROM site_views WHERE day >= ? GROUP BY day ORDER BY day", (since,))]
+        pages = [dict(r) for r in conn.execute(
+            "SELECT path, COUNT(*) AS views, COUNT(DISTINCT visitor) AS visitors "
+            "FROM site_views WHERE day >= ? GROUP BY path "
+            "ORDER BY views DESC LIMIT 20", (since,))]
+        referrers = [dict(r) for r in conn.execute(
+            "SELECT referrer, COUNT(*) AS views, COUNT(DISTINCT visitor) AS visitors "
+            "FROM site_views WHERE day >= ? AND referrer IS NOT NULL GROUP BY referrer "
+            "ORDER BY views DESC LIMIT 15", (since,))]
+        totals = conn.execute(
+            "SELECT COUNT(*) AS views, COUNT(DISTINCT visitor) AS visitors, "
+            "       COUNT(DISTINCT account_id) AS signed_in "
+            "FROM site_views WHERE day >= ?", (since,)).fetchone()
+        first = conn.execute("SELECT MIN(day) AS d FROM site_views").fetchone()["d"]
+    # Days with no visits are still days; a gap in a chart should be a zero.
+    seen = {d["day"]: d for d in by_day}
+    start = datetime.fromisoformat(since).date()
+    series = []
+    for i in range(days):
+        d = (start + timedelta(days=i)).isoformat()
+        series.append(seen.get(d) or {"day": d, "views": 0, "visitors": 0})
+    return {"days": days, "series": series, "pages": pages, "referrers": referrers,
+            "totals": dict(totals), "recording_since": first,
+            "peak": max((d["views"] for d in series), default=0)}
 
 
 def season_weeks(season: dict) -> list[dict]:
