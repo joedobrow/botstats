@@ -39,6 +39,34 @@ DEFENSIVE_ITEM_KEYS = (
 )
 
 
+def _obs_uptime(p: dict) -> tuple[int, int]:
+    """How long this player's observer wards lasted: (total seconds, wards).
+
+    OpenDota logs each ward placed and each ward leaving, and the two share an
+    ehandle. A ward with no leaving entry was still standing when the game
+    ended — it didn't survive, the game stopped — so it is left out rather
+    than counted at whatever the clock happened to say.
+
+    Returned as a sum and a count so a season can be totalled honestly: a game
+    with one ward should not weigh as much as a game with seven.
+    """
+    placed = p.get("obs_log") or []
+    if not placed:
+        return 0, 0
+    left = {e.get("ehandle"): e for e in (p.get("obs_left_log") or []) if e.get("ehandle") is not None}
+    total = count = 0
+    for e in placed:
+        gone = left.get(e.get("ehandle"))
+        if gone is None:
+            continue
+        life = (gone.get("time") or 0) - (e.get("time") or 0)
+        if life < 0:            # a log out of order tells us nothing
+            continue
+        total += life
+        count += 1
+    return total, count
+
+
 def _sum_defensive_item_uses(player: dict) -> int:
     """Sum item_uses across the defensive items we score."""
     uses = player.get("item_uses") or {}
@@ -237,6 +265,7 @@ def _store_full_match(full: dict, division_id: int | None,
         team_num = 2 if is_radiant else 3
         killed_dict    = p.get("killed") or {}
         ability_uses   = p.get("ability_uses") or {}
+        obs_total, obs_count = _obs_uptime(p)
 
         players.append({
             "match_id":       full["match_id"],
@@ -274,6 +303,8 @@ def _store_full_match(full: dict, division_id: int | None,
             "team_first_tormentor_time": team_first_tormentor.get(team_num, -1),
             "defensive_item_uses":     _sum_defensive_item_uses(p),
             "building_damage":         p.get("tower_damage", 0) or 0,
+            "obs_uptime_total":        obs_total,
+            "obs_uptime_count":        obs_count,
         })
 
     upsert_players(players)

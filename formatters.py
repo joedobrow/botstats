@@ -41,6 +41,7 @@ STAT_LABELS: dict[str, str] = {
     "firstblood_claimed":          "🩸 First Blood Rate",
     "watcher_captures":            "👁️  Watcher Captures",
     "avg_first_tormentor_time":    "⏱️  First Tormentor Time",
+    "obs_uptime":                  "👁️ Obs Uptime",
     "avg_duration":                "⏱️  Avg Game Length",
 }
 
@@ -127,6 +128,8 @@ def format_stat_value(player: dict, sort_by: str, debug: bool = False) -> str | 
         return f"{val:.1f}"
     if sort_by in ("stuns_per_min", "observer_kills_per_min"):
         return f"{val:.2f}/min"
+    if sort_by == "obs_uptime":
+        return _format_seconds(val)
     if sort_by == "avg_first_tormentor_time":
         return _format_seconds(val)
     if sort_by == "avg_duration":
@@ -323,6 +326,7 @@ _NOTABLE_STATS: list[tuple[str, str, bool, callable]] = [
     ("Building Damage/game",    "building_damage",         True,  lambda v: f"{v:,.0f}"),
     ("First Blood Rate",        "firstblood_claimed",      True,  lambda v: f"{v*100:.0f}%"),
     ("First Tormentor Time",    "avg_first_tormentor_time",False, lambda v: _format_seconds(v)),
+    ("Obs Uptime",              "obs_uptime",              True,  lambda v: _format_seconds(v)),
 ]
 
 
