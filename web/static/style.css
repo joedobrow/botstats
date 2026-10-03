@@ -573,7 +573,9 @@ a.tile:focus-visible { outline: 3px solid var(--accent); outline-offset: 4px; }
   .matchups td { border: 0; padding: 1px 0; }
   .matchups td.matchup-vs { display: none; }
   .matchups td.matchup-side { white-space: normal; }
-  .matchups td.matchup-side + .matchup-side { padding-left: 14px; }
+  /* The name may wrap; "4-2 · 10" may not — a record broken across two lines
+     reads as two numbers. The indent goes, since 14px is a word of name. */
+  .matchups td.matchup-side .muted, .matchups td.matchup-side .matchup-score { white-space: nowrap; }
   .matchups td.matchup-games { padding-top: 4px; }
 }
 
