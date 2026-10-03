@@ -10,7 +10,7 @@ import re
 import time
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import quote, urlencode
+from urllib.parse import quote, urlencode, urlparse
 
 import jinja2
 from aiohttp import web
@@ -1250,6 +1250,24 @@ async def admin_signups_csv(request: web.Request):
 # ---------------------------------------------------------------------------
 
 @web.middleware
+async def canonical_host_middleware(request: web.Request, handler):
+    """www.adcl.gg and adcl.gg are the same site, but only one of them is the
+    address. Sending www to the bare name permanently keeps links, bookmarks
+    and search results on one host — and, more practically, keeps the login
+    cookie on one host, since a session set on one is not sent to the other.
+
+    Only the www form of the canonical host is redirected: the fly.dev name
+    goes on working, which is what the bot's own links and the stream cards
+    use.
+    """
+    if BASE_URL:
+        canonical = urlparse(BASE_URL).netloc
+        if request.host.split(":")[0] == f"www.{canonical}":
+            raise web.HTTPMovedPermanently(BASE_URL.rstrip("/") + request.path_qs)
+    return await handler(request)
+
+
+@web.middleware
 async def error_middleware(request: web.Request, handler):
     try:
         return await handler(request)
@@ -1260,6 +1278,7 @@ async def error_middleware(request: web.Request, handler):
 def setup(app: web.Application) -> None:
     """Add the website's routes to the bot's aiohttp app."""
     store.init_site_tables()
+    app.middlewares.append(canonical_host_middleware)
     app.middlewares.append(error_middleware)
     app.middlewares.append(session_middleware)
     app.router.add_routes(routes)
