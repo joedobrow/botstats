@@ -613,9 +613,11 @@ def _clean_card_line(line: str) -> str:
 
 @tree.command(name="player_card", description="Render a stream-friendly PNG card for a player")
 @app_commands.describe(name="Player name (partial), override nickname, or numeric account ID",
-                       season=SEASON_PARAM_DESCRIPTION)
+                       season=SEASON_PARAM_DESCRIPTION,
+                       in_role="Compare against players in the same position, instead of the whole league")
 @app_commands.autocomplete(season=_season_autocomplete)
-async def player_card(interaction: discord.Interaction, name: str, season: str = None):
+async def player_card(interaction: discord.Interaction, name: str, season: str = None,
+                      in_role: bool = False):
     await interaction.response.defer()
     division = _require_division(interaction)
     if not division:
@@ -658,9 +660,22 @@ async def player_card(interaction: discord.Interaction, name: str, season: str =
         if adj:
             rating = adj["adjusted_rating"]
 
-    # Strengths/weaknesses (max 3 each), against the rest of the league.
+    # Strengths/weaknesses (max 3 each), against the rest of the league — or
+    # against the player's own position, which is the fairer comparison for
+    # anything a support is never going to win on.
     from db import comparison_pool
     pool = comparison_pool(stats, include=[account_id])
+    compared_to = None
+    position = target.get("role_position")
+    if in_role:
+        if position is None:
+            await interaction.followup.send(
+                f"\u26a0\ufe0f `{resolved_name or account_id}` has no position on record, so there's "
+                "nobody to compare them with. Leaving `in_role` off compares them with the league.",
+                ephemeral=True)
+            return
+        pool = [s for s in pool if s.get("role_position") == position]
+        compared_to = f"pos {position}"
     strengths, weaknesses = _compute_strengths_weaknesses(target, pool)
     strengths = [_clean_card_line(s) for s in strengths[:3]]
     weaknesses = [_clean_card_line(s) for s in weaknesses[:3]]
@@ -686,7 +701,7 @@ async def player_card(interaction: discord.Interaction, name: str, season: str =
         rating=rating,
         role=role,
         wins=wins, losses=losses, games=games,
-        strengths=strengths, weaknesses=weaknesses,
+        strengths=strengths, weaknesses=weaknesses, compared_to=compared_to,
         avatar=avatar, account_id=account_id,
     )
     await interaction.followup.send(
