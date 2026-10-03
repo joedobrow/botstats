@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block content %}
+<p class="small"><a href="/admin">← Admin</a></p>
+<h1>Traffic</h1>
+
+<nav class="admin-nav">
+  {% for d, label in [(7, "7 days"), (30, "30 days"), (90, "90 days"), (365, "A year")] %}
+  <a href="?days={{ d }}"{% if days == d %} class="active"{% endif %}>{{ label }}</a>
+  {% endfor %}
+</nav>
+
+<div class="stat-row">
+  <div><span class="stat">{{ "{:,}".format(traffic.totals.views or 0) }}</span><span class="label">Page views</span></div>
+  <div><span class="stat">{{ "{:,}".format(traffic.totals.visitors or 0) }}</span><span class="label">Visitors</span></div>
+  <div><span class="stat">{{ traffic.totals.signed_in or 0 }}</span><span class="label">Signed in</span></div>
+</div>
+
+<h2>By day</h2>
+{% if traffic.peak %}
+<div class="scroll">
+<div class="bars" style="--peak: {{ traffic.peak }}">
+  {% for d in traffic.series %}
+  <div class="bar" title="{{ d.day }} — {{ d.views }} views, {{ d.visitors }} visitors">
+    <div class="bar-fill" style="height: {{ (100 * d.views / traffic.peak)|round(1) }}%"></div>
+    <div class="bar-day">{{ d.day[8:] }}</div>
+  </div>
+  {% endfor %}
+</div>
+</div>
+<p class="muted small">Tallest bar is {{ traffic.peak }} views. Recording since {{ traffic.recording_since or "—" }}.</p>
+{% else %}
+<p class="muted">Nothing recorded in this window yet.</p>
+{% endif %}
+
+<h2>Pages</h2>
+<div class="scroll">
+<table class="sortable">
+  <thead><tr><th data-sort-type="text">Page</th>
+    <th class="num" data-sort-type="num" data-sort-first="desc">Views</th>
+    <th class="num" data-sort-type="num" data-sort-first="desc">Visitors</th></tr></thead>
+  <tbody>
+  {% for p in traffic.pages %}
+    <tr><td><a href="{{ p.path }}">{{ p.path }}</a></td>
+      <td class="num">{{ p.views }}</td><td class="num">{{ p.visitors }}</td></tr>
+  {% else %}
+    <tr><td colspan="3" class="muted">Nothing yet.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+
+<h2>Came from</h2>
+<div class="scroll">
+<table class="sortable">
+  <thead><tr><th data-sort-type="text">Site</th>
+    <th class="num" data-sort-type="num" data-sort-first="desc">Views</th>
+    <th class="num" data-sort-type="num" data-sort-first="desc">Visitors</th></tr></thead>
+  <tbody>
+  {% for r in traffic.referrers %}
+    <tr><td>{{ r.referrer }}</td><td class="num">{{ r.views }}</td><td class="num">{{ r.visitors }}</td></tr>
+  {% else %}
+    <tr><td colspan="3" class="muted">No one has arrived from another site yet.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}
