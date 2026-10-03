@@ -271,7 +271,6 @@ def _slug(name: str) -> str:
     app_commands.Choice(name="Camp Stacks",             value="camps_stacked"),
     app_commands.Choice(name="Rune Pickups",            value="rune_pickups"),
     app_commands.Choice(name="First Blood Rate",        value="firstblood_claimed"),
-    app_commands.Choice(name="Tormentor Kills",         value="tormentor_kills"),
     app_commands.Choice(name="Watcher Captures",        value="watcher_captures"),
     app_commands.Choice(name="First Tormentor Time",    value="avg_first_tormentor_time"),
     app_commands.Choice(name="Avg Game Length",         value="avg_duration"),

@@ -508,7 +508,6 @@ H2H_PLAYER_CANDIDATE_STATS: list[tuple[str, str, callable]] = [
     ("Teamfight %",      "teamfight_participation", lambda v: f"{v*100:.0f}%"),
     ("Stuns/Min",        "stuns_per_min",           lambda v: f"{v:.2f}"),
     ("Def Item Uses",    "defensive_item_uses",     lambda v: f"{v:.1f}"),
-    ("Tormentors",       "tormentor_kills",         lambda v: f"{v:.2f}"),
     ("Watcher Caps",     "watcher_captures",        lambda v: f"{v:.2f}"),
     ("Fantasy Pts/Game", "fantasy_points",          lambda v: f"{v:.1f}"),
 ]
