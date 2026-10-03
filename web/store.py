@@ -445,6 +445,13 @@ def traffic(days: int = 30) -> dict:
             "SELECT COUNT(*) AS views, COUNT(DISTINCT visitor) AS visitors, "
             "       COUNT(DISTINCT account_id) AS signed_in "
             "FROM site_views WHERE day >= ?", (since,)).fetchone()
+        # Only counts what someone did while signed in, which is the only part
+        # of the traffic that has a name attached to it.
+        members = [dict(r) for r in conn.execute(
+            "SELECT account_id, COUNT(*) AS views, COUNT(DISTINCT day) AS days, "
+            "       MAX(ts) AS last_seen "
+            "FROM site_views WHERE day >= ? AND account_id IS NOT NULL "
+            "GROUP BY account_id ORDER BY last_seen DESC", (since,))]
         first = conn.execute("SELECT MIN(day) AS d FROM site_views").fetchone()["d"]
     # Days with no visits are still days; a gap in a chart should be a zero.
     seen = {d["day"]: d for d in by_day}
@@ -453,8 +460,13 @@ def traffic(days: int = 30) -> dict:
     for i in range(days):
         d = (start + timedelta(days=i)).isoformat()
         series.append(seen.get(d) or {"day": d, "views": 0, "visitors": 0})
+    idents = player_identities([m["account_id"] for m in members])
+    for m in members:
+        ident = idents.get(m["account_id"]) or {}
+        m["name"] = ident.get("name") or str(m["account_id"])
+        m["avatar_url"] = ident.get("avatar_url")
     return {"days": days, "series": series, "pages": pages, "referrers": referrers,
-            "totals": dict(totals), "recording_since": first,
+            "members": members, "totals": dict(totals), "recording_since": first,
             "peak": max((d["views"] for d in series), default=0)}
 
 
