@@ -754,7 +754,19 @@ def player_identities(account_ids: list[int]) -> dict[int, dict]:
 
 
 def search_players(q: str = "", limit: int | None = None) -> list[dict]:
-    """Everyone who has played a league match or logged in, filtered by name."""
+    """Everyone who has played a league match or logged in, filtered by name.
+
+    The gathering is cached on the database's own version (see db._derived);
+    the filtering is per call, since it is a string compare over a list that
+    is already in memory.
+    """
+    rows = db._derived(("site_player_index",), _player_index)
+    ql = q.strip().lower()
+    out = [r for r in rows if not ql or ql in r["name"].lower() or ql == str(r["account_id"])]
+    return out[:limit] if limit else out
+
+
+def _player_index() -> list[dict]:
     with _conn() as conn:
         rows = conn.execute("""
             SELECT account_id, COUNT(*) AS games, SUM(won) AS wins, MAX(match_id) AS last_match
@@ -766,20 +778,15 @@ def search_players(q: str = "", limit: int | None = None) -> list[dict]:
     for aid in users:
         stats.setdefault(aid, {"account_id": aid, "games": 0, "wins": 0, "last_match": 0})
     idents = player_identities(list(stats))
-    out = []
-    ql = q.strip().lower()
-    for aid, s in stats.items():
-        ident = idents.get(aid, {})
-        s.update(ident)
-        s["name"] = s["name"] or str(aid)
-        if ql and ql not in s["name"].lower() and ql != str(aid):
-            continue
-        out.append(s)
     ratings = player_ratings()
-    for s in out:
-        s["rating"] = ratings.get(s["account_id"])
+    out = []
+    for aid, s in stats.items():
+        s.update(idents.get(aid, {}))
+        s["name"] = s["name"] or str(aid)
+        s["rating"] = ratings.get(aid)
+        out.append(s)
     out.sort(key=lambda s: (-s["games"], s["name"].lower()))
-    return out[:limit] if limit else out
+    return out
 
 
 def player_matches(account_id: int) -> list[dict]:
