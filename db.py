@@ -29,6 +29,51 @@ def _conn() -> sqlite3.Connection:
     return conn
 
 
+# ---------------------------------------------------------------------------
+# Derived-stat cache
+#
+# A season's player stats are a pure function of the matches on record, and
+# those change only when the fetcher runs or an admin edits something — yet
+# one page could rebuild them three times over, because asking for one
+# player's row computes every player's. Caching them turns that into one
+# computation shared by every page until the data actually changes.
+#
+# The invalidation signal is the database's own files. Writes in WAL mode land
+# in the -wal file, so watching the size and modification time of both catches
+# every write from any process, with no bookkeeping to forget at a call site.
+# ---------------------------------------------------------------------------
+
+_derived_cache: dict = {}
+
+
+def _db_version() -> tuple:
+    out = []
+    for path in (DB_PATH, f"{DB_PATH}-wal"):
+        try:
+            st = os.stat(path)
+            out.append((st.st_mtime_ns, st.st_size))
+        except OSError:
+            out.append(None)
+    return tuple(out)
+
+
+def _derived(key: tuple, build):
+    """Return build()'s rows, recomputing only when the database has changed.
+
+    Callers add their own keys to these rows (a breakdown, a display name), so
+    each gets its own copy of each row — otherwise one page's annotations
+    would leak into the next page's data.
+    """
+    version = _db_version()
+    hit = _derived_cache.get(key)
+    if hit is None or hit[0] != version:
+        if hit is not None or len(_derived_cache) > 48:
+            _derived_cache.clear()          # the data moved: everything is stale
+        rows = build()
+        _derived_cache[key] = (version, rows)
+    return [dict(r) for r in _derived_cache[key][1]]
+
+
 # Canonical definitions of the two big tables, shared by the fresh-database
 # schema in init_db and the rebuild in _migrate_to_divisions.
 MATCHES_TABLE = """
@@ -1843,6 +1888,13 @@ def get_stats_for_season_week(season_id: int, division_id: int, week_number: int
 
 def get_all_time_stats(division_id: int, season_id: int | None = None,
                        cross_season: bool = False) -> list[dict]:
+    """Cached; see _derived. The work is in _all_time_stats below."""
+    return _derived(("all_time_stats", division_id, season_id, cross_season),
+                    lambda: _all_time_stats(division_id, season_id, cross_season))
+
+
+def _all_time_stats(division_id: int, season_id: int | None = None,
+                    cross_season: bool = False) -> list[dict]:
     """Return aggregated per-player stats for a division.
 
     With season_id: that season's matches (its league). Without, or with
