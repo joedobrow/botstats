@@ -561,6 +561,22 @@ a.tile:focus-visible { outline: 3px solid var(--accent); outline-offset: 4px; }
 .tile.disabled .tile-label { color: var(--tile-off-ink); }
 .tile.disabled .tile-sub { color: var(--tile-off-ink-soft); }
 
+/* A phone has no room for two team names, their records and a separator on
+   one line: fixed columns squashed the names into each other. Each matchup
+   becomes a block — the two teams on their own lines, the games under them —
+   and the separator goes, since the grouping already says they met. */
+@media (max-width: 600px) {
+  .matchups, .matchups tbody, .matchups tr, .matchups td { display: block; width: auto; }
+  .matchups { table-layout: auto; }
+  .matchups tr { padding: 8px 2px; border-bottom: 1px solid var(--border); }
+  .matchups tr:last-child { border-bottom: 0; }
+  .matchups td { border: 0; padding: 1px 0; }
+  .matchups td.matchup-vs { display: none; }
+  .matchups td.matchup-side { white-space: normal; }
+  .matchups td.matchup-side + .matchup-side { padding-left: 14px; }
+  .matchups td.matchup-games { padding-top: 4px; }
+}
+
 @media (max-width: 600px) {
   .tiles.big { grid-template-columns: 1fr; }
 }
