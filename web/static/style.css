@@ -381,6 +381,17 @@ ul.plain li:last-child { border-bottom: 0; }
 .bar-day { font-size: 0.6rem; color: var(--muted); text-align: center; padding-top: 3px; }
 .admin-nav a.active { font-weight: 700; color: var(--accent); }
 
+/* Teams: one wide table of what every team averages, then the rosters.
+   The team column stays put while the numbers scroll under it, because a row
+   of figures with no name against it is unreadable. */
+.season-pick select { height: var(--control-h); }
+.stats-table { min-width: 860px; }
+.stats-table .sticky-col { position: sticky; left: 0; background: var(--surface); z-index: 1; }
+.stats-table thead .sticky-col { background: var(--surface); }
+.with-logo { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+img.logo-sm { width: 22px; height: 22px; object-fit: contain; border-radius: 4px; flex: 0 0 auto; }
+.roster-cards { margin-top: 24px; }
+
 /* Roster editing: folded away, because a roster is read far more often than
    it is changed. */
 .roster-edit > summary { cursor: pointer; font-size: .85rem; color: var(--link); }
@@ -507,9 +518,9 @@ picture.themed { display: contents; }
   flex: 0 0 100%;
   text-align: center;
   margin-top: clamp(4px, 1.2vw, 12px);
-  font-family: "Alfa Slab One", Rockwell, "Roboto Slab", Georgia, serif;
-  font-weight: 400;          /* the face has one weight, and it is heavy */
-  font-size: clamp(0.85rem, 2.6vw, 1.6rem);
+  font-weight: 800;
+  font-size: clamp(0.85rem, 2.5vw, 1.5rem);
+  letter-spacing: 0.02em;
   line-height: 1.15;
   letter-spacing: 0.01em;
   color: var(--hero-sub-ink);
@@ -558,9 +569,11 @@ a.tile:hover, a.tile:focus-visible {
 }
 a.tile:focus-visible { outline: 3px solid var(--accent); outline-offset: 4px; }
 .tile-label {
-  font-family: "Alfa Slab One", Rockwell, "Roboto Slab", Georgia, serif;
-  font-weight: 400;   /* the face is already heavy; there is only one weight */
-  font-size: clamp(1.5rem, 2.9vw, 2.4rem);
+  /* One typeface across the site. The slab face that used to be here read as
+     a second design rather than part of this one, so the weight does the work
+     a heavy face was doing. */
+  font-weight: 800;
+  font-size: clamp(1.45rem, 2.7vw, 2.2rem);
   letter-spacing: 0.01em;
   line-height: 1.05;
   color: var(--tile-ink);

@@ -359,6 +359,28 @@ async def robots(request: web.Request):
                                      "Cache-Control": "no-cache"})
 
 
+@routes.get("/teams")
+async def teams_page(request: web.Request):
+    """Every team of one season, with what they average a game. The season
+    defaults to the one being played, so the teams are one click away."""
+    seasons = store.all_seasons()
+    q = request.query
+    season = next((s for s in seasons if str(s["id"]) == q.get("season", "")
+                   and (not q.get("division") or s["division_slug"] == q["division"])), None)
+    if season is None:
+        current = store.current_seasons()
+        season = current[0] if current else (seasons[0] if seasons else None)
+    teams, stats, idents = [], {}, {}
+    if season:
+        teams = store.season_teams(season)
+        stats = store.team_stats(season)
+        idents = store.player_identities(
+            [p["account_id"] for t in teams for p in t["roster"]]
+            + [t["captain_account_id"] for t in teams if t["captain_account_id"]])
+    return render(request, "teams.html", title="Teams", season=season, seasons=seasons,
+                  teams=teams, stats=stats, idents=idents)
+
+
 @routes.get("/hall-of-fame")
 async def hall_of_fame(request: web.Request):
     return render(request, "hall_of_fame.html", title="Hall of Fame",
