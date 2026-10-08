@@ -1,29 +1,134 @@
 {% extends "base.html" %}
-{% from "macros.html" import tile %}
+{% from "macros.html" import player_link, team_cell, season_status %}
 {% block content %}
-<h1 class="hero">
-  <span class="wordmark">
-    {# <picture> picks by media query, so only the drawing in use is fetched. #}
-    <picture class="themed">
-      <source media="(prefers-color-scheme: dark)" srcset="/static/adcl-logo-dark.png?v={{ asset_version }}">
-      <img src="/static/adcl-logo-light.png?v={{ asset_version }}" alt="ADCL">
-    </picture>
-  </span>
-  <picture class="themed">
-    <source media="(prefers-color-scheme: dark)" srcset="/static/mascot-dark.png?v={{ asset_version }}">
-    <img class="hero-mascot" src="/static/mascot-light.png?v={{ asset_version }}" alt=""
-         title="Ability Draft, in one picture">
+<section class="banner">
+  <picture class="themed banner-logo">
+    <source media="(prefers-color-scheme: dark)" srcset="/static/adcl-logo-dark.png?v={{ asset_version }}">
+    <img src="/static/adcl-logo-light.png?v={{ asset_version }}" alt="ADCL">
   </picture>
-  <span class="hero-sub">Ability Draft Community League</span>
-</h1>
-<div class="tiles big">
-  {{ tile("/signup", "Sign-Up", disabled=not signups_open) }}
-  {{ tile("/seasons", "Seasons") }}
-  {{ tile("/teams", "Teams") }}
-  {{ tile("/players", "Players") }}
-  {{ tile("/matches", "Matches") }}
-  {{ tile("/fantasy", "Fantasy") }}
-  {{ tile("/hall-of-fame", "Hall of Fame") }}
-  {{ tile("/info", "Info") }}
+  <div class="banner-text">
+    <h1 class="banner-title">Ability Draft Community League</h1>
+    {% if season %}
+    <div class="banner-sub">
+      <a href="{{ season_url(season) }}">{{ season.label }}</a>{% if season.show_division %} · {{ season.division }}{% endif %}
+      · {{ season_status(season) }}{% if this_week %} · {{ this_week.label }}{% endif %}
+    </div>
+    {% endif %}
+    <div class="actions">
+      {% if open_seasons %}<a class="button primary" href="/signup">Sign up</a>{% endif %}
+      {% if season %}<a class="button" href="{{ season_url(season) }}">Season</a>{% endif %}
+      <a class="button" href="/teams">Teams</a>
+      <a class="button" href="/fantasy">Fantasy</a>
+    </div>
+  </div>
+  <picture class="themed banner-mascot">
+    <source media="(prefers-color-scheme: dark)" srcset="/static/mascot-dark.png?v={{ asset_version }}">
+    <img src="/static/mascot-light.png?v={{ asset_version }}" alt="">
+  </picture>
+</section>
+
+<div class="feed">
+  <div class="feed-main">
+    {% if this_week and this_week.pairs %}
+    <section class="box">
+      <header class="box-head">
+        <h2>{{ this_week.label }}{% if this_week.played %} <span class="tag">Completed</span>{% endif %}</h2>
+        <a href="{{ season_url(season) }}">All weeks</a>
+      </header>
+      <ul class="pairings">
+        {% for p in this_week.pairs %}
+        <li>
+          <span class="pair-side{% if p.winner and p.winner == p.a %} win{% endif %}">
+            <a href="{{ team_url(season, p.a) }}">{{ p.a_name }}</a>
+            <span class="muted small">{% if this_week.played %}{{ p.a_score }}{% else %}{{ p.a_record }}{% endif %}</span>
+          </span>
+          <span class="pair-vs">vs</span>
+          <span class="pair-side right{% if p.winner and p.winner == p.b %} win{% endif %}">
+            {% if p.bye %}<span class="muted">Bye</span>{% else %}
+            <span class="muted small">{% if this_week.played %}{{ p.b_score }}{% else %}{{ p.b_record }}{% endif %}</span>
+            <a href="{{ team_url(season, p.b) }}">{{ p.b_name }}</a>{% endif %}
+          </span>
+        </li>
+        {% endfor %}
+      </ul>
+    </section>
+    {% endif %}
+
+    {% if results %}
+    <section class="box">
+      <header class="box-head">
+        <h2>Recent results</h2>
+        <a href="/matches?season={{ season.id }}&division={{ season.division_id }}">All matches</a>
+      </header>
+      <table class="compact results">
+        <tbody>
+        {% for m in results %}
+          <tr>
+            <td class="muted nowrap">{{ m.start_time|date("%b %-d") }}</td>
+            <td class="result-team right{% if m.radiant_win %} win{% endif %}">{{ team_cell(season, m.radiant_team, team_names) }}</td>
+            <td class="num result-score"><a href="/match/{{ m.match_id }}" title="Kills · {{ m.duration|duration }}">{{ m.radiant_score }}–{{ m.dire_score }}</a></td>
+            <td class="result-team{% if not m.radiant_win %} win{% endif %}">{{ team_cell(season, m.dire_team, team_names) }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </section>
+    {% endif %}
+  </div>
+
+  <aside class="feed-side">
+    {% if standings %}
+    <section class="box">
+      <header class="box-head"><h2>Standings</h2><a href="/teams">Teams</a></header>
+      <table class="compact">
+        <tbody>
+        {% for t in standings %}
+          <tr>
+            <td class="muted num rank">{{ loop.index }}</td>
+            <td class="with-logo">{% if t.logo_url %}<img class="logo-sm" src="{{ t.logo_url }}" alt="">{% endif %}<a href="{{ team_url(season, t.captain) }}">{{ t.name }}</a></td>
+            <td class="num" title="Tiebreaker {{ t.buchholz }}">{{ t.wins }}–{{ t.losses }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </section>
+    {% endif %}
+
+    {% if leaders %}
+    <section class="box">
+      <header class="box-head"><h2>Fantasy leaders</h2><a href="/fantasy?season={{ season.id }}">Full table</a></header>
+      <table class="compact">
+        <tbody>
+        {% for p in leaders %}
+          <tr>
+            <td class="muted num rank">{{ loop.index }}</td>
+            <td>{{ player_link(p.account_id, p.name) }}</td>
+            <td class="num">{{ "%.1f"|format(p.fantasy_points) }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </section>
+    {% endif %}
+
+    {% if champions %}
+    <section class="box">
+      <header class="box-head"><h2>Reigning champions</h2><a href="/hall-of-fame">Hall of Fame</a></header>
+      <div class="box-body">
+        <div class="champ-team">🏆 {{ champions.team or "Champions" }} <span class="muted small">· {{ champions.season.label }}</span></div>
+        <ul class="champion-list">
+          {% for m in champions.members %}
+          <li>{% if m.avatar_url %}<img class="avatar" src="{{ m.avatar_url }}" alt="">{% endif %}
+            {% if m.account_id %}{{ player_link(m.account_id, m.name) }}{% else %}{{ m.name }}{% endif %}</li>
+          {% endfor %}
+        </ul>
+      </div>
+    </section>
+    {% endif %}
+
+    {% for s in other_current %}
+    <p class="small"><a href="{{ season_url(s) }}">{{ s.label }} · {{ s.division }}</a></p>
+    {% endfor %}
+  </aside>
 </div>
 {% endblock %}
