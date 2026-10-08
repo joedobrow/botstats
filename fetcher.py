@@ -192,8 +192,21 @@ def pick_division(season_id: int, divisions: list[dict], full: dict) -> dict | N
     One left: that one. Several (divisions sharing a league and servers):
     the one whose drafted rosters (players + captains) include the most of
     the game's players. None when nothing fits or that's a tie."""
-    candidates = [d for d in divisions
-                  if _division_accepts(d, full.get("game_mode", 0), full.get("cluster", 0))]
+    mode, cluster = full.get("game_mode", 0), full.get("cluster", 0)
+    candidates = [d for d in divisions if _division_accepts(d, mode, cluster)]
+    if not candidates:
+        # The game was played on a server this map doesn't know. Valve adds
+        # them — cluster 410 appeared one Wednesday and cost four league games
+        # in a night, and it isn't in OpenDota's own cluster list either. The
+        # region is only ever here to tell divisions apart, so when it can't
+        # place a game, fall back to the divisions whose game mode fits and
+        # let the rosters decide. For a season with one division that means
+        # storing it, which is the right answer: every game in this league is
+        # that division's, wherever it was played.
+        candidates = [d for d in divisions if _division_accepts(d, mode, 0)]
+        if candidates:
+            logger.info("Match %d: cluster %d is in no region, placing it by roster instead",
+                        full.get("match_id"), cluster)
     if len(candidates) <= 1:
         return candidates[0] if candidates else None
     players = {p.get("account_id") for p in full.get("players", []) if p.get("account_id")}
