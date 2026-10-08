@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% from "macros.html" import player_link %}
+{% block content %}
+<div class="page-head">
+  <h1>Teams</h1>
+  {% if seasons %}
+  <form method="get" class="season-pick">
+    <select name="season" aria-label="Season" onchange="this.form.submit()">
+      {% for s in seasons %}
+      <option value="{{ s.id }}"{% if season and s.id == season.id and s.division_id == season.division_id %} selected{% endif %}>{{ s.label }}{% if s.show_division %} · {{ s.division }}{% endif %}</option>
+      {% endfor %}
+    </select>
+    <noscript><button>Show</button></noscript>
+  </form>
+  {% endif %}
+</div>
+
+{% if teams %}
+<div class="scroll">
+<table class="sortable stats-table">
+  <thead><tr>
+    <th class="sticky-col" data-sort-type="text">Team</th>
+    <th class="num" data-sort-type="num" data-sort-first="desc" title="Wins">W</th>
+    <th class="num" data-sort-type="num" title="Losses">L</th>
+    <th class="num" data-sort-type="num" data-sort-first="desc" title="Kills a game">K</th>
+    <th class="num" data-sort-type="num" title="Deaths a game">D</th>
+    <th class="num" data-sort-type="num" data-sort-first="desc" title="Assists a game">A</th>
+    <th class="num" data-sort-type="num" data-sort-first="desc" title="(Kills + assists) / deaths">KDA</th>
+    <th class="num" data-sort-type="num" data-sort-first="desc" title="Gold a minute, the five's average">GPM</th>
+    <th class="num" data-sort-type="num" data-sort-first="desc" title="Experience a minute, the five's average">XPM</th>
+    <th class="num" data-sort-type="num" data-sort-first="desc" title="Hero damage a game, the five together">Dmg</th>
+    <th class="num" data-sort-type="num" data-sort-first="desc" title="Towers a game">Twr</th>
+    <th class="num" data-sort-type="num" data-sort-first="desc" title="Roshans a game">Rosh</th>
+    <th class="num" data-sort-type="num" data-sort-first="desc" title="Fantasy points a game, the five together">Fantasy</th>
+    <th class="num" data-sort-type="num" title="Average game length">Length</th>
+  </tr></thead>
+  <tbody>
+  {% for t in teams %}
+    {% set a = stats.get(t.captain) %}
+    <tr>
+      <td class="sticky-col with-logo" data-sort="{{ t.name|lower }}">{% if t.logo_url %}<img class="logo-sm" src="{{ t.logo_url }}" alt="">{% endif %}<a href="{{ team_url(season, t.captain) }}">{{ t.name }}</a></td>
+      <td class="num">{{ t.wins }}</td>
+      <td class="num">{{ t.losses }}</td>
+      {% if a %}
+      <td class="num">{{ "%.1f"|format(a.kills) }}</td>
+      <td class="num">{{ "%.1f"|format(a.deaths) }}</td>
+      <td class="num">{{ "%.1f"|format(a.assists) }}</td>
+      <td class="num">{{ "%.2f"|format(a.kda) }}</td>
+      <td class="num">{{ "%.0f"|format(a.gpm) }}</td>
+      <td class="num">{{ "%.0f"|format(a.xpm) }}</td>
+      <td class="num" data-sort="{{ a.hero_damage }}">{{ "%.0f"|format(a.hero_damage / 1000) }}k</td>
+      <td class="num">{{ "%.1f"|format(a.tower_kills) }}</td>
+      <td class="num">{{ "%.2f"|format(a.roshans_killed) }}</td>
+      <td class="num">{{ "%.1f"|format(a.fantasy_points) }}</td>
+      <td class="num" data-sort="{{ a.avg_duration }}">{{ a.avg_duration|duration }}</td>
+      {% else %}
+      <td class="num muted" colspan="11"></td>
+      {% endif %}
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+
+<div class="cards roster-cards">
+{% for t in teams %}
+  <div class="card team">
+    <div class="team-head">
+      {% if t.logo_url %}<img class="logo" src="{{ t.logo_url }}" alt="">{% endif %}
+      <div>
+        <h3><a href="{{ team_url(season, t.captain) }}">{{ t.name }}</a></h3>
+        <div class="muted small">{{ t.wins }}–{{ t.losses }}</div>
+      </div>
+    </div>
+    <ul class="roster">
+      <li><span>{% if t.captain_account_id %}{{ player_link(t.captain_account_id, idents[t.captain_account_id].name or t.captain) }}{% else %}{{ t.captain }}{% endif %} <span class="tag">C</span></span></li>
+      {% for p in t.roster|sort(attribute="cost", reverse=True) if p.account_id != t.captain_account_id %}
+      <li><span>{{ player_link(p.account_id, idents[p.account_id].name) }}</span>{% if p.cost %}<span class="muted">${{ p.cost }}</span>{% endif %}</li>
+      {% endfor %}
+    </ul>
+  </div>
+{% endfor %}
+</div>
+{% else %}
+<p class="muted">No teams for this season yet.</p>
+{% endif %}
+{% endblock %}

@@ -3071,6 +3071,8 @@ def get_team_match_aggregates(season_id: int, division_id: int) -> dict[str, dic
         td = sum((p.get("deaths") or 0)  for p in side)
         ta = sum((p.get("assists") or 0) for p in side)
         out["kda"] = (tk + ta) / max(1, td)
+        # The totals are already here for the KDA; the teams table shows them.
+        out["kills"], out["deaths"], out["assists"] = tk, td, ta
         total_stuns = sum((p.get("stuns") or 0) for p in side)
         out["stuns_per_min"] = (total_stuns * 60.0 / duration) if duration else 0
         out["avg_duration"] = duration or 0

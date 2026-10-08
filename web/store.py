@@ -549,6 +549,34 @@ def set_season_week(season_id: int, division_id: int, week_number: int,
                           int(s_dt.timestamp()), int(e_dt.timestamp()))
 
 
+def current_seasons() -> list[dict]:
+    """The season each division is playing now: its active one, or failing
+    that the newest that has started. One per division, newest first."""
+    out: dict[int, dict] = {}
+    seasons = all_seasons()
+    for s in seasons:
+        if s["status"] == "active":
+            out.setdefault(s["division_id"], s)
+    for s in seasons:
+        if s["started"]:
+            out.setdefault(s["division_id"], s)
+    return sorted(out.values(), key=lambda s: (s["season_start"], s["id"]), reverse=True)
+
+
+def team_stats(season: dict) -> dict[str, dict]:
+    """{captain: per-game team stats} for a season: the bot's /team numbers.
+
+    A game counts for a team when three of its five played one side, and the
+    side's numbers are whoever was on it — a stand-in's kills are the team's
+    kills that night. Per-player rates (GPM, XPM) are the five's average."""
+    aggs = db.get_team_match_aggregates(season["id"], season["division_id"])
+    for a in aggs.values():
+        for k in ("gpm", "xpm"):
+            if a.get(k) is not None:
+                a[k] = a[k] / 5
+    return aggs
+
+
 def free_agents(season: dict) -> list[dict]:
     """Players not on any roster this season, best rating first — who a team
     can bring in. Someone drafted under any of their accounts is on a team,
