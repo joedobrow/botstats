@@ -38,9 +38,17 @@
 {% endif %}
 
 <h2>Roster</h2>
+{% macro free_agent_picker(name) %}
+<select name="{{ name }}" required>
+  <option value="" disabled selected>Pick a player</option>
+  {% for p in free_agents %}
+  <option value="{{ p.account_id }}">{{ p.name }}{% if p.rating %} · {{ p.rating }}{% endif %}</option>
+  {% endfor %}
+</select>
+{% endmacro %}
 <div class="scroll">
 <table>
-  <thead><tr><th>Player</th><th class="num">Rating</th><th class="num">Cost</th><th class="num">Games</th><th class="num">W–L</th><th class="num">Fantasy</th></tr></thead>
+  <thead><tr><th>Player</th><th class="num">Rating</th><th class="num">Cost</th><th class="num">Games</th><th class="num">W–L</th><th class="num">Fantasy</th>{% if is_admin %}<th></th>{% endif %}</tr></thead>
   <tbody>
   {% set members = ([{"account_id": team.captain_account_id, "cost": None, "is_captain": True}] if team.captain_account_id else []) + team.roster|sort(attribute="cost", reverse=True)|list %}
   {% for p in members if p.is_captain or p.account_id != team.captain_account_id %}
@@ -59,11 +67,47 @@
       {% else %}
       <td class="num muted" colspan="3">No games</td>
       {% endif %}
+      {% if is_admin %}
+      <td class="row-actions">
+        {% if p.is_captain %}
+          <span class="muted small">captain</span>
+        {% else %}
+          <details class="roster-edit">
+            <summary>Change</summary>
+            <form method="post" action="{{ team_url(season, team.captain) }}/roster/replace" class="form">
+              <input type="hidden" name="csrf" value="{{ csrf }}">
+              <input type="hidden" name="out" value="{{ p.account_id }}">
+              <label>Replaced by {{ free_agent_picker("account_id") }}</label>
+              <div class="actions">
+                <button class="primary">Swap in</button>
+              </div>
+            </form>
+            <form method="post" action="{{ team_url(season, team.captain) }}/roster/remove" class="inline"
+                  onsubmit="return confirm('Take {{ idents[p.account_id].name }} off the roster, leaving the slot empty?')">
+              <input type="hidden" name="csrf" value="{{ csrf }}">
+              <input type="hidden" name="account_id" value="{{ p.account_id }}">
+              <button class="linklike danger">Remove, leaving the slot empty</button>
+            </form>
+          </details>
+        {% endif %}
+      </td>
+      {% endif %}
     </tr>
   {% endfor %}
   </tbody>
 </table>
 </div>
+{% if is_admin %}
+<details class="roster-edit">
+  <summary>Add a player</summary>
+  <form method="post" action="{{ team_url(season, team.captain) }}/roster/add" class="form grid">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label>Player {{ free_agent_picker("account_id") }}</label>
+    <label>Cost <input type="number" name="cost" min="0" max="999" value="0" required></label>
+    <div class="actions"><button class="primary">Add to the roster</button></div>
+  </form>
+</details>
+{% endif %}
 
 <h2 class="with-action">Matches
   {% if is_admin %}<button type="button" class="add-button" data-open-dialog="add-match-dialog"
