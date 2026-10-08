@@ -175,33 +175,44 @@ footer.wrap { padding-top: 16px; padding-bottom: 32px; font-size: 0.85rem; borde
 .small { font-size: 0.85rem; }
 .nowrap { white-space: nowrap; }
 
-/* The masthead */
+/* The masthead: a deeper band of the same paper, ruled in red, now carrying
+   the whole site's navigation rather than two links. */
 .topbar {
   background: var(--bar-bg);
   border-bottom: 1px solid var(--bar-edge);
   box-shadow: inset 0 -3px 0 var(--accent), var(--bar-shadow);
   position: relative;  /* keeps its shadow above the page */
 }
-.topbar nav { display: flex; align-items: center; gap: 4px 18px; flex-wrap: wrap; min-height: 56px; padding-top: 6px; padding-bottom: 6px; }
-.topbar a { color: var(--text); font-weight: 600; text-shadow: var(--bar-text-shadow); }
-.topbar a:hover { text-decoration: none; color: var(--accent); }
-.topbar a.active { color: var(--accent); box-shadow: inset 0 -2px 0 var(--accent); }
-.brand { display: flex; align-items: center; gap: 8px; font-weight: 800; font-size: 1.2rem; letter-spacing: 0.02em; color: var(--accent); }
+.topbar-row { display: flex; align-items: center; gap: 4px 20px; min-height: 52px;
+              padding-top: 4px; padding-bottom: 4px; }
+.brand { display: flex; align-items: center; flex: 0 0 auto; }
+.brand:hover { text-decoration: none; }
 /* The mark is a silhouette painted through a mask, so it is the masthead's
-   ink in either mode rather than a second file that has to be kept in step. */
+   ink in either mode rather than a second file to keep in step. */
 .brand-mark {
   display: block;
-  height: 26px;
+  height: 22px;
   aspect-ratio: 833 / 268;
   background-color: var(--brand-ink);
   -webkit-mask: url("/static/adcl-wordmark.png") no-repeat center / contain;
   mask: url("/static/adcl-wordmark.png") no-repeat center / contain;
 }
-.topbar a.whoami {
-  display: inline-flex; align-items: center; gap: 7px; max-width: 14rem;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+.mainnav { display: flex; align-items: stretch; gap: 2px; flex: 1 1 auto; min-width: 0;
+           align-self: stretch; }
+.mainnav a, .topbar-end > a:not(.button) {
+  display: flex; align-items: center; padding: 0 10px; color: var(--ink-soft);
+  font-weight: 600; white-space: nowrap; text-shadow: var(--bar-text-shadow);
+  border-bottom: 2px solid transparent; margin-bottom: -2px;
 }
-.topbar a.whoami img { width: 22px; height: 22px; border-radius: 50%; }
+.mainnav a:hover, .topbar-end > a:not(.button):hover { color: var(--accent); text-decoration: none; }
+.mainnav a.active, .topbar-end > a.active { color: var(--accent); border-bottom-color: var(--accent); }
+.topbar-end { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; align-self: stretch; }
+.topbar a.whoami { gap: 7px; max-width: 12rem; }
+.topbar a.whoami span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.topbar a.whoami img { width: 20px; height: 20px; border-radius: 50%; }
+.theme-toggle { display: inline-grid; place-items: center; width: 28px; height: 28px; padding: 0;
+  border: 0; background: none; color: var(--ink-soft); border-radius: 6px; cursor: pointer; }
+.theme-toggle:hover { color: var(--accent); background: rgba(0, 0, 0, 0.06); }
 .spacer { flex: 1; }
 
 /* Buttons and forms */
@@ -524,6 +535,69 @@ picture.themed { display: contents; }
   line-height: 1.15;
   letter-spacing: 0.01em;
   color: var(--hero-sub-ink);
+}
+
+/* Home: a banner, then a feed of what is happening. A box is the panel the
+   rest of the site uses, with a ruled head so a column of them reads as a
+   list of answers rather than one long page. */
+.banner {
+  display: flex; align-items: center; gap: 12px 24px;
+  margin: 18px 0 20px; padding: 18px 22px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+}
+/* A themed <picture> is display:contents, so the <img> inside it is the flex
+   item — the size belongs on the image, not on the picture, or the logo takes
+   the whole row. */
+.banner-logo img { width: clamp(150px, 24vw, 250px); height: auto; display: block; flex: 0 0 auto; }
+.banner-mascot img { width: clamp(80px, 11vw, 125px); height: auto; display: block; flex: 0 0 auto; }
+.banner-text { flex: 1 1 auto; min-width: 0; }
+.banner-title { margin: 0 0 2px; font-size: 1.2rem; font-weight: 800; }
+.banner-sub { color: var(--muted); margin-bottom: 12px; font-size: 0.9rem; }
+
+.feed { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 18px; }
+.feed-main, .feed-side { min-width: 0; }
+
+.box { background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+       margin-bottom: 16px; overflow: hidden; }
+.box-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
+            padding: 8px 14px; border-bottom: 1px solid var(--border); background: var(--tag-bg); }
+.box-head h2 { margin: 0; font-size: 0.78rem; text-transform: uppercase;
+               letter-spacing: 0.06em; color: var(--text); }
+.box-head a { font-size: 0.82rem; }
+.box-body { padding: 10px 14px; }
+.box > table { border: 0; border-radius: 0; }
+.box .champion-list { flex-direction: column; gap: 5px; }
+.champ-team { font-weight: 700; }
+
+table.compact th, table.compact td { padding: 5px 10px; }
+td.rank { width: 1%; padding-right: 2px; }
+
+.pairings { list-style: none; margin: 0; padding: 0; }
+.pairings li { display: flex; align-items: center; gap: 10px; padding: 7px 14px;
+               border-bottom: 1px solid var(--border); }
+.pairings li:last-child { border-bottom: 0; }
+.pair-side { flex: 1 1 0; min-width: 0; display: flex; align-items: baseline; gap: 6px; }
+.pair-side.right { justify-content: flex-end; text-align: right; }
+.pair-side.win > a { font-weight: 700; }
+/* The name may wrap; "6-2" may not, or it reads as two numbers. */
+.pair-side .muted { white-space: nowrap; }
+.pair-vs { color: var(--muted); font-size: 0.7rem; text-transform: uppercase;
+           letter-spacing: 0.08em; flex: 0 0 auto; }
+.result-team { width: 42%; }
+.result-team.right { text-align: right; }
+.result-team.win a { font-weight: 700; }
+.result-score { width: 1%; white-space: nowrap; }
+
+@media (max-width: 760px) {
+  .feed { grid-template-columns: 1fr; }
+  .banner { flex-wrap: wrap; padding: 16px; }
+  .banner-logo img { width: clamp(140px, 44vw, 210px); }
+  .banner-mascot img { width: 84px; margin-left: auto; }
+  .topbar-row { flex-wrap: wrap; }
+  .brand { order: 1; }
+  .topbar-end { order: 2; margin-left: auto; }
+  .mainnav { order: 3; flex: 1 0 100%; flex-wrap: wrap; gap: 0; margin: 2px -8px 0; }
+  .mainnav a { padding: 7px 8px; font-size: 0.9rem; }
 }
 
 /* Tiles: the big links on the home and info pages. Flat deep red with a faint

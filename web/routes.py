@@ -228,7 +228,24 @@ def _open_seasons() -> list[dict]:
 
 @routes.get("/")
 async def home(request: web.Request):
-    return render(request, "home.html", signups_open=bool(_open_seasons()))
+    """A front page that answers "what's going on": this week's pairings, the
+    latest results, the standings and who is winning the fantasy table."""
+    current = store.current_seasons()
+    season = current[0] if current else None
+    ctx: dict = {"season": season, "other_current": current[1:],
+                 "open_seasons": _open_seasons()}
+    if season:
+        matches = store.season_matches(season)
+        teams = store.season_teams(season, matches)
+        rounds = store.season_matchups(season)
+        ctx["standings"] = teams
+        ctx["team_names"] = {t["captain"]: t["name"] for t in teams}
+        ctx["this_week"] = rounds[0] if rounds else None
+        ctx["results"] = [m for m in matches if m["radiant_team"] or m["dire_team"]][:8]
+        leaders, _, _ = store.season_leaders(season)
+        ctx["leaders"] = leaders[:5]
+    ctx["champions"] = next(iter(store.all_champions()), None)
+    return render(request, "home.html", **ctx)
 
 
 @routes.get("/signup")

@@ -32,20 +32,40 @@
 // at the other drawing — the only case where a second one is fetched. The
 // pairs are named <thing>-light.png and <thing>-dark.png, so one rule finds
 // them all.
+function applyThemedImages(theme) {
+  if (!theme) return;
+  document.querySelectorAll("picture.themed > img, img[data-themed]").forEach(function (img) {
+    var src = img.getAttribute("src");
+    if (!/-(light|dark)\.png/.test(src)) return;
+    var source = img.parentNode.querySelector && img.parentNode.querySelector("source");
+    if (source) source.remove();        // a <source> outranks the img's own src
+    img.setAttribute("src", src.replace(/-(light|dark)\.png/, "-" + theme + ".png"));
+  });
+}
 (function () {
   var theme = document.documentElement.getAttribute("data-theme");
   if (!theme) return;
   document.addEventListener("DOMContentLoaded", function () {
     if ((theme === "dark") === matchMedia("(prefers-color-scheme: dark)").matches) return;
-    document.querySelectorAll("picture.themed > img").forEach(function (img) {
-      var src = img.getAttribute("src");
-      if (!/-(light|dark)\.png/.test(src)) return;
-      var source = img.parentNode.querySelector("source");
-      if (source) source.remove();      // a <source> outranks the img's own src
-      img.src = src.replace(/-(light|dark)\.png/, "-" + theme + ".png");
-    });
+    applyThemedImages(theme);
   });
 })();
+
+// The nav's toggle. It writes the same stored choice ?theme= does, so the two
+// never disagree, and re-points the themed drawings, which a media query
+// can't do once the page is already up.
+document.addEventListener("DOMContentLoaded", function () {
+document.querySelectorAll("[data-theme-toggle]").forEach(function (b) {
+  b.addEventListener("click", function () {
+    var root = document.documentElement, set = root.getAttribute("data-theme");
+    var dark = set ? set === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+    var next = dark ? "light" : "dark";
+    root.setAttribute("data-theme", next);
+    try { localStorage.setItem("theme", next); } catch (e) {}
+    applyThemedImages(next);
+  });
+});
+});
 </script>
 <script>
 // With a theme forced, every same-origin link carries it, so the address bar
@@ -65,23 +85,33 @@
   });
 })();
 </script>
+{% set nav = [("/seasons", "Seasons"), ("/teams", "Teams"), ("/players", "Players"),
+              ("/matches", "Matches"), ("/fantasy", "Fantasy"),
+              ("/hall-of-fame", "Hall of Fame"), ("/rules", "Rules")] %}
 <header class="topbar">
-  <nav class="wrap">
-    <a class="brand" href="/" title="Ability Draft Community League"><span class="brand-mark" role="img" aria-label="ADCL"></span></a>
-    <span class="spacer"></span>
-    {# The bar says who you are: logged out it offers the way in, and Admin
-       only appears for someone who can actually use it. #}
-    {% if is_admin %}
-    <a href="/admin" {% if path.startswith('/admin') %}class="active"{% endif %}>Admin</a>
-    {% endif %}
-    {% if user %}
-    <a class="whoami" href="/settings" {% if path == '/settings' %}class="active"{% endif %}>
-      {% if user.avatar_url %}<img class="avatar" src="{{ user.avatar_url }}" alt="">{% endif %}
-      {{ user.steam_name or user.account_id }}</a>
-    {% else %}
-    <a href="/login?next={{ path|urlencode }}">Log in</a>
-    {% endif %}
-  </nav>
+  <div class="wrap topbar-row">
+    <a class="brand" href="/" title="Ability Draft Community League">
+      <span class="brand-mark" role="img" aria-label="ADCL"></span></a>
+    <nav class="mainnav" aria-label="Site">
+      {% for href, label in nav %}
+      <a href="{{ href }}"{% if path == href or path.startswith(href ~ "/") or (href == "/seasons" and path.startswith("/season/")) %} class="active"{% endif %}>{{ label }}</a>
+      {% endfor %}
+    </nav>
+    <div class="topbar-end">
+      <button type="button" class="theme-toggle" data-theme-toggle
+              title="Light or dark" aria-label="Switch between light and dark">
+        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.39 5.39 0 0 1-4.4 2.26 5.4 5.4 0 0 1-3.14-9.8c-.44-.06-.9-.1-1.36-.1z"/></svg>
+      </button>
+      {% if is_admin %}<a href="/admin"{% if path.startswith('/admin') %} class="active"{% endif %}>Admin</a>{% endif %}
+      {% if user %}
+      <a class="whoami{% if path == '/settings' %} active{% endif %}" href="/settings">
+        {% if user.avatar_url %}<img class="avatar" src="{{ user.avatar_url }}" alt="">{% endif %}
+        <span>{{ user.steam_name or user.account_id }}</span></a>
+      {% else %}
+      <a class="button small-button" href="/login?next={{ path|urlencode }}">Log in</a>
+      {% endif %}
+    </div>
+  </div>
 </header>
 <main class="wrap">
 {% block content %}{% endblock %}
