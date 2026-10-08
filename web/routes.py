@@ -514,7 +514,8 @@ async def team_page(request: web.Request):
                   stats=stats, ratings=db.displayed_ratings(season["division_id"]),
                   team_names={c: t["name"] for c, t in teams.items()},
                   opponents=[(c, t["name"]) for c, t in sorted(teams.items(), key=lambda kv: kv[1]["name"].lower())],
-                  can_edit=_can_edit_team(request, team), notice=request.query.get("notice"))
+                  can_edit=_can_edit_team(request, team), notice=request.query.get("notice"),
+                  free_agents=store.free_agents(season) if request.get("is_admin") else [])
 
 
 def _can_edit_team(request: web.Request, team: dict) -> bool:
@@ -534,6 +535,70 @@ def _editable_team(request: web.Request) -> tuple[dict, dict]:
     if not _can_edit_team(request, team):
         raise web.HTTPForbidden(text="Only an admin or this team's captain can change it.")
     return season, team
+
+
+def _roster_redirect(season: dict, captain: str, notice: str):
+    return web.HTTPFound(f"{team_url(season, captain)}?" + urlencode({"notice": notice}))
+
+
+def _roster_target(request: web.Request, data) -> int:
+    """The account a roster form names: a pick from the list, or an id typed in."""
+    raw = (data.get("account_id") or data.get("player") or "").strip()
+    account_id = account_id_from(raw)
+    if not account_id:
+        raise ValueError("Pick a player, or paste a Dota account id or Steam64 id.")
+    return account_id
+
+
+@routes.post("/season/{season_id}/{division}/team/{captain}/roster/replace")
+async def roster_replace(request: web.Request):
+    """Hand one player's slot to another, at the same price."""
+    season = _season_or_404(request)
+    _require_admin(request)
+    captain = request.match_info["captain"]
+    data = await request.post()
+    try:
+        out_id = int(data["out"])
+        in_id = _roster_target(request, data)
+        slot = db.replace_roster_player(season["id"], season["division_id"], out_id, in_id)
+    except (KeyError, ValueError) as e:
+        raise _roster_redirect(season, captain, str(e) or "Couldn't read that.")
+    names = store.player_identities([out_id, in_id])
+    raise _roster_redirect(season, captain,
+                           f"{names[in_id]['name']} takes {names[out_id]['name']}'s "
+                           f"${slot['cost']} slot.")
+
+
+@routes.post("/season/{season_id}/{division}/team/{captain}/roster/remove")
+async def roster_remove(request: web.Request):
+    season = _season_or_404(request)
+    _require_admin(request)
+    captain = request.match_info["captain"]
+    data = await request.post()
+    try:
+        account_id = int(data["account_id"])
+    except (KeyError, ValueError):
+        raise _roster_redirect(season, captain, "Which player?")
+    name = store.player_identities([account_id])[account_id]["name"]
+    removed = db.remove_roster_player(season["id"], season["division_id"], account_id)
+    raise _roster_redirect(season, captain,
+                           f"{name} is off the roster." if removed else "They weren't on it.")
+
+
+@routes.post("/season/{season_id}/{division}/team/{captain}/roster/add")
+async def roster_add(request: web.Request):
+    season = _season_or_404(request)
+    _require_admin(request)
+    captain = request.match_info["captain"]
+    data = await request.post()
+    try:
+        account_id = _roster_target(request, data)
+        cost = int(re.sub(r"\D", "", data.get("cost", "")) or 0)
+        db.add_roster_player(season["id"], season["division_id"], account_id, captain, cost)
+    except ValueError as e:
+        raise _roster_redirect(season, captain, str(e) or "Couldn't read that.")
+    name = store.player_identities([account_id])[account_id]["name"]
+    raise _roster_redirect(season, captain, f"{name} joins at ${cost}.")
 
 
 @routes.post("/season/{season_id}/{division}/team/{captain}/name")

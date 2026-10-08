@@ -381,6 +381,12 @@ ul.plain li:last-child { border-bottom: 0; }
 .bar-day { font-size: 0.6rem; color: var(--muted); text-align: center; padding-top: 3px; }
 .admin-nav a.active { font-weight: 700; color: var(--accent); }
 
+/* Roster editing: folded away, because a roster is read far more often than
+   it is changed. */
+.roster-edit > summary { cursor: pointer; font-size: .85rem; color: var(--link); }
+.roster-edit[open] { padding-bottom: 10px; }
+.roster-edit .form { margin: 10px 0 6px; max-width: 420px; }
+
 /* Click-to-rename */
 .edit-view { cursor: pointer; border-bottom: 1px dashed var(--muted); }
 .edit-view:hover { color: var(--accent); }

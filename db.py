@@ -3267,6 +3267,60 @@ def upsert_player_costs(season_id: int, division_id: int, costs: list[dict]):
         } for c in costs])
 
 
+def replace_roster_player(season_id: int, division_id: int,
+                          out_id: int, in_id: int) -> dict:
+    """Hand one roster slot to a different player, keeping its price.
+
+    The slot's cost is what the team paid at the draft, not a valuation of
+    whoever fills it, so a replacement inherits it — otherwise a team's budget
+    changes every time somebody leaves.
+
+    Both halves in one transaction: a slot is never briefly empty and never
+    briefly held by two people. Returns the slot that moved.
+    """
+    with _conn() as conn:
+        row = conn.execute(
+            "SELECT cost, captain, mmr FROM player_costs "
+            "WHERE season_id = ? AND division_id = ? AND account_id = ?",
+            (season_id, division_id, out_id)).fetchone()
+        if not row:
+            raise ValueError("That player isn't on this roster.")
+        if conn.execute(
+                "SELECT 1 FROM player_costs WHERE season_id = ? AND division_id = ? "
+                "AND account_id = ?", (season_id, division_id, in_id)).fetchone():
+            raise ValueError("That player is already on a roster this season.")
+        slot = dict(row)
+        conn.execute("DELETE FROM player_costs WHERE season_id = ? AND division_id = ? "
+                     "AND account_id = ?", (season_id, division_id, out_id))
+        conn.execute(
+            "INSERT INTO player_costs (season_id, division_id, account_id, cost, captain, mmr) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (season_id, division_id, in_id, slot["cost"], slot["captain"], slot["mmr"]))
+    return slot
+
+
+def remove_roster_player(season_id: int, division_id: int, account_id: int) -> bool:
+    """Take a player off a roster, leaving the slot unfilled."""
+    with _conn() as conn:
+        cur = conn.execute(
+            "DELETE FROM player_costs WHERE season_id = ? AND division_id = ? AND account_id = ?",
+            (season_id, division_id, account_id))
+    return cur.rowcount > 0
+
+
+def add_roster_player(season_id: int, division_id: int, account_id: int,
+                      captain: str, cost: int) -> None:
+    """Put a player on a team at a given price."""
+    with _conn() as conn:
+        if conn.execute("SELECT 1 FROM player_costs WHERE season_id = ? AND division_id = ? "
+                        "AND account_id = ?", (season_id, division_id, account_id)).fetchone():
+            raise ValueError("That player is already on a roster this season.")
+        conn.execute(
+            "INSERT INTO player_costs (season_id, division_id, account_id, cost, captain, mmr) "
+            "VALUES (?, ?, ?, ?, ?, NULL)",
+            (season_id, division_id, account_id, cost, captain))
+
+
 def _compute_attendance(scope: MatchScope, costs: dict[int, dict],
                         captain_aids: dict[str, int] | None = None) -> dict[int, float]:
     """Return {account_id: attendance_ratio} for a team's players.

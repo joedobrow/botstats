@@ -549,6 +549,22 @@ def set_season_week(season_id: int, division_id: int, week_number: int,
                           int(s_dt.timestamp()), int(e_dt.timestamp()))
 
 
+def free_agents(season: dict) -> list[dict]:
+    """Players not on any roster this season, best rating first — who a team
+    can bring in. Someone drafted under any of their accounts is on a team,
+    so the whole person is out, not just the account that was drafted.
+    """
+    sid, did = season["id"], season["division_id"]
+    drafted = set(db.get_player_costs(sid, did))
+    drafted |= {a for a in db.get_captain_account_ids(sid, did).values() if a}
+    everyone = search_players()
+    person = {p["account_id"]: (p.get("alt_account_for") or p["account_id"]) for p in everyone}
+    drafted_people = {person.get(a, a) for a in drafted}
+    out = [p for p in everyone if person[p["account_id"]] not in drafted_people]
+    out.sort(key=lambda p: (-(p.get("rating") or -1), p["name"].lower()))
+    return out
+
+
 def season_champions(season: dict) -> dict | None:
     """Who won this season, or None if nobody has yet.
 
