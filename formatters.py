@@ -442,7 +442,8 @@ def _compute_strengths_weaknesses(
 # /players
 # ---------------------------------------------------------------------------
 
-def format_players_list(cached: list[dict], fantasy_adjusted: bool = False, debug: bool = False) -> list[discord.Embed]:
+def format_players_list(cached: list[dict], fantasy_adjusted: bool = False,
+                        debug: bool = False, note: str | None = None) -> list[discord.Embed]:
     """Build the /players embed list. Returns multiple embeds when needed —
     Discord caps each embed at 6000 total chars, but allows up to 10 embeds
     per message. We pack ~5500 chars per embed (safety margin)."""
@@ -464,6 +465,9 @@ def format_players_list(cached: list[dict], fantasy_adjusted: bool = False, debu
     if debug and fantasy_adjusted:
         base_title += " (fantasy-adjusted, debug)"
         desc_extra = " · ±6% based on fantasy diff residual (actual vs rating-expected)"
+    # A filtered list that doesn't say so reads as the whole list.
+    if note:
+        base_title += f" — {note}"
 
     # Build the lines once
     lines: list[str] = []
