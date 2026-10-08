@@ -1665,10 +1665,12 @@ async def refresh_ratings(interaction: discord.Interaction):
 @tree.command(name="players", description="Show all guild players ordered by rating")
 @app_commands.describe(
     show_all="Include every cached player, not just those in this server's matches/roster",
+    standins="Only players not drafted this season — who's free to fill in",
     debug="[Owner only] show methodology details (residual %, expected vs actual)",
     public=PUBLIC_BY_DEFAULT_PARAM_DESCRIPTION,
 )
-async def players(interaction: discord.Interaction, show_all: bool = False, debug: bool = False, public: bool = True):
+async def players(interaction: discord.Interaction, show_all: bool = False, standins: bool = False,
+                  debug: bool = False, public: bool = True):
     await interaction.response.defer(ephemeral=not public)
 
     is_owner = ADMIN_USER_ID and interaction.user.id == ADMIN_USER_ID
@@ -1688,6 +1690,27 @@ async def players(interaction: discord.Interaction, show_all: bool = False, debu
         return
 
     rows = [dict(r) for r in cached]
+
+    if standins:
+        # Everyone a team already has: the drafted players and the captains,
+        # who aren't in player_costs because they did the drafting.
+        from db import get_captain_account_ids, get_player_costs
+        season_id = division["current_season_id"]
+        rostered = set(get_player_costs(season_id, division["id"]))
+        rostered |= {aid for aid in get_captain_account_ids(season_id, division["id"]).values() if aid}
+        # A person is one or more accounts, and being drafted under any of
+        # them puts the whole person on a team. Checking only an account's
+        # main gets this backwards for someone drafted under their alt — which
+        # is real: Mr.Glock is drafted on an account that is dingus's alt, and
+        # a main-only test offered him as a stand-in.
+        person = {r["account_id"]: (r.get("alt_account_for") or r["account_id"]) for r in rows}
+        drafted_people = {person.get(a, a) for a in rostered}
+        rows = [r for r in rows if person[r["account_id"]] not in drafted_people]
+        if not rows:
+            await interaction.followup.send(
+                "⚠️ Everyone in the cache is on a roster this season.", ephemeral=True)
+            return
+
     division = _require_division(interaction)
     if division:
         from db import compute_fantasy_adjusted_ratings
@@ -1706,7 +1729,8 @@ async def players(interaction: discord.Interaction, show_all: bool = False, debu
             r["internal_rating"] = adj["adjusted_rating"]
 
     from formatters import format_players_list
-    embeds = format_players_list(rows, fantasy_adjusted=True, debug=debug)
+    embeds = format_players_list(rows, fantasy_adjusted=True, debug=debug,
+                                 note="not on a roster" if standins else None)
     # Discord's 6000-char limit is across all embeds in a single message, so
     # we send one followup message per embed instead of cramming them together.
     for embed in embeds:
