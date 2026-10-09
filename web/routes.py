@@ -228,24 +228,51 @@ def _open_seasons() -> list[dict]:
 
 @routes.get("/")
 async def home(request: web.Request):
-    """A front page that answers "what's going on": this week's pairings, the
-    latest results, the standings and who is winning the fantasy table."""
+    """A front page that answers "what's going on".
+
+    Everything that belongs to one division is shown per division: a week's
+    pairings and a standings table are about one league, and two leagues'
+    worth mixed together is a table of nothing. Results and the fantasy
+    table pool fine, so they do.
+    """
     current = store.current_seasons()
-    season = current[0] if current else None
-    ctx: dict = {"season": season, "other_current": current[1:],
-                 "open_seasons": _open_seasons()}
-    if season:
+    many = len(current) > 1
+    blocks, results, team_names = [], [], {}
+    for season in current:
         matches = store.season_matches(season)
         teams = store.season_teams(season, matches)
         rounds = store.season_matchups(season)
-        ctx["standings"] = teams
-        ctx["team_names"] = {t["captain"]: t["name"] for t in teams}
-        ctx["this_week"] = rounds[0] if rounds else None
-        ctx["results"] = [m for m in matches if m["radiant_team"] or m["dire_team"]][:8]
-        leaders, _, _ = store.season_leaders(season)
-        ctx["leaders"] = leaders[:5]
-    ctx["champions"] = next(iter(store.all_champions()), None)
-    return render(request, "home.html", **ctx)
+        team_names.update({t["captain"]: t["name"] for t in teams})
+        blocks.append({"season": season, "standings": teams,
+                       "this_week": rounds[0] if rounds else None})
+        results += [dict(m, season=season) for m in matches
+                    if m["radiant_team"] or m["dire_team"]]
+    results.sort(key=lambda m: m["start_time"], reverse=True)
+    leaders: list[dict] = []
+    for season in current:
+        rows, _, _ = store.season_leaders(season)
+        leaders += [dict(r, season=season) for r in rows]
+    leaders.sort(key=lambda r: -r["fantasy_points"])
+    return render(request, "home.html", blocks=blocks, many_divisions=many,
+                  results=results[:8], leaders=leaders[:5], team_names=team_names,
+                  open_seasons=_open_seasons(), matchup_links=_matchup_links(request, current))
+
+
+def _matchup_links(request: web.Request, current: list[dict]) -> list[dict]:
+    """The banner's matchups button(s).
+
+    One, unlabelled, when there's no doubt which league is the viewer's:
+    they signed up for it, or it's the only one being played. Otherwise one
+    per league, named for its division — guessing would send half the
+    visitors to the wrong division's week.
+    """
+    user = request.get("user")
+    signed = set(store.signed_up_seasons(user["account_id"])) if user else set()
+    mine = [s for s in current if (s["id"], s["division_id"]) in signed] or current
+    if len(mine) == 1:
+        return [{"label": "This week's matchups", "url": season_url(mine[0]) + "?tab=matchups"}]
+    return [{"label": f"{s['division']} matchups", "url": season_url(s) + "?tab=matchups"}
+            for s in mine]
 
 
 @routes.get("/signup")
