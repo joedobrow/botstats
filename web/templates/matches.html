@@ -17,7 +17,7 @@
   <label>Season
     <select name="season">
       <option value="">Any</option>
-      {% for s in seasons %}
+      {% for s in seasons | unique(attribute="id") %}
       <option value="{{ s.id }}"{% if q.get('season') == s.id|string %} selected{% endif %}>{{ s.label }}</option>
       {% endfor %}
     </select>

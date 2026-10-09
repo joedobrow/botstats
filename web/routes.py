@@ -409,8 +409,12 @@ async def teams_page(request: web.Request):
     defaults to the one being played, so the teams are one click away."""
     seasons = store.all_seasons()
     q = request.query
-    season = next((s for s in seasons if str(s["id"]) == q.get("season", "")
-                   and (not q.get("division") or s["division_slug"] == q["division"])), None)
+    # A season appears once per division playing it, so the picker's value is
+    # "<season>/<division>"; ?season=&division= still works for older links.
+    sid, _, slug = q.get("season", "").partition("/")
+    slug = slug or q.get("division", "")
+    season = next((s for s in seasons if str(s["id"]) == sid
+                   and (not slug or s["division_slug"] == slug)), None)
     if season is None:
         current = store.current_seasons()
         season = current[0] if current else (seasons[0] if seasons else None)

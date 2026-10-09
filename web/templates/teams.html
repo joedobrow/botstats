@@ -7,7 +7,7 @@
   <form method="get" class="season-pick">
     <select name="season" aria-label="Season" onchange="this.form.submit()">
       {% for s in seasons %}
-      <option value="{{ s.id }}"{% if season and s.id == season.id and s.division_id == season.division_id %} selected{% endif %}>{{ s.label }}{% if s.show_division %} · {{ s.division }}{% endif %}</option>
+      <option value="{{ s.id }}/{{ s.division_slug }}"{% if season and s.id == season.id and s.division_id == season.division_id %} selected{% endif %}>{{ s.label }}{% if s.show_division %} · {{ s.division }}{% endif %}</option>
       {% endfor %}
     </select>
     <noscript><button>Show</button></noscript>
