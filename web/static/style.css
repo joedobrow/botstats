@@ -553,6 +553,14 @@ picture.themed { display: contents; }
 .banner-text { flex: 1 1 auto; min-width: 0; }
 .banner-title { margin: 0 0 2px; font-size: 1.2rem; font-weight: 800; }
 .banner-sub { color: var(--muted); margin-bottom: 12px; font-size: 0.9rem; }
+/* The one button most people came to press, so it doesn't look like its
+   neighbours: the league's red, outlined rather than filled, so it reads as
+   the way in without competing with Sign up during signup season. */
+.matchup-cta {
+  border: 2px solid var(--accent); color: var(--accent); font-weight: 700;
+  background: transparent;
+}
+.matchup-cta:hover { background: var(--accent); color: var(--accent-text); text-decoration: none; }
 
 .feed { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 18px; }
 .feed-main, .feed-side { min-width: 0; }
@@ -566,8 +574,6 @@ picture.themed { display: contents; }
 .box-head a { font-size: 0.82rem; }
 .box-body { padding: 10px 14px; }
 .box > table { border: 0; border-radius: 0; }
-.box .champion-list { flex-direction: column; gap: 5px; }
-.champ-team { font-weight: 700; }
 
 table.compact th, table.compact td { padding: 5px 10px; }
 td.rank { width: 1%; padding-right: 2px; }

@@ -1,7 +1,10 @@
 {% extends "base.html" %}
 {% from "macros.html" import player_link %}
 {% block content %}
-<h1>Fantasy</h1>
+<div class="page-head">
+  <h1>Fantasy</h1>
+  <div class="actions"><a class="button" href="/teams">Team stats</a></div>
+</div>
 {% set active = q.keys()|reject("in", ["stat", "page"])|select|list|length %}
 <button type="button" class="filter-toggle" data-toggle-filters aria-expanded="false">
   Filters{% if active %} ({{ active }}){% endif %}</button>
