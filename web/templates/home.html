@@ -21,11 +21,12 @@
       {{ season_status(b.season) }}{% endfor %}
     </div>
     {% endif %}
+    {% if matchup_links or open_seasons %}
     <div class="actions">
       {% for m in matchup_links %}<a class="button matchup-cta" href="{{ m.url }}">{{ m.label }} →</a>{% endfor %}
       {% if open_seasons %}<a class="button primary" href="/signup">Sign up</a>{% endif %}
-      <a class="button" href="/fantasy">Fantasy</a>
     </div>
+    {% endif %}
   </div>
   <picture class="themed banner-mascot">
     <source media="(prefers-color-scheme: dark)" srcset="/static/mascot-dark.png?v={{ asset_version }}">

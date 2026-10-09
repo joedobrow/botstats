@@ -593,6 +593,41 @@ def free_agents(season: dict) -> list[dict]:
     return out
 
 
+def alt_links() -> dict[int, int]:
+    """{alt account: the account it belongs to}, cached against the database
+    version. The query is trivial but the connection it needs isn't, and
+    pages ask this once per division."""
+    rows = db._derived(("alt_links",),
+                       lambda: [{"alt": a, "main": m} for a, m in db.alt_links().items()])
+    return {r["alt"]: r["main"] for r in rows}
+
+
+def season_people(season: dict) -> set[int]:
+    """Everyone in a division's season — drafted into it or captaining a
+    team — as the account their alts resolve to.
+
+    Cached against the database's version: resolving captains is a dozen
+    name lookups apiece, and the front page asks this on every signed-in
+    view.
+    """
+    sid, did = season["id"], season["division_id"]
+
+    def build() -> list[dict]:
+        aids = set(db.get_player_costs(sid, did))
+        aids |= {a for a in db.get_captain_account_ids(sid, did).values() if a}
+        links = alt_links()
+        return [{"account_id": links.get(a, a)} for a in aids]
+
+    return {r["account_id"] for r in db._derived(("season_people", sid, did), build)}
+
+
+def plays_in(season: dict, account_id: int) -> bool:
+    """Is this account's owner in the season? Someone drafted under any of
+    their accounts is in it, so the whole person counts, not just the
+    account they happened to log in on."""
+    return alt_links().get(account_id, account_id) in season_people(season)
+
+
 def season_champions(season: dict) -> dict | None:
     """Who won this season, or None if nobody has yet.
 
