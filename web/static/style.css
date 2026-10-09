@@ -553,6 +553,8 @@ picture.themed { display: contents; }
 .banner-text { flex: 1 1 auto; min-width: 0; }
 .banner-title { margin: 0 0 2px; font-size: 1.2rem; font-weight: 800; }
 .banner-sub { color: var(--muted); margin-bottom: 12px; font-size: 0.9rem; }
+/* Nothing below it for a visitor who isn't in a league. */
+.banner-sub:last-child { margin-bottom: 0; }
 /* The one button most people came to press, so it doesn't look like its
    neighbours: the league's red, outlined rather than filled, so it reads as
    the way in without competing with Sign up during signup season. */

@@ -259,20 +259,22 @@ async def home(request: web.Request):
 
 
 def _matchup_links(request: web.Request, current: list[dict]) -> list[dict]:
-    """The banner's matchups button(s).
+    """The banner's matchups button: the viewer's own league, or nothing.
 
-    One, unlabelled, when there's no doubt which league is the viewer's:
-    they signed up for it, or it's the only one being played. Otherwise one
-    per league, named for its division — guessing would send half the
-    visitors to the wrong division's week.
+    Theirs is a league they signed up for here, or — since the seasons
+    played so far were drafted from lists that predate the site — one they
+    were drafted into. A visitor who plays in neither gets no button: there
+    is no week that is theirs, and sending them to a guess is worse than
+    sending them nowhere.
     """
     user = request.get("user")
-    signed = set(store.signed_up_seasons(user["account_id"])) if user else set()
-    mine = [s for s in current if (s["id"], s["division_id"]) in signed] or current
-    if len(mine) == 1:
-        return [{"label": "This week's matchups", "url": season_url(mine[0]) + "?tab=matchups"}]
+    if not user:
+        return []
+    aid = user["account_id"]
+    signed = set(store.signed_up_seasons(aid))
     return [{"label": f"{s['division']} matchups", "url": season_url(s) + "?tab=matchups"}
-            for s in mine]
+            for s in current
+            if (s["id"], s["division_id"]) in signed or store.plays_in(s, aid)]
 
 
 @routes.get("/signup")
