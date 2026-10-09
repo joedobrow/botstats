@@ -1111,6 +1111,8 @@ def season_teams(season: dict, matches: list[dict] | None = None) -> list[dict]:
         t = teams.setdefault(cap, {"captain": cap, "roster": [], "wins": 0, "losses": 0})
         t["roster"].append({"account_id": aid, "cost": c.get("cost")})
     for cap, t in teams.items():
+        # Priciest first; a player who joined without a draft price goes last.
+        t["roster"].sort(key=lambda p: (p["cost"] is None, -(p["cost"] or 0)))
         ident = identity.get(cap.lower(), {})
         t["name"] = ident.get("team_name") or cap
         t["logo_url"] = ident.get("logo_url")

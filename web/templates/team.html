@@ -38,19 +38,25 @@
 {% endif %}
 
 <h2>Roster</h2>
-{% macro free_agent_picker(name) %}
-<select name="{{ name }}" required>
-  <option value="" disabled selected>Pick a player</option>
-  {% for p in free_agents %}
-  <option value="{{ p.account_id }}">{{ p.name }}{% if p.rating %} · {{ p.rating }}{% endif %}</option>
-  {% endfor %}
-</select>
+{% macro player_fields() %}
+<label>From the list
+  <select name="account_id">
+    <option value="" selected>Pick a player</option>
+    {% for p in free_agents %}
+    <option value="{{ p.account_id }}">{{ p.name }}{% if p.rating %} · {{ p.rating }}{% endif %}</option>
+    {% endfor %}
+  </select>
+</label>
+<label>Or their Dota or Steam ID
+  <input type="text" name="player" inputmode="numeric" autocomplete="off" placeholder="123456789"
+         title="Someone new: their Dota account id, Steam64 id, or a Dotabuff/OpenDota link. Overrides the list.">
+</label>
 {% endmacro %}
 <div class="scroll">
 <table>
   <thead><tr><th>Player</th><th class="num">Rating</th><th class="num">Cost</th><th class="num">Games</th><th class="num">W–L</th><th class="num">Fantasy</th>{% if is_admin %}<th></th>{% endif %}</tr></thead>
   <tbody>
-  {% set members = ([{"account_id": team.captain_account_id, "cost": None, "is_captain": True}] if team.captain_account_id else []) + team.roster|sort(attribute="cost", reverse=True)|list %}
+  {% set members = ([{"account_id": team.captain_account_id, "cost": None, "is_captain": True}] if team.captain_account_id else []) + team.roster %}
   {% for p in members if p.is_captain or p.account_id != team.captain_account_id %}
     {% set s = stats.get(p.account_id) %}
     <tr>
@@ -72,23 +78,8 @@
         {% if p.is_captain %}
           <span class="muted small">captain</span>
         {% else %}
-          <details class="roster-edit">
-            <summary>Change</summary>
-            <form method="post" action="{{ team_url(season, team.captain) }}/roster/replace" class="form">
-              <input type="hidden" name="csrf" value="{{ csrf }}">
-              <input type="hidden" name="out" value="{{ p.account_id }}">
-              <label>Replaced by {{ free_agent_picker("account_id") }}</label>
-              <div class="actions">
-                <button class="primary">Swap in</button>
-              </div>
-            </form>
-            <form method="post" action="{{ team_url(season, team.captain) }}/roster/remove" class="inline"
-                  onsubmit="return confirm('Take {{ idents[p.account_id].name }} off the roster, leaving the slot empty?')">
-              <input type="hidden" name="csrf" value="{{ csrf }}">
-              <input type="hidden" name="account_id" value="{{ p.account_id }}">
-              <button class="linklike danger">Remove, leaving the slot empty</button>
-            </form>
-          </details>
+          <button type="button" class="linklike" data-replace="{{ p.account_id }}"
+                  data-name="{{ idents[p.account_id].name }}" title="The replacement joins with no cost">Replace</button>
         {% endif %}
       </td>
       {% endif %}
@@ -98,15 +89,70 @@
 </table>
 </div>
 {% if is_admin %}
-<details class="roster-edit">
-  <summary>Add a player</summary>
-  <form method="post" action="{{ team_url(season, team.captain) }}/roster/add" class="form grid">
+<p><button type="button" class="small-button" data-open-dialog="add-player-dialog">Add a player</button></p>
+
+<dialog id="replace-dialog" class="dialog">
+  <form method="post" action="{{ team_url(season, team.captain) }}/roster/replace" class="form" id="replace-form">
     <input type="hidden" name="csrf" value="{{ csrf }}">
-    <label>Player {{ free_agent_picker("account_id") }}</label>
-    <label>Cost <input type="number" name="cost" min="0" max="999" value="0" required></label>
-    <div class="actions"><button class="primary">Add to the roster</button></div>
+    <input type="hidden" name="out" value="">
+    <h2 class="flush">Replace <span data-out-name></span></h2>
+    {{ player_fields() }}
+    <div class="actions">
+      <button class="primary">Replace</button>
+      <button type="button" data-close-dialog>Cancel</button>
+    </div>
   </form>
-</details>
+  <form method="post" action="{{ team_url(season, team.captain) }}/roster/remove" id="remove-form" class="dialog-foot"
+        onsubmit="return confirm('Take ' + this.dataset.name + ' off the roster, leaving the slot empty?')">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="hidden" name="account_id" value="">
+    <button class="linklike danger">Remove <span data-out-name></span> and leave the slot empty</button>
+  </form>
+</dialog>
+
+<dialog id="add-player-dialog" class="dialog">
+  <form method="post" action="{{ team_url(season, team.captain) }}/roster/add" class="form">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <h2 class="flush">Add a player to {{ team.name }}</h2>
+    {{ player_fields() }}
+    <label>Cost
+      <input type="number" name="cost" min="0" max="999" placeholder="None"
+             title="Leave empty for a player who wasn't drafted">
+    </label>
+    <div class="actions">
+      <button class="primary">Add to the roster</button>
+      <button type="button" data-close-dialog>Cancel</button>
+    </div>
+  </form>
+</dialog>
+<script>
+// One popup serves every row: it is told whose slot it's for when opened.
+(function () {
+  var d = document.getElementById("replace-dialog");
+  var replace = document.getElementById("replace-form"), remove = document.getElementById("remove-form");
+  document.querySelectorAll("[data-replace]").forEach(function (b) {
+    b.addEventListener("click", function () {
+      replace.reset();
+      replace.elements.out.value = remove.elements.account_id.value = b.dataset.replace;
+      remove.dataset.name = b.dataset.name;
+      d.querySelectorAll("[data-out-name]").forEach(function (s) { s.textContent = b.dataset.name; });
+      d.showModal();
+    });
+  });
+  // The list or a typed id, one of the two.
+  document.querySelectorAll("#replace-dialog form.form, #add-player-dialog form").forEach(function (f) {
+    f.addEventListener("submit", function (e) {
+      var typed = f.elements.player.value.trim(), picked = f.elements.account_id.value;
+      if (!typed && !picked) {
+        e.preventDefault();
+        f.elements.player.setCustomValidity("Pick a player from the list, or type their ID.");
+        f.elements.player.reportValidity();
+      }
+    });
+    f.elements.player.addEventListener("input", function () { this.setCustomValidity(""); });
+  });
+})();
+</script>
 {% endif %}
 
 <h2 class="with-action">Matches

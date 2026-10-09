@@ -155,7 +155,7 @@ CREATE TABLE IF NOT EXISTS match_drafts (
 
 # Bumped by each structural migration in _MIGRATIONS; stored in the database
 # as PRAGMA user_version so every migration runs exactly once, in order.
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 
 def init_db():
@@ -402,7 +402,7 @@ def init_db():
                 season_id     INTEGER NOT NULL REFERENCES seasons(id),
                 division_id   INTEGER NOT NULL REFERENCES divisions(id),
                 account_id    INTEGER NOT NULL,
-                cost          INTEGER NOT NULL,
+                cost          INTEGER,             -- NULL: on the team, never drafted
                 captain       TEXT,
                 mmr           INTEGER,
                 PRIMARY KEY (season_id, division_id, account_id)
@@ -1073,9 +1073,44 @@ def _add_match_drafts(conn: sqlite3.Connection) -> None:
         raise
 
 
+def _player_cost_nullable(conn: sqlite3.Connection) -> None:
+    """Migration 4: player_costs.cost may be NULL. A player who joins a team
+    mid-season — a replacement, a late addition — was never drafted, so there
+    is no price to record, and a made-up one would skew value."""
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        before = conn.execute("SELECT COUNT(*) FROM player_costs").fetchone()[0]
+        _run_script(conn, """
+            CREATE TABLE player_costs_new (
+                season_id     INTEGER NOT NULL REFERENCES seasons(id),
+                division_id   INTEGER NOT NULL REFERENCES divisions(id),
+                account_id    INTEGER NOT NULL,
+                cost          INTEGER,
+                captain       TEXT,
+                mmr           INTEGER,
+                PRIMARY KEY (season_id, division_id, account_id)
+            );
+            INSERT INTO player_costs_new
+                SELECT season_id, division_id, account_id, cost, captain, mmr FROM player_costs;
+            DROP TABLE player_costs;
+            ALTER TABLE player_costs_new RENAME TO player_costs
+        """)
+        after = conn.execute("SELECT COUNT(*) FROM player_costs").fetchone()[0]
+        if after != before:
+            raise RuntimeError(f"player_costs: {before} rows before, {after} after")
+        conn.execute("PRAGMA user_version = 4")
+        conn.execute("COMMIT")
+        logger.info("Migration 4: player_costs.cost may be NULL (%d rows kept)", after)
+    except Exception:
+        if conn.in_transaction:
+            conn.execute("ROLLBACK")
+        raise
+
+
 # Structural migrations, in order; the database's PRAGMA user_version is the
 # number of the last one applied. Append new ones; never reorder or edit.
-_MIGRATIONS = [_migrate_seasons_to_ids, _migrate_to_divisions, _add_match_drafts]
+_MIGRATIONS = [_migrate_seasons_to_ids, _migrate_to_divisions, _add_match_drafts,
+               _player_cost_nullable]
 
 
 def _migrate_ranked_mmr_overrides_to_rank():
@@ -3237,7 +3272,7 @@ def get_player_costs(season_id: int, division_id: int) -> dict[int, dict]:
             # Explicit order (priciest first) — rosters and member lists
             # follow it, and table order isn't guaranteed.
             "SELECT account_id, cost, captain, mmr FROM player_costs WHERE season_id = ? AND division_id = ? "
-            "ORDER BY cost DESC, account_id",
+            "ORDER BY cost IS NULL, cost DESC, account_id",
             (season_id, division_id),
         ).fetchall()
     result = {
@@ -3271,11 +3306,11 @@ def upsert_player_costs(season_id: int, division_id: int, costs: list[dict]):
 
 def replace_roster_player(season_id: int, division_id: int,
                           out_id: int, in_id: int) -> dict:
-    """Hand one roster slot to a different player, keeping its price.
+    """Hand one roster slot to a different player.
 
-    The slot's cost is what the team paid at the draft, not a valuation of
-    whoever fills it, so a replacement inherits it — otherwise a team's budget
-    changes every time somebody leaves.
+    The newcomer joins with no cost: the price was what the team paid for the
+    player who left, and the replacement was never drafted, so carrying it
+    over would measure their value against someone else's price.
 
     Both halves in one transaction: a slot is never briefly empty and never
     briefly held by two people. Returns the slot that moved.
@@ -3297,7 +3332,7 @@ def replace_roster_player(season_id: int, division_id: int,
         conn.execute(
             "INSERT INTO player_costs (season_id, division_id, account_id, cost, captain, mmr) "
             "VALUES (?, ?, ?, ?, ?, ?)",
-            (season_id, division_id, in_id, slot["cost"], slot["captain"], slot["mmr"]))
+            (season_id, division_id, in_id, None, slot["captain"], None))
     return slot
 
 
@@ -3311,8 +3346,8 @@ def remove_roster_player(season_id: int, division_id: int, account_id: int) -> b
 
 
 def add_roster_player(season_id: int, division_id: int, account_id: int,
-                      captain: str, cost: int) -> None:
-    """Put a player on a team at a given price."""
+                      captain: str, cost: int | None) -> None:
+    """Put a player on a team, at a price or (None) at none."""
     with _conn() as conn:
         if conn.execute("SELECT 1 FROM player_costs WHERE season_id = ? AND division_id = ? "
                         "AND account_id = ?", (season_id, division_id, account_id)).fetchone():

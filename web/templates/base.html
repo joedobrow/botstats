@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en"{% if theme %} data-theme="{{ theme }}"{% endif %}>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -10,24 +10,26 @@
 <link rel="apple-touch-icon" href="/static/favicon.png?v={{ asset_version }}">
 <link rel="stylesheet" href="/static/style.css?v={{ asset_version }}">
 <script>
-// ?theme=dark / ?theme=light / ?theme=auto, remembered while browsing, so
-// every link followed from here stays in the mode being tested. Runs in the
-// head, before the first paint, so the page never flashes the other one.
+// The light/dark choice lives in the theme cookie, which the server reads to
+// render each page in it. This only carries over a choice made before that,
+// when it was kept in localStorage.
 (function () {
-  var q = new URLSearchParams(location.search).get("theme"), theme = q;
   try {
-    if (q === "auto") localStorage.removeItem("theme");
-    else if (q) localStorage.setItem("theme", q);
-    if (!q || q === "auto") theme = localStorage.getItem("theme");
+    var old = localStorage.getItem("theme");
+    if (!old) return;
+    localStorage.removeItem("theme");
+    if (document.documentElement.getAttribute("data-theme")) return;
+    if (old === "dark" || old === "light") {
+      document.documentElement.setAttribute("data-theme", old);
+      document.cookie = "theme=" + old + "; path=/; max-age=31536000; samesite=lax";
+    }
   } catch (e) {}
-  if (theme === "dark" || theme === "light")
-    document.documentElement.setAttribute("data-theme", theme);
 })();
 </script>
 </head>
 <body>
 <script>
-// A <picture> chooses by media query, which knows nothing of ?theme=. When a
+// A <picture> chooses by media query, which knows nothing of the chosen theme. When a
 // theme is forced against the system's own setting, point each themed picture
 // at the other drawing — the only case where a second one is fetched. The
 // pairs are named <thing>-light.png and <thing>-dark.png, so one rule finds
@@ -51,9 +53,9 @@ function applyThemedImages(theme) {
   });
 })();
 
-// The nav's toggle. It writes the same stored choice ?theme= does, so the two
-// never disagree, and re-points the themed drawings, which a media query
-// can't do once the page is already up.
+// The nav's toggle: it writes the cookie every later page is rendered from,
+// and re-points the themed drawings, which a media query can't do once the
+// page is already up.
 document.addEventListener("DOMContentLoaded", function () {
 document.querySelectorAll("[data-theme-toggle]").forEach(function (b) {
   b.addEventListener("click", function () {
@@ -61,29 +63,11 @@ document.querySelectorAll("[data-theme-toggle]").forEach(function (b) {
     var dark = set ? set === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
     var next = dark ? "light" : "dark";
     root.setAttribute("data-theme", next);
-    try { localStorage.setItem("theme", next); } catch (e) {}
+    document.cookie = "theme=" + next + "; path=/; max-age=31536000; samesite=lax";
     applyThemedImages(next);
   });
 });
 });
-</script>
-<script>
-// With a theme forced, every same-origin link carries it, so the address bar
-// keeps saying which mode this is and a copied link arrives in it too.
-(function () {
-  var theme = document.documentElement.getAttribute("data-theme");
-  if (!theme) return;
-  document.addEventListener("DOMContentLoaded", function () {
-    document.querySelectorAll("a[href]").forEach(function (a) {
-      var href = a.getAttribute("href"), u;
-      if (!href || href.charAt(0) === "#") return;
-      try { u = new URL(href, location.href); } catch (e) { return; }
-      if (u.origin !== location.origin || u.searchParams.get("theme")) return;
-      u.searchParams.set("theme", theme);
-      a.setAttribute("href", u.pathname + u.search + u.hash);
-    });
-  });
-})();
 </script>
 {% set nav = [("/seasons", "Seasons"), ("/players", "Players"), ("/matches", "Matches"),
               ("/fantasy", "Fantasy"), ("/hall-of-fame", "Hall of Fame"), ("/rules", "Rules")] %}

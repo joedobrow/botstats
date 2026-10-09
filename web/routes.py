@@ -92,8 +92,26 @@ def _asset_version() -> int:
     return int(max((p.stat().st_mtime for p in STATIC_DIR.iterdir() if p.is_file()), default=0))
 
 
+THEME_COOKIE = "theme"
+
+
+def _theme(request: web.Request) -> tuple[str | None, str | None]:
+    """(theme to render, value to store) — light, dark, or None for "follow
+    the system". The cookie is the one place the choice lives, so every page
+    is served in it; ?theme=light|dark|auto changes it, the way a link can."""
+    asked = request.query.get("theme")
+    if asked in ("light", "dark"):
+        return asked, asked
+    if asked == "auto":
+        return None, ""
+    stored = request.cookies.get(THEME_COOKIE)
+    return (stored if stored in ("light", "dark") else None), None
+
+
 def render(request: web.Request, template: str, status: int = 200, **ctx) -> web.Response:
+    theme, store_theme = _theme(request)
     ctx.update(user=request.get("user"), is_admin=request.get("is_admin", False),
+               theme=theme,
                is_uberadmin=request.get("is_uberadmin", False),
                csrf=request.get("csrf", ""), path=request.path,
                # Changes whenever any static file does. Keying it to the
@@ -101,7 +119,12 @@ def render(request: web.Request, template: str, status: int = 200, **ctx) -> web
                # query, so browsers went on serving the copy they had.
                asset_version=_asset_version())
     html = env.get_template(template).render(**ctx)
-    return web.Response(text=html, content_type="text/html", status=status)
+    resp = web.Response(text=html, content_type="text/html", status=status)
+    if store_theme:
+        resp.set_cookie(THEME_COOKIE, store_theme, max_age=365 * 86400, samesite="Lax", path="/")
+    elif store_theme == "":
+        resp.del_cookie(THEME_COOKIE, path="/")
+    return resp
 
 
 def not_found(request: web.Request, what: str = "Page") -> web.Response:
@@ -614,8 +637,10 @@ def _roster_redirect(season: dict, captain: str, notice: str):
 
 
 def _roster_target(request: web.Request, data) -> int:
-    """The account a roster form names: a pick from the list, or an id typed in."""
-    raw = (data.get("account_id") or data.get("player") or "").strip()
+    """The account a roster form names: an id typed in, or else a pick from
+    the list. Typing wins, since it's the way to name someone the list
+    doesn't know yet."""
+    raw = (data.get("player") or "").strip() or (data.get("account_id") or "").strip()
     account_id = account_id_from(raw)
     if not account_id:
         raise ValueError("Pick a player, or paste a Dota account id or Steam64 id.")
@@ -624,7 +649,8 @@ def _roster_target(request: web.Request, data) -> int:
 
 @routes.post("/season/{season_id}/{division}/team/{captain}/roster/replace")
 async def roster_replace(request: web.Request):
-    """Hand one player's slot to another, at the same price."""
+    """Hand one player's slot to another. The newcomer wasn't drafted, so
+    they join with no cost."""
     season = _season_or_404(request)
     _require_admin(request)
     captain = request.match_info["captain"]
@@ -632,13 +658,12 @@ async def roster_replace(request: web.Request):
     try:
         out_id = int(data["out"])
         in_id = _roster_target(request, data)
-        slot = db.replace_roster_player(season["id"], season["division_id"], out_id, in_id)
+        db.replace_roster_player(season["id"], season["division_id"], out_id, in_id)
     except (KeyError, ValueError) as e:
         raise _roster_redirect(season, captain, str(e) or "Couldn't read that.")
     names = store.player_identities([out_id, in_id])
     raise _roster_redirect(season, captain,
-                           f"{names[in_id]['name']} takes {names[out_id]['name']}'s "
-                           f"${slot['cost']} slot.")
+                           f"{names[in_id]['name'] or in_id} replaces {names[out_id]['name'] or out_id}.")
 
 
 @routes.post("/season/{season_id}/{division}/team/{captain}/roster/remove")
@@ -665,12 +690,14 @@ async def roster_add(request: web.Request):
     data = await request.post()
     try:
         account_id = _roster_target(request, data)
-        cost = int(re.sub(r"\D", "", data.get("cost", "")) or 0)
+        digits = re.sub(r"\D", "", data.get("cost", ""))
+        cost = int(digits) if digits else None
         db.add_roster_player(season["id"], season["division_id"], account_id, captain, cost)
     except ValueError as e:
         raise _roster_redirect(season, captain, str(e) or "Couldn't read that.")
-    name = store.player_identities([account_id])[account_id]["name"]
-    raise _roster_redirect(season, captain, f"{name} joins at ${cost}.")
+    name = store.player_identities([account_id])[account_id]["name"] or account_id
+    raise _roster_redirect(season, captain, f"{name} joins at ${cost}." if cost is not None
+                           else f"{name} joins with no cost.")
 
 
 @routes.post("/season/{season_id}/{division}/team/{captain}/name")
