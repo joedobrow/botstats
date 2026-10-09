@@ -74,7 +74,7 @@
     </div>
     <ul class="roster">
       <li><span>{% if t.captain_account_id %}{{ player_link(t.captain_account_id, idents[t.captain_account_id].name or t.captain) }}{% else %}{{ t.captain }}{% endif %} <span class="tag">C</span></span></li>
-      {% for p in t.roster|sort(attribute="cost", reverse=True) if p.account_id != t.captain_account_id %}
+      {% for p in t.roster if p.account_id != t.captain_account_id %}
       <li><span>{{ player_link(p.account_id, idents[p.account_id].name) }}</span>{% if p.cost %}<span class="muted">${{ p.cost }}</span>{% endif %}</li>
       {% endfor %}
     </ul>
