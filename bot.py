@@ -374,7 +374,7 @@ async def player(interaction: discord.Interaction, name: str, week: int = None, 
     # findable in /lookup is findable here.
     account_id, resolved_name, err = await _resolve_player_query(interaction, name)
     if err:
-        await interaction.followup.send(err, ephemeral=True)
+        await _send_resolve_error(interaction, err)
         return
 
     season_id, season_err = _resolve_season(interaction, season)
@@ -528,7 +528,7 @@ async def team_stats(interaction: discord.Interaction, name: str, season: str = 
 
     account_id, resolved_name, err = await _resolve_player_query(interaction, name)
     if err:
-        await interaction.followup.send(err, ephemeral=True)
+        await _send_resolve_error(interaction, err)
         return
 
     from db import get_player_costs, get_team_match_aggregates, get_captain_account_ids
@@ -630,7 +630,7 @@ async def player_card(interaction: discord.Interaction, name: str, season: str =
 
     account_id, resolved_name, err = await _resolve_player_query(interaction, name)
     if err:
-        await interaction.followup.send(err, ephemeral=True)
+        await _send_resolve_error(interaction, err)
         return
 
     from db import (
@@ -726,7 +726,7 @@ async def team_card(interaction: discord.Interaction, name: str, season: str = N
 
     account_id, resolved_name, err = await _resolve_player_query(interaction, name)
     if err:
-        await interaction.followup.send(err, ephemeral=True)
+        await _send_resolve_error(interaction, err)
         return
 
     from db import (
@@ -872,10 +872,10 @@ async def h2h_card(interaction: discord.Interaction, team1: str, team2: str, sea
 
     cap_a, err_a = await _resolve_to_captain(team1)
     if err_a:
-        await interaction.followup.send(err_a, ephemeral=True); return
+        await _send_resolve_error(interaction, err_a); return
     cap_b, err_b = await _resolve_to_captain(team2)
     if err_b:
-        await interaction.followup.send(err_b, ephemeral=True); return
+        await _send_resolve_error(interaction, err_b); return
     if cap_a == cap_b:
         await interaction.followup.send("⚠️ Same team on both sides.", ephemeral=True); return
 
@@ -981,10 +981,10 @@ async def h2h_player(interaction: discord.Interaction, player1: str, player2: st
 
     aid_a, resolved_a, err_a = await _resolve_player_query(interaction, player1)
     if err_a:
-        await interaction.followup.send(err_a, ephemeral=True); return
+        await _send_resolve_error(interaction, err_a); return
     aid_b, resolved_b, err_b = await _resolve_player_query(interaction, player2)
     if err_b:
-        await interaction.followup.send(err_b, ephemeral=True); return
+        await _send_resolve_error(interaction, err_b); return
     if aid_a == aid_b:
         await interaction.followup.send("⚠️ Same player on both sides.", ephemeral=True); return
 
@@ -1085,7 +1085,7 @@ async def lookup(interaction: discord.Interaction, query: str, force_refresh: bo
 
     account_id, player_name, err = await _resolve_player_query(interaction, query)
     if err:
-        await interaction.followup.send(err, ephemeral=True)
+        await _send_resolve_error(interaction, err)
         return
 
     # Cache-first: if we have a fresh cached row and the caller isn't in
@@ -1237,6 +1237,94 @@ def _group_rating_kwargs(account_id: int) -> dict:
     return {"group_rating": row["group_rating"], "group_note": row.get("group_explanation")}
 
 
+class _AmbiguousName(str):
+    """The "be more specific" message, carrying the picker that goes with it.
+
+    It subclasses str so a caller that just sends it still says something
+    sensible; callers that go through _send_resolve_error get a card per
+    candidate and a button to choose one.
+    """
+    embeds: list
+    view: "discord.ui.View | None"
+
+
+class _PickPlayerButton(discord.ui.Button):
+    """One candidate. Pressing it runs the command again with that account's
+    id in place of the name that was ambiguous."""
+
+    def __init__(self, account_id: int, name: str | None, command, params: dict, param: str):
+        super().__init__(label=(name or str(account_id))[:80], style=discord.ButtonStyle.secondary)
+        self.account_id, self.command, self.params, self.param = account_id, command, params, param
+
+    async def callback(self, interaction: discord.Interaction):
+        await self.command.callback(interaction, **{**self.params, self.param: str(self.account_id)})
+
+
+class _PlayerPicker(discord.ui.View):
+    """Who a name could have meant, as buttons."""
+
+    def __init__(self, user_id: int, command, params: dict, param: str,
+                 candidates: list[tuple[int, str]]):
+        super().__init__(timeout=180)
+        self.user_id = user_id
+        for aid, name in candidates:
+            self.add_item(_PickPlayerButton(aid, name, command, params, param))
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("Not your lookup — run it yourself.", ephemeral=True)
+            return False
+        return True
+
+
+def _player_card_embed(account_id: int, name: str | None) -> discord.Embed:
+    """A candidate at a glance: the name, the account id to paste back in,
+    their Steam picture, and the rating, which is usually what tells two
+    people with the same handle apart."""
+    from db import get_rating_cache_row, get_skill_override
+    row = get_rating_cache_row(account_id) or {}
+    override = get_skill_override(account_id) or {}
+    rating = row.get("group_rating") or row.get("internal_rating")
+    embed = discord.Embed(
+        title=name or f"#{account_id}",
+        description=f"`{account_id}`" + (f" · rating **{rating}**" if rating else ""),
+    )
+    if not (row.get("hide_avatar") or override.get("hide_avatar")):
+        if row.get("avatar_url"):
+            embed.set_thumbnail(url=row["avatar_url"])
+    return embed
+
+
+def _ambiguous(interaction: discord.Interaction, q: str,
+               candidates: list[tuple[int, str]]) -> _AmbiguousName:
+    """The answer when a name matches several people: one card each, and a
+    button per candidate when we can tell which option held the name."""
+    total = len(candidates)
+    candidates = candidates[:10]           # Discord sends at most 10 embeds
+    shown = f" — the first {len(candidates)} are below" if total > len(candidates) else ""
+    err = _AmbiguousName(f"`{q}` matches {total} players{shown}. Pick one, "
+                         f"or run it again with the account id.")
+    err.embeds = [_player_card_embed(aid, name) for aid, name in candidates]
+    err.view = None
+    # The button re-runs this same command, so it has to know which of its
+    # options the name came from; two options holding the same text resolve
+    # one at a time, which is the only way to tell them apart anyway.
+    params = dict(interaction.namespace)
+    param = next((k for k, v in params.items() if isinstance(v, str) and v.strip() == q), None)
+    if param and isinstance(interaction.command, app_commands.Command):
+        err.view = _PlayerPicker(interaction.user.id, interaction.command, params, param, candidates)
+    return err
+
+
+async def _send_resolve_error(interaction: discord.Interaction, err) -> None:
+    """Say why a name didn't resolve, with the picker when it was ambiguous."""
+    if isinstance(err, _AmbiguousName):
+        extra = {"view": err.view} if err.view is not None else {}
+        await interaction.followup.send(str(err), embeds=err.embeds, ephemeral=True, **extra)
+    else:
+        await interaction.followup.send(err, ephemeral=True)
+
+
 async def _resolve_player_query(interaction: discord.Interaction, q: str) -> tuple[int | None, str | None, str | None]:
     """Shared name-or-account-id resolver for /lookup, /set_skill, etc.
 
@@ -1312,8 +1400,19 @@ async def _resolve_player_query(interaction: discord.Interaction, q: str) -> tup
         if len(exact) == 1:
             unique = exact
         else:
-            names = ", ".join(f"`{n}`" for _, n in unique[:10])
-            return None, None, f"Multiple matches: {names}\nBe more specific."
+            # Accounts already linked as one person aren't a choice — asking
+            # which of poof's two accounts you meant is the same answer
+            # twice. Collapse to the main, which is where the stats live.
+            from db import alt_links
+            links = alt_links()
+            people: dict[int, tuple[int, str]] = {}
+            for aid, n in unique:
+                person = links.get(aid, aid)
+                if person not in people or aid == person:
+                    people[person] = (person, n)
+            unique = list(people.values())
+            if len(unique) > 1:
+                return None, None, _ambiguous(interaction, q, unique)
     return unique[0][0], unique[0][1], None
 
 
@@ -1359,7 +1458,7 @@ async def set_player(
 
     account_id, player_name, err = await _resolve_player_query(interaction, name)
     if err:
-        await interaction.followup.send(err, ephemeral=True)
+        await _send_resolve_error(interaction, err)
         return
 
     from db import (
