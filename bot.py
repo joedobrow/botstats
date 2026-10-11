@@ -1241,11 +1241,9 @@ class _AmbiguousName(str):
     """The "be more specific" message, carrying the picker that goes with it.
 
     It subclasses str so a caller that just sends it still says something
-    sensible; callers that go through _send_resolve_error get a card per
-    candidate and a button to choose one.
+    sensible; callers that go through _send_resolve_error get the cards.
     """
-    embeds: list
-    view: "discord.ui.View | None"
+    view: "discord.ui.LayoutView | None"
 
 
 class _PickPlayerButton(discord.ui.Button):
@@ -1262,19 +1260,53 @@ class _PickPlayerButton(discord.ui.Button):
         await self.command.callback(interaction, **{**self.params, self.param: str(self.account_id)})
 
 
-class _PlayerPicker(discord.ui.View):
-    """Who a name could have meant, as buttons."""
+def _player_card_text(account_id: int, name: str | None) -> tuple[str, str | None]:
+    """(what the card says, their Steam picture): the name, the account id to
+    paste back in, and the rating, which is usually what tells two people
+    with the same handle apart."""
+    from db import get_rating_cache_row, get_skill_override
+    row = get_rating_cache_row(account_id) or {}
+    override = get_skill_override(account_id) or {}
+    rating = row.get("group_rating") or row.get("internal_rating")
+    text = f"### {name or f'#{account_id}'}\n`{account_id}`" + (f" · rating **{rating}**" if rating else "")
+    hidden = row.get("hide_avatar") or override.get("hide_avatar")
+    return text, None if hidden else (row.get("avatar_url") or None)
 
-    def __init__(self, user_id: int, command, params: dict, param: str,
+
+# A card with a face and its own button costs six of the forty components
+# Discord allows in one message.
+MAX_PICKER_CARDS = 6
+
+
+class _PlayerPicker(discord.ui.LayoutView):
+    """Who a name could have meant, a card each.
+
+    Discord gives no way to make a card itself clickable, so every card
+    carries its own button instead of the buttons sitting in a row
+    underneath, where which one goes with which card is a guess.
+    """
+
+    def __init__(self, user_id: int, header: str, command, params: dict, param: str,
                  candidates: list[tuple[int, str]]):
         super().__init__(timeout=180)
         self.user_id = user_id
+        self.add_item(discord.ui.TextDisplay(header))
         # Two people really can share a handle, and two identical buttons are
         # no choice at all; those ones carry the account id as well.
         seen = [n for _, n in candidates]
         for aid, name in candidates:
             label = f"{name} · {aid}" if seen.count(name) > 1 else name
-            self.add_item(_PickPlayerButton(aid, name, command, params, param, label))
+            button = _PickPlayerButton(aid, name, command, params, param, label)
+            text, avatar = _player_card_text(aid, name)
+            card = discord.ui.Container(accent_colour=discord.Colour(0x9A2A1E))
+            if avatar:
+                card.add_item(discord.ui.Section(discord.ui.TextDisplay(text),
+                                                 accessory=discord.ui.Thumbnail(avatar)))
+                card.add_item(discord.ui.ActionRow(button))
+            else:
+                # Nobody's picture to sit beside it, so the button takes the slot.
+                card.add_item(discord.ui.Section(discord.ui.TextDisplay(text), accessory=button))
+            self.add_item(card)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.user_id:
@@ -1283,54 +1315,40 @@ class _PlayerPicker(discord.ui.View):
         return True
 
 
-def _player_card_embed(account_id: int, name: str | None) -> discord.Embed:
-    """A candidate at a glance: the name, the account id to paste back in,
-    their Steam picture, and the rating, which is usually what tells two
-    people with the same handle apart."""
-    from db import get_rating_cache_row, get_skill_override
-    row = get_rating_cache_row(account_id) or {}
-    override = get_skill_override(account_id) or {}
-    rating = row.get("group_rating") or row.get("internal_rating")
-    embed = discord.Embed(
-        title=name or f"#{account_id}",
-        description=f"`{account_id}`" + (f" · rating **{rating}**" if rating else ""),
-    )
-    if not (row.get("hide_avatar") or override.get("hide_avatar")):
-        if row.get("avatar_url"):
-            embed.set_thumbnail(url=row["avatar_url"])
-    return embed
-
-
 def _ambiguous(interaction: discord.Interaction, q: str,
                candidates: list[tuple[int, str]]) -> _AmbiguousName:
-    """The answer when a name matches several people: one card each, and a
-    button per candidate when we can tell which option held the name."""
+    """The answer when a name matches several people: a card each, with a
+    button on it, when we can tell which option held the name."""
     total = len(candidates)
-    candidates = candidates[:10]           # Discord sends at most 10 embeds
+    candidates = candidates[:MAX_PICKER_CARDS]
     shown = f" — the first {len(candidates)} are below" if total > len(candidates) else ""
-    err = _AmbiguousName(f"`{q}` matches {total} players{shown}. Pick one, "
-                         f"or run it again with the account id.")
-    err.embeds = [_player_card_embed(aid, name) for aid, name in candidates]
+    header = f"`{q}` matches {total} players{shown}. Pick one, or run it again with the account id."
+    # The plain-sentence version, for the callers that fold this into a longer
+    # message and so can't show cards at all.
+    listed = ", ".join(f"{n} `{a}`" for a, n in candidates)
+    err = _AmbiguousName(f"`{q}` matches {total} players ({listed}) — use the account id.")
     err.view = None
     # The button re-runs this same command, so it has to know which of its
     # options the name came from; two options holding the same text resolve
     # one at a time, which is the only way to tell them apart anyway.
+    #
     # Not dict(namespace): its __getattr__ answers None to everything, so
     # dict() finds a "keys" attribute and calls None. Iterating is the API.
     params = {k: v for k, v in interaction.namespace}
     param = next((k for k, v in params.items() if isinstance(v, str) and v.strip() == q), None)
     if param and isinstance(interaction.command, app_commands.Command):
-        err.view = _PlayerPicker(interaction.user.id, interaction.command, params, param, candidates)
+        err.view = _PlayerPicker(interaction.user.id, header, interaction.command,
+                                 params, param, candidates)
     return err
 
 
 async def _send_resolve_error(interaction: discord.Interaction, err) -> None:
-    """Say why a name didn't resolve, with the picker when it was ambiguous."""
-    if isinstance(err, _AmbiguousName):
-        extra = {"view": err.view} if err.view is not None else {}
-        await interaction.followup.send(str(err), embeds=err.embeds, ephemeral=True, **extra)
+    """Say why a name didn't resolve, with the cards when it was ambiguous."""
+    if isinstance(err, _AmbiguousName) and err.view is not None:
+        # A components-v2 message carries its words inside the view.
+        await interaction.followup.send(view=err.view, ephemeral=True)
     else:
-        await interaction.followup.send(err, ephemeral=True)
+        await interaction.followup.send(str(err), ephemeral=True)
 
 
 async def _resolve_player_query(interaction: discord.Interaction, q: str) -> tuple[int | None, str | None, str | None]:
