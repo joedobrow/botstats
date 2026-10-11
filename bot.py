@@ -1252,8 +1252,10 @@ class _PickPlayerButton(discord.ui.Button):
     """One candidate. Pressing it runs the command again with that account's
     id in place of the name that was ambiguous."""
 
-    def __init__(self, account_id: int, name: str | None, command, params: dict, param: str):
-        super().__init__(label=(name or str(account_id))[:80], style=discord.ButtonStyle.secondary)
+    def __init__(self, account_id: int, name: str | None, command, params: dict, param: str,
+                 label: str | None = None):
+        super().__init__(label=(label or name or str(account_id))[:80],
+                         style=discord.ButtonStyle.secondary)
         self.account_id, self.command, self.params, self.param = account_id, command, params, param
 
     async def callback(self, interaction: discord.Interaction):
@@ -1267,8 +1269,12 @@ class _PlayerPicker(discord.ui.View):
                  candidates: list[tuple[int, str]]):
         super().__init__(timeout=180)
         self.user_id = user_id
+        # Two people really can share a handle, and two identical buttons are
+        # no choice at all; those ones carry the account id as well.
+        seen = [n for _, n in candidates]
         for aid, name in candidates:
-            self.add_item(_PickPlayerButton(aid, name, command, params, param))
+            label = f"{name} · {aid}" if seen.count(name) > 1 else name
+            self.add_item(_PickPlayerButton(aid, name, command, params, param, label))
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.user_id:
