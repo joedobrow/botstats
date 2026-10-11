@@ -1315,7 +1315,9 @@ def _ambiguous(interaction: discord.Interaction, q: str,
     # The button re-runs this same command, so it has to know which of its
     # options the name came from; two options holding the same text resolve
     # one at a time, which is the only way to tell them apart anyway.
-    params = dict(interaction.namespace)
+    # Not dict(namespace): its __getattr__ answers None to everything, so
+    # dict() finds a "keys" attribute and calls None. Iterating is the API.
+    params = {k: v for k, v in interaction.namespace}
     param = next((k for k, v in params.items() if isinstance(v, str) and v.strip() == q), None)
     if param and isinstance(interaction.command, app_commands.Command):
         err.view = _PlayerPicker(interaction.user.id, interaction.command, params, param, candidates)
