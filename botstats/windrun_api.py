@@ -16,9 +16,11 @@ import aiohttp
 
 logger = logging.getLogger(__name__)
 
-BASE_URL = "https://api.windrun.io/api/v2"
-RATE_LIMIT_SECONDS = 5.0
-REQUEST_TIMEOUT = 90
+# One definition of how to talk to windrun, shared with the ratings client.
+# This module used to carry its own copy and quietly went without the
+# whitelisted User-Agent, so Cloudflare started answering the AD helper with a
+# bot challenge while the rest of the bot carried on fine. Import, don't copy.
+from windrun import BASE_URL, HEADERS, RATE_LIMIT_SECONDS, REQUEST_TIMEOUT
 
 _last_call_time = 0.0
 _rate_lock = asyncio.Lock()
@@ -59,7 +61,7 @@ async def fetch_ability_high_skill() -> Optional[list[dict]]:
     logger.info("Fetching windrun ability-high-skill")
 
     timeout = aiohttp.ClientTimeout(total=REQUEST_TIMEOUT)
-    async with aiohttp.ClientSession(timeout=timeout) as session:
+    async with aiohttp.ClientSession(timeout=timeout, headers=HEADERS) as session:
         data = await _rate_limited_get(session, url)
 
     if not data:
