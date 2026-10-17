@@ -60,7 +60,10 @@ async def _get_opendota_constants() -> dict:
         return _constants_cache
 
     timeout = aiohttp.ClientTimeout(total=30)
-    async with aiohttp.ClientSession(timeout=timeout) as session:
+    # Say who we are here too — an anonymous client is what got the windrun
+    # half of this page challenged by Cloudflare.
+    from windrun import HEADERS
+    async with aiohttp.ClientSession(timeout=timeout, headers=HEADERS) as session:
         ability_ids, abilities, heroes = await asyncio.gather(
             _fetch_json(session, f"{OPENDOTA_API}/ability_ids"),
             _fetch_json(session, f"{OPENDOTA_API}/abilities"),
