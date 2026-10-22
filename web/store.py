@@ -690,6 +690,59 @@ def champion_counts() -> dict[int, int]:
     return _champion_counts
 
 
+# The five voted awards, in the order they're announced, plus the All-AD
+# Team, which isn't voted — it's the top average fantasy points per position.
+AWARDS = [
+    ("breakout", "Breakout Player of the Season"),
+    ("support", "Support of the Season"),
+    ("core", "Core of the Season"),
+    ("leader", "Leader of the Season"),
+    ("mvp", "Most Valuable Player"),
+]
+ALL_AD_TEAM = "all_ad_team"
+AWARD_LABELS = dict(AWARDS) | {ALL_AD_TEAM: "All-AD Team"}
+
+
+def season_awards(season: dict) -> list[dict]:
+    """A season's awards in announcement order, each with its winners and the
+    write-up that announced it. Winners carry an avatar where we know one."""
+    rows = db.get_season_awards(season["id"], season["division_id"])
+    if not rows:
+        return []
+    idents = player_identities([r["account_id"] for r in rows if r["account_id"]])
+    by_award: dict[str, dict] = {}
+    for r in rows:
+        a = by_award.setdefault(r["award"], {
+            "key": r["award"], "label": AWARD_LABELS.get(r["award"], r["award"]),
+            "citation": r["citation"], "winners": [],
+        })
+        ident = idents.get(r["account_id"]) or {}
+        a["winners"].append({"account_id": r["account_id"], "position": r["position"],
+                             "name": ident.get("name") or r["name"],
+                             "avatar_url": ident.get("avatar_url")})
+    order = [k for k, _ in AWARDS] + [ALL_AD_TEAM]
+    return [by_award[k] for k in order if k in by_award]
+
+
+def set_season_award(season: dict, award: str, text: str, citation: str) -> int:
+    """Record one award from pasted text, the way champions are recorded.
+    Returns how many winners were stored; an empty paste clears the award."""
+    winners = resolve_champion_names(text)
+    db.set_season_award(season["id"], season["division_id"], award, winners,
+                        (citation or "").strip() or None)
+    return len(winners)
+
+
+def hall_of_fame() -> list[dict]:
+    """Every season that has a trophy or an award, newest first."""
+    out = []
+    for season in all_seasons():
+        won, awards = season_champions(season), season_awards(season)
+        if won or awards:
+            out.append({"season": season, "champions": won, "awards": awards})
+    return out
+
+
 def all_champions() -> list[dict]:
     """Every season that has been won, newest first, with its winners."""
     out = []

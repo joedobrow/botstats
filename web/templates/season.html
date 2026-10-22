@@ -240,6 +240,34 @@
       <div class="actions"><button class="primary">Save</button></div>
     </form>
   </section>
+
+  <section class="panel">
+    <h2>Awards</h2>
+    {% if awards %}
+    <ul class="recorded-awards">
+      {% for a in awards %}
+      <li><b>{{ a.label }}</b> — {% for w in a.winners %}{{ w.name }}{% if not loop.last %} · {% endif %}{% endfor %}</li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+    <form method="post" action="{{ season_url(season) }}/awards" class="form">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <label>Award
+        <select name="award">
+          {% for key, label in award_choices %}
+          <option value="{{ key }}">{{ label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Winner{{ "s" }}
+        <textarea name="winners" rows="2" placeholder="Paste the announcement, @names and all"></textarea>
+      </label>
+      <label>Write-up
+        <textarea name="citation" rows="5" placeholder="The paragraph that announced it"></textarea>
+      </label>
+      <div class="actions"><button class="primary">Save award</button></div>
+    </form>
+  </section>
   {% endif %}
 
 {% elif tab == "teams" %}

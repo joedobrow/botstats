@@ -708,3 +708,16 @@ a.tile:focus-visible { outline: 3px solid var(--accent); outline-offset: 4px; }
 /* Taking a game out, on the game's own page. */
 .match-admin { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: -4px 0 14px; }
 .match-admin input[type=text] { flex: 0 1 260px; }
+
+/* An award opens where it sits — no request, and it still works with the
+   page's scripts turned off. */
+.award { border-top: 1px solid var(--border); padding: 7px 0 0; margin-top: 8px; }
+.award > summary { cursor: pointer; display: flex; gap: 8px; align-items: baseline;
+                   flex-wrap: wrap; list-style: none; }
+.award > summary::-webkit-details-marker { display: none; }
+.award > summary::before { content: "▸"; color: var(--muted); font-size: .8em; }
+.award[open] > summary::before { content: "▾"; }
+.award-name { color: var(--link); font-size: .9rem; }
+.award-who { color: var(--muted); font-size: .82rem; margin-left: auto; }
+.award-body { padding: 6px 0 4px 14px; }
+.award-citation { margin: 6px 0 0; font-size: .88rem; white-space: pre-line; }
