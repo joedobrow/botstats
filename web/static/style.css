@@ -757,3 +757,19 @@ a.tile:focus-visible { outline: 3px solid var(--accent); outline-offset: 4px; }
        background: var(--muted); opacity: .4; }
 .dot.on { background: var(--win); opacity: 1; }
 .dot.off { background: var(--loss); opacity: .55; }
+
+/* The auction floor. */
+.lot { display: flex; align-items: center; justify-content: space-between; gap: 16px;
+       flex-wrap: wrap; margin: 6px 0 12px; }
+.lot-player { display: flex; align-items: center; gap: 9px; font-size: 1.15rem; font-weight: 600; }
+.lot-bid { font-size: 1.4rem; }
+.clock { font-variant-numeric: tabular-nums; color: var(--muted); font-size: .9rem; }
+.clock.soon { color: var(--loss); font-weight: 700; }
+.team-line { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px;
+             padding: 8px 14px; border-bottom: 1px solid var(--border); }
+.team-line:last-child { border-bottom: 0; }
+.team-line.up { background: var(--tag-bg); }
+.team-money { text-align: right; }
+.team-roster { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 4px 14px;
+               font-size: .85rem; }
+.team-roster .chip { gap: 4px; }

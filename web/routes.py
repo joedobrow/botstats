@@ -6,6 +6,7 @@ import csv
 import io
 import logging
 import os
+import random
 import re
 import time
 from datetime import datetime
@@ -1291,15 +1292,6 @@ async def admin_signup_level(request: web.Request):
 # The draft
 # ---------------------------------------------------------------------------
 
-async def _draft_push(season: dict) -> None:
-    """Tell the room what the lobby looks like now. One message carrying the
-    whole picture: it's small, and a client that reconnects gets the same
-    thing it would have got by listening the whole time."""
-    r = draft.room(season)
-    await r.broadcast({"type": "lobby",
-                       **draft.lobby(season, draft.state(season), r.present())})
-
-
 @routes.get("/season/{season_id}/{division}/draft")
 async def draft_page(request: web.Request):
     """The draft room. Before it starts, that's the lobby: who is captaining,
@@ -1307,10 +1299,11 @@ async def draft_page(request: web.Request):
     season = _season_or_404(request)
     st = draft.state(season)
     user = request.get("user")
+    me = (user or {}).get("account_id")
     return render(request, "draft.html", title=f"{season['label']} draft", season=season,
-                  lobby=draft.lobby(season, st, draft.room(season).present()),
-                  signups=store.list_signups(season),
-                  me=(user or {}).get("account_id"),
+                  view=draft.view(season, st, draft.room(season).present()),
+                  names=draft.names(season), me=me,
+                  my_teams=[c for c in st.order if draft.may_act_for(st, c, me)],
                   notice=request.query.get("notice"))
 
 
@@ -1325,13 +1318,16 @@ async def draft_ws(request: web.Request):
     user = request.get("user")
     r.join(ws, (user or {}).get("account_id"))
     try:
-        await _draft_push(season)
+        # A lot left open by a server that went away gets its clock back as
+        # soon as anybody looks at the room.
+        draft.start_clock(season)
+        await draft.push(season)
         async for msg in ws:
             if msg.type == web.WSMsgType.ERROR:
                 break
     finally:
         r.leave(ws)
-        await _draft_push(season)
+        await draft.push(season)
     return ws
 
 
@@ -1357,7 +1353,7 @@ async def draft_surrogate(request: web.Request):
     db.append_draft_event(season["id"], season["division_id"], "surrogate",
                           request["user"]["account_id"],
                           {"captain": captain_id, "surrogate": surrogate_id})
-    await _draft_push(season)
+    await draft.push(season)
     raise web.HTTPFound(back)
 
 
@@ -1375,10 +1371,74 @@ async def draft_start(request: web.Request):
     if not view["can_start"]:
         missing = ", ".join(view["missing"]) or "nobody is captaining this season"
         raise web.HTTPFound(back + "?" + urlencode({"notice": f"Still waiting on {missing}."}))
+    order = [c["account_id"] for c in draft.captains(season)]
+    random.shuffle(order)                    # recorded, so the replay keeps it
     db.append_draft_event(season["id"], season["division_id"], "start",
-                          request["user"]["account_id"])
-    await _draft_push(season)
+                          request["user"]["account_id"], {"order": order})
+    await draft.push(season)
     raise web.HTTPFound(back)
+
+
+@routes.post("/season/{season_id}/{division}/draft/rules")
+async def draft_rules(request: web.Request):
+    """What the auction is played with. Only before it starts — changing the
+    budget halfway through would rewrite what every bid so far meant."""
+    season = _season_or_404(request)
+    _require_admin(request)
+    data = await request.post()
+    back = season_url(season) + "/draft"
+    if draft.state(season).phase != draft.LOBBY:
+        raise web.HTTPFound(back + "?" + urlencode({"notice": "The draft has already started."}))
+    rules = {}
+    for key, low, high in (("budget", 1, 1_000_000), ("slots", 1, 10),
+                           ("min_bid", 1, 1000), ("bid_seconds", 3, 300)):
+        raw = re.sub(r"\D", "", data.get(key, ""))
+        if not raw or not low <= int(raw) <= high:
+            raise web.HTTPFound(back + "?" + urlencode(
+                {"notice": f"{key.replace('_', ' ')} has to be a number between {low} and {high}."}))
+        rules[key] = int(raw)
+    db.append_draft_event(season["id"], season["division_id"], "rules",
+                          request["user"]["account_id"], {"rules": rules})
+    await draft.push(season)
+    raise web.HTTPFound(back)
+
+
+async def _draft_action(request: web.Request, run) -> web.Response:
+    """Every change to a draft goes through here: one at a time, re-read
+    from the log, and the room told afterwards."""
+    season = _season_or_404(request)
+    user = request.get("user")
+    if not user:
+        raise web.HTTPForbidden(text="Sign in first.")
+    data = await request.post()
+    try:
+        async with draft.lock(season):
+            run(season, draft.state(season), user, data)
+    except draft.Refused as e:
+        return web.json_response({"ok": False, "why": str(e)}, status=409)
+    draft.start_clock(season)
+    await draft.push(season)
+    return web.json_response({"ok": True})
+
+
+@routes.post("/season/{season_id}/{division}/draft/nominate")
+async def draft_nominate(request: web.Request):
+    def run(season, st, user, data):
+        draft.nominate(season, st, actor=user["account_id"],
+                       is_admin=bool(request.get("is_admin")),
+                       player=int(data.get("player") or 0),
+                       amount=int(re.sub(r"\D", "", data.get("amount", "")) or 0))
+    return await _draft_action(request, run)
+
+
+@routes.post("/season/{season_id}/{division}/draft/bid")
+async def draft_bid(request: web.Request):
+    def run(season, st, user, data):
+        draft.bid(season, st, actor=user["account_id"],
+                  is_admin=bool(request.get("is_admin")),
+                  captain=int(data.get("captain") or 0),
+                  amount=int(re.sub(r"\D", "", data.get("amount", "")) or 0))
+    return await _draft_action(request, run)
 
 
 # ---------------------------------------------------------------------------
