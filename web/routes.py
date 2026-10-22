@@ -819,14 +819,37 @@ async def match_delete(request: web.Request):
     raise web.HTTPFound(team_url(season, captain) + "?" + urlencode({"notice": notice}))
 
 
+@routes.post("/matches/{match_id}/exclude")
+async def match_exclude(request: web.Request):
+    """Take a game out from its own page.
+
+    The team page has a button for this too, but it can only reach games it
+    can put a team to. A ticketed inhouse belongs to nobody, so that button
+    never appears for the games most likely to need it.
+    """
+    _require_admin(request)
+    match_id = int(request.match_info["match_id"])
+    form = await request.post()
+    reason = (form.get("reason") or "").strip()[:200] or None
+    done = db.set_match_excluded(match_id, True, reason=reason,
+                                 by=request["user"]["account_id"])
+    notice = (f"Game {match_id} no longer counts — records, stats and matchups all skip it, "
+              f"and re-fetching the league won't bring it back."
+              if done else f"No game {match_id}.")
+    raise web.HTTPFound(_safe_next(form.get("next")) + "?" + urlencode({"notice": notice}))
+
+
 @routes.post("/matches/{match_id}/restore")
 async def match_restore(request: web.Request):
     """Put an excluded game back."""
     _require_admin(request)
     match_id = int(request.match_info["match_id"])
+    back = (await request.post()).get("next")
     db.set_match_excluded(match_id, False)
-    raise web.HTTPFound("/matches?" + urlencode({"kind": "excluded",
-                                                 "notice": f"Game {match_id} counts again."}))
+    notice = f"Game {match_id} counts again."
+    if back:
+        raise web.HTTPFound(_safe_next(back) + "?" + urlencode({"notice": notice}))
+    raise web.HTTPFound("/matches?" + urlencode({"kind": "excluded", "notice": notice}))
 
 
 @routes.post("/season/{season_id}/{division}/team/{captain}/match/add")
@@ -1126,7 +1149,7 @@ async def match_page(request: web.Request):
         m = None
     if not m:
         return not_found(request, "Match")
-    return render(request, "match.html", title=f"Match {m['match_id']}", m=m)
+    return render(request, "match.html", title=f"Match {m['match_id']}", m=m, q=request.query)
 
 
 # ---------------------------------------------------------------------------

@@ -698,3 +698,7 @@ a.tile:focus-visible { outline: 3px solid var(--accent); outline-offset: 4px; }
 @media (max-width: 600px) {
   .tiles.big { grid-template-columns: 1fr; }
 }
+
+/* Taking a game out, on the game's own page. */
+.match-admin { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: -4px 0 14px; }
+.match-admin input[type=text] { flex: 0 1 260px; }
