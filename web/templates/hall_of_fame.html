@@ -7,7 +7,8 @@
 <section class="hof">
   <header class="hof-head">
     <h2>{% if s.champions %}🏆 {{ s.champions.team or "Champions" }}{% else %}{{ s.season.label }}{% endif %}</h2>
-    <span class="muted small">{{ s.season.division }} · <a href="{{ season_url(s.season) }}">{{ s.season.label }}</a></span>
+    <span class="muted small">{{ s.season.division }} · <a href="{{ season_url(s.season) }}">{{ s.season.label }}</a>
+      {%- if is_admin %} · <a href="{{ season_url(s.season) }}?tab=champions">Edit</a>{% endif %}</span>
   </header>
   {% if s.champions %}
   <ul class="chips">
