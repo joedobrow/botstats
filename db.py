@@ -11,6 +11,7 @@ We derive "week" from the match start_time at query time so we never have to
 update rows when weeks change.
 """
 
+import json
 import sqlite3
 import os
 import logging
@@ -167,10 +168,25 @@ CREATE TABLE IF NOT EXISTS season_awards (
 )
 """
 
+DRAFT_EVENTS_TABLE = """
+CREATE TABLE IF NOT EXISTS draft_events (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    season_id   INTEGER NOT NULL REFERENCES seasons(id),
+    division_id INTEGER NOT NULL REFERENCES divisions(id),
+    at          TEXT NOT NULL,          -- ISO timestamp, for reading back
+    kind        TEXT NOT NULL,          -- open / surrogate / start / nominate / bid / sold / undo / commit
+    actor       INTEGER,                -- the account that caused it; NULL for the server
+    payload     TEXT NOT NULL DEFAULT '{}'
+)
+"""
+DRAFT_EVENTS_INDEX = (
+    "CREATE INDEX IF NOT EXISTS idx_draft_events ON draft_events(season_id, division_id, id)"
+)
+
 
 # Bumped by each structural migration in _MIGRATIONS; stored in the database
 # as PRAGMA user_version so every migration runs exactly once, in order.
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 
 def init_db():
@@ -367,6 +383,9 @@ def init_db():
             {DRAFTS_TABLE};
 
             {AWARDS_TABLE};
+
+            {DRAFT_EVENTS_TABLE};
+            {DRAFT_EVENTS_INDEX};
 
             CREATE INDEX IF NOT EXISTS idx_players_match   ON players(match_id);
             CREATE INDEX IF NOT EXISTS idx_players_account ON players(account_id);
@@ -1142,8 +1161,23 @@ def _add_season_awards(conn: sqlite3.Connection) -> None:
         raise
 
 
+def _add_draft_events(conn: sqlite3.Connection) -> None:
+    """Migration 6: the auction draft's event log (draft_events)."""
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute(DRAFT_EVENTS_TABLE)
+        conn.execute(DRAFT_EVENTS_INDEX)
+        conn.execute("PRAGMA user_version = 6")
+        conn.execute("COMMIT")
+        logger.info("Migration 6: added draft_events")
+    except Exception:
+        if conn.in_transaction:
+            conn.execute("ROLLBACK")
+        raise
+
+
 _MIGRATIONS = [_migrate_seasons_to_ids, _migrate_to_divisions, _add_match_drafts,
-               _player_cost_nullable, _add_season_awards]
+               _player_cost_nullable, _add_season_awards, _add_draft_events]
 
 
 def _migrate_ranked_mmr_overrides_to_rank():
@@ -4009,6 +4043,41 @@ def get_match_draft(match_id: int) -> dict[int, list[int]]:
     for r in rows:
         out.setdefault(r["account_id"], []).append(r["ability_id"])
     return {aid: sorted(ids, key=lambda i: i >= 0) for aid, ids in out.items()}  # model first, stable
+
+
+def append_draft_event(season_id: int, division_id: int, kind: str,
+                       actor: int | None, payload: dict | None = None) -> int:
+    """Add one thing that happened to a draft, and return its id.
+
+    The log is the draft. Every other view of it — whose turn, what a team
+    has left to spend, who is on it — is replayed from these rows, so a
+    crash, a redeploy or a captain's laptop lid closing loses nothing.
+    Nothing here is ever updated or deleted; an undo is its own event.
+    """
+    with _conn() as conn:
+        cur = conn.execute(
+            "INSERT INTO draft_events (season_id, division_id, at, kind, actor, payload) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (season_id, division_id, datetime.now(timezone.utc).isoformat(), kind, actor,
+             json.dumps(payload or {})))
+    return cur.lastrowid
+
+
+def get_draft_events(season_id: int, division_id: int, after_id: int = 0) -> list[dict]:
+    """A draft's events in the order they happened, with payloads parsed."""
+    with _conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM draft_events WHERE season_id = ? AND division_id = ? AND id > ? "
+            "ORDER BY id", (season_id, division_id, after_id)).fetchall()
+    out = []
+    for r in rows:
+        e = dict(r)
+        try:
+            e["payload"] = json.loads(e["payload"] or "{}")
+        except ValueError:
+            e["payload"] = {}
+        out.append(e)
+    return out
 
 
 def get_season_awards(season_id: int, division_id: int) -> list[dict]:

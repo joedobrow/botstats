@@ -32,6 +32,9 @@ SESSION_DAYS = 30
 SEASON_STATUSES = {
     "upcoming": "Upcoming",
     "signups": "Signups open",
+    # Signups are shut and the draft hasn't happened: admins are settling who
+    # captains and who is only standing in.
+    "drafting": "Drafting",
     "active": "Active",
     "completed": "Completed",
 }
