@@ -1,46 +1,37 @@
 {% extends "base.html" %}
-{% from "macros.html" import player_link %}
+{% from "macros.html" import player_link, winner_chip %}
 {% block content %}
 <h1>Hall of Fame</h1>
 {% if seasons %}
-<div class="cards">
 {% for s in seasons %}
-  <section class="card champions">
-    <div class="muted small">{{ s.season.division }} · <a href="{{ season_url(s.season) }}">{{ s.season.label }}</a></div>
-    {% if s.champions %}
-    <h3 class="flush">🏆 {% if s.champions.team %}{{ s.champions.team }}{% else %}Champions{% endif %}</h3>
-    <ul class="champion-list">
-      {% for m in s.champions.members %}
-      <li>
-        {% if m.avatar_url %}<img class="avatar" src="{{ m.avatar_url }}" alt="">{% endif %}
-        {% if m.account_id %}{{ player_link(m.account_id, m.name) }}{% else %}{{ m.name }}{% endif %}
-      </li>
-      {% endfor %}
-    </ul>
-    {% endif %}
-    {% for a in s.awards %}
-    <details class="award">
-      <summary>
-        <span class="award-name">{{ a.label }}</span>
-        <span class="award-who">{% for w in a.winners %}{{ w.name }}{% if not loop.last %} · {% endif %}{% endfor %}</span>
-      </summary>
-      <div class="award-body">
-        <ul class="champion-list">
-          {% for w in a.winners %}
-          <li>
-            {% if w.avatar_url %}<img class="avatar" src="{{ w.avatar_url }}" alt="">{% endif %}
-            {% if a.key == "all_ad_team" %}<span class="muted small">Pos {{ w.position }}</span> {% endif %}
-            {% if w.account_id %}{{ player_link(w.account_id, w.name) }}{% else %}{{ w.name }}{% endif %}
-          </li>
-          {% endfor %}
-        </ul>
-        {% if a.citation %}<p class="award-citation">{{ a.citation }}</p>{% endif %}
-      </div>
-    </details>
-    {% endfor %}
-  </section>
+<section class="hof">
+  <header class="hof-head">
+    <h2>{% if s.champions %}🏆 {{ s.champions.team or "Champions" }}{% else %}{{ s.season.label }}{% endif %}</h2>
+    <span class="muted small">{{ s.season.division }} · <a href="{{ season_url(s.season) }}">{{ s.season.label }}</a></span>
+  </header>
+  {% if s.champions %}
+  <ul class="chips">
+    {% for m in s.champions.members %}<li>{{ winner_chip(m) }}</li>{% endfor %}
+  </ul>
+  {% endif %}
+  {% for a in s.awards %}
+  <details class="award">
+    <summary>
+      <span class="award-name">{{ a.label }}</span>
+      <span class="award-who">{% for w in a.winners %}{{ winner_chip(w) }}{% endfor %}</span>
+    </summary>
+    <div class="award-body">
+      {% if a.key == "all_ad_team" %}
+      <ul class="chips positions">
+        {% for w in a.winners %}<li><span class="muted small">Pos {{ w.position }}</span> {{ winner_chip(w) }}</li>{% endfor %}
+      </ul>
+      {% endif %}
+      {% if a.citation %}<p class="award-citation">{{ a.citation }}</p>{% endif %}
+    </div>
+  </details>
+  {% endfor %}
+</section>
 {% endfor %}
-</div>
 {% else %}
 <p class="muted">No season has been won yet.</p>
 {% endif %}

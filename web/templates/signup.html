@@ -36,16 +36,12 @@
     {% endfor %}
   </fieldset>
 
-  <label>MMR <span class="muted small">(optional, shown publicly)</span>
-    <input type="number" name="mmr" min="0" max="20000" value="{{ form.mmr or '' }}">
-  </label>
-
-  <label>Discord name <span class="muted small">(only admins see this)</span>
+  <label>Discord name <span class="muted small">(shown publicly)</span>
     <input type="text" name="discord" maxlength="64" required value="{{ form.discord or '' }}">
   </label>
 
-  <label>About you <span class="muted small">(optional, shown publicly, up to 1000 characters)</span>
-    <textarea name="statement" maxlength="1000" rows="4" placeholder="Heroes you like, when you can play, anything captains should know">{{ form.statement or '' }}</textarea>
+  <label>Comment
+    <textarea name="statement" maxlength="1000" rows="4" placeholder="Anything captains should know">{{ form.statement or '' }}</textarea>
   </label>
 
   <div class="actions">

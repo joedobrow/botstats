@@ -709,15 +709,40 @@ a.tile:focus-visible { outline: 3px solid var(--accent); outline-offset: 4px; }
 .match-admin { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: -4px 0 14px; }
 .match-admin input[type=text] { flex: 0 1 260px; }
 
+
+/* Hall of Fame: a season is a block, not a card in a grid — the awards need
+   the width, and at 240px everything wrapped onto two lines. */
+.hof { background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+       padding: 14px 18px 6px; margin-bottom: 16px; }
+.hof-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
+            flex-wrap: wrap; }
+.hof-head h2 { margin: 0; font-size: 1.05rem; }
+.chips { list-style: none; display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 8px 0 12px; padding: 0; }
+.chips li { display: flex; align-items: center; gap: 6px; }
+.chip { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.chips.positions { gap: 6px 20px; }
+
 /* An award opens where it sits — no request, and it still works with the
-   page's scripts turned off. */
-.award { border-top: 1px solid var(--border); padding: 7px 0 0; margin-top: 8px; }
-.award > summary { cursor: pointer; display: flex; gap: 8px; align-items: baseline;
-                   flex-wrap: wrap; list-style: none; }
+   page's scripts turned off. Name left, winners right, and they stack
+   rather than wrap mid-name when there isn't room for both. */
+.award { border-top: 1px solid var(--border); }
+.award > summary { cursor: pointer; list-style: none; display: grid; gap: 2px 12px;
+                   grid-template-columns: minmax(0, 1fr) auto; align-items: center;
+                   padding: 8px 0; }
 .award > summary::-webkit-details-marker { display: none; }
-.award > summary::before { content: "▸"; color: var(--muted); font-size: .8em; }
-.award[open] > summary::before { content: "▾"; }
 .award-name { color: var(--link); font-size: .9rem; }
-.award-who { color: var(--muted); font-size: .82rem; margin-left: auto; }
-.award-body { padding: 6px 0 4px 14px; }
-.award-citation { margin: 6px 0 0; font-size: .88rem; white-space: pre-line; }
+.award-name::before { content: "▸ "; color: var(--muted); font-size: .85em; }
+.award[open] .award-name::before { content: "▾ "; }
+.award-who { display: flex; flex-wrap: wrap; gap: 4px 14px; justify-content: flex-end;
+             font-size: .85rem; }
+.award-body { padding: 0 0 10px 14px; }
+.award-citation { margin: 4px 0 0; font-size: .88rem; white-space: pre-line; max-width: 62ch; }
+
+@media (max-width: 620px) {
+  .award > summary { grid-template-columns: 1fr; }
+  .award-who { justify-content: flex-start; }
+}
+
+/* A Discord name is how people actually reach each other, so it reads as a
+   name rather than a link to nowhere. */
+.discord::before { content: "\0040"; color: var(--muted); }
