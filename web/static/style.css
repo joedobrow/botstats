@@ -746,3 +746,14 @@ a.tile:focus-visible { outline: 3px solid var(--accent); outline-offset: 4px; }
 /* A Discord name is how people actually reach each other, so it reads as a
    name rather than a link to nowhere. */
 .discord::before { content: "\0040"; color: var(--muted); }
+
+/* The draft lobby: a seat per captain, lit when someone is in it. */
+.seats { list-style: none; margin: 10px 0 0; padding: 0; }
+.seats li { display: flex; align-items: center; gap: 9px; padding: 6px 0;
+            border-top: 1px solid var(--border); }
+.seats li:first-child { border-top: 0; }
+.seats .seat-note { margin-left: auto; }
+.dot { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto;
+       background: var(--muted); opacity: .4; }
+.dot.on { background: var(--win); opacity: 1; }
+.dot.off { background: var(--loss); opacity: .55; }

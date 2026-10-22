@@ -19,7 +19,7 @@ from markupsafe import Markup
 import db
 from config import GAME_MODE_FILTERS, LEAGUE_TZ, REGION_CLUSTERS, STEAM_API_KEY
 from player_api import account_id_from
-from web import markup, steam, store, uploads
+from web import draft, markup, steam, store, uploads
 
 TEMPLATE_DIR = Path(__file__).parent / "templates"
 STATIC_DIR = Path(__file__).parent / "static"
@@ -368,7 +368,8 @@ async def season_any_division(request: web.Request):
 async def season_page(request: web.Request):
     season = _season_or_404(request)
     tab = request.query.get("tab", "matchups")
-    ctx: dict = {"season": season, "tab": tab, "title": season["label"]}
+    ctx: dict = {"season": season, "tab": tab, "title": season["label"],
+                 "draft_started": draft.state(season).phase != draft.LOBBY}
     if tab == "playoffs":
         ctx["bracket"] = store.playoff_bracket(season)
         ctx["standings"] = store.season_teams(season)
@@ -1284,6 +1285,100 @@ async def admin_signup_level(request: web.Request):
     level = data.get("level") or None
     store.set_signup_level(season, int(data["account_id"]), level)
     raise web.HTTPFound(season_url(season) + "?tab=signups")
+
+
+# ---------------------------------------------------------------------------
+# The draft
+# ---------------------------------------------------------------------------
+
+async def _draft_push(season: dict) -> None:
+    """Tell the room what the lobby looks like now. One message carrying the
+    whole picture: it's small, and a client that reconnects gets the same
+    thing it would have got by listening the whole time."""
+    r = draft.room(season)
+    await r.broadcast({"type": "lobby",
+                       **draft.lobby(season, draft.state(season), r.present())})
+
+
+@routes.get("/season/{season_id}/{division}/draft")
+async def draft_page(request: web.Request):
+    """The draft room. Before it starts, that's the lobby: who is captaining,
+    who is actually here, and who is sitting in for whom."""
+    season = _season_or_404(request)
+    st = draft.state(season)
+    user = request.get("user")
+    return render(request, "draft.html", title=f"{season['label']} draft", season=season,
+                  lobby=draft.lobby(season, st, draft.room(season).present()),
+                  signups=store.list_signups(season),
+                  me=(user or {}).get("account_id"),
+                  notice=request.query.get("notice"))
+
+
+@routes.get("/season/{season_id}/{division}/draft/ws")
+async def draft_ws(request: web.Request):
+    """One socket per watcher. The server says what the room looks like; the
+    client never says what it thinks is true."""
+    season = _season_or_404(request)
+    ws = web.WebSocketResponse(heartbeat=25)
+    await ws.prepare(request)
+    r = draft.room(season)
+    user = request.get("user")
+    r.join(ws, (user or {}).get("account_id"))
+    try:
+        await _draft_push(season)
+        async for msg in ws:
+            if msg.type == web.WSMsgType.ERROR:
+                break
+    finally:
+        r.leave(ws)
+        await _draft_push(season)
+    return ws
+
+
+@routes.post("/season/{season_id}/{division}/draft/surrogate")
+async def draft_surrogate(request: web.Request):
+    """Put someone else in a captain's seat, or take them out of it. Allowed
+    mid-draft: the reason this exists is that someone's power went out."""
+    season = _season_or_404(request)
+    _require_admin(request)
+    data = await request.post()
+    back = season_url(season) + "/draft"
+    captain_id = int(data.get("captain") or 0)
+    if not any(c["account_id"] == captain_id for c in draft.captains(season)):
+        raise web.HTTPFound(back + "?" + urlencode({"notice": "That isn't a captain this season."}))
+    who = (data.get("surrogate") or "").strip()
+    surrogate_id = None
+    if who:
+        matched = store.resolve_champion_names("@" + who)
+        surrogate_id = matched[0]["account_id"] if matched else None
+        if surrogate_id is None:
+            raise web.HTTPFound(back + "?" + urlencode(
+                {"notice": f"No player here matches “{who}”. An account id always works."}))
+    db.append_draft_event(season["id"], season["division_id"], "surrogate",
+                          request["user"]["account_id"],
+                          {"captain": captain_id, "surrogate": surrogate_id})
+    await _draft_push(season)
+    raise web.HTTPFound(back)
+
+
+@routes.post("/season/{season_id}/{division}/draft/start")
+async def draft_start(request: web.Request):
+    """Begin. Refused while any captain's seat is empty — the check is the
+    same one that decides whether a bid is allowed, so the two can't drift."""
+    season = _season_or_404(request)
+    _require_admin(request)
+    st = draft.state(season)
+    back = season_url(season) + "/draft"
+    if st.phase != draft.LOBBY:
+        raise web.HTTPFound(back + "?" + urlencode({"notice": "The draft has already started."}))
+    view = draft.lobby(season, st, draft.room(season).present())
+    if not view["can_start"]:
+        missing = ", ".join(view["missing"]) or "nobody is captaining this season"
+        raise web.HTTPFound(back + "?" + urlencode({"notice": f"Still waiting on {missing}."}))
+    db.append_draft_event(season["id"], season["division_id"], "start",
+                          request["user"]["account_id"])
+    await _draft_push(season)
+    raise web.HTTPFound(back)
 
 
 # ---------------------------------------------------------------------------

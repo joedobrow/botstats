@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% from "macros.html" import player_link %}
+{% block content %}
+<p class="small"><a href="{{ season_url(season) }}">← {{ season.label }}</a></p>
+<div class="page-head">
+  <h1>Draft</h1>
+  <span class="tag" id="phase">{{ "Waiting for captains" if lobby.phase == "lobby" else ("Running" if lobby.phase == "running" else "Done") }}</span>
+</div>
+{% if notice %}<p class="notice">{{ notice }}</p>{% endif %}
+
+<section class="panel">
+  <h2 class="with-action">Captains <span class="muted small" id="seated"></span></h2>
+  {% if lobby.captains %}
+  <ul class="seats" id="seats">
+    {% for c in lobby.captains %}
+    <li data-captain="{{ c.account_id }}">
+      <span class="dot {{ 'on' if c.seated else 'off' }}"></span>
+      {% if c.avatar_url %}<img class="avatar" src="{{ c.avatar_url }}" alt="">{% endif %}
+      {{ player_link(c.account_id, c.name) }}
+      <span class="seat-note muted small"></span>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="muted">Nobody is set as a captain yet — set them on the
+    <a href="{{ season_url(season) }}?tab=signups">signups tab</a>.</p>
+  {% endif %}
+</section>
+
+{% if is_admin and lobby.phase == "lobby" %}
+<section class="panel">
+  <h2>Start</h2>
+  <form method="post" action="{{ season_url(season) }}/draft/start">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <button class="primary" id="start"{% if not lobby.can_start %} disabled{% endif %}>Start the draft</button>
+    <span class="muted small" id="blocked"></span>
+  </form>
+</section>
+
+<section class="panel">
+  <h2>Sit someone in</h2>
+  <form method="post" action="{{ season_url(season) }}/draft/surrogate" class="form">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label>Captain
+      <select name="captain">
+        {% for c in lobby.captains %}
+        <option value="{{ c.account_id }}">{{ c.name }}{% if c.surrogate %} (currently seated by someone else){% endif %}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Drafting for them <span class="muted small">(name or account id — blank to undo)</span>
+      <input type="text" name="surrogate">
+    </label>
+    <div class="actions"><button class="primary">Save</button></div>
+  </form>
+</section>
+{% endif %}
+
+<script>
+(() => {
+  const seats = document.getElementById("seats");
+  if (!seats) return;
+  const seated = document.getElementById("seated");
+  const start = document.getElementById("start");
+  const blocked = document.getElementById("blocked");
+  const phase = document.getElementById("phase");
+  const PHASES = {lobby: "Waiting for captains", running: "Running", done: "Done"};
+
+  function paint(view) {
+    const here = view.captains.filter(c => c.seated).length;
+    seated.textContent = here + " of " + view.captains.length + " here";
+    phase.textContent = PHASES[view.phase] || view.phase;
+    view.captains.forEach(c => {
+      const li = seats.querySelector('[data-captain="' + c.account_id + '"]');
+      if (!li) return;
+      li.querySelector(".dot").className = "dot " + (c.seated ? "on" : "off");
+      const note = li.querySelector(".seat-note");
+      note.textContent = c.surrogate
+        ? (c.surrogate_present ? "seat filled for them" : "someone is sitting in, but isn't here")
+        : (c.present ? "" : "not here");
+    });
+    if (start) {
+      start.disabled = !view.can_start;
+      blocked.textContent = view.can_start ? "" : ("waiting on " + view.missing.join(", "));
+    }
+  }
+
+  // The server says what is true; this only ever draws it. A dropped socket
+  // reconnects and asks for the whole picture again rather than guessing.
+  let wait = 1000;
+  function connect() {
+    const url = (location.protocol === "https:" ? "wss://" : "ws://") + location.host + location.pathname + "/ws";
+    const ws = new WebSocket(url);
+    ws.onopen = () => { wait = 1000; };
+    ws.onmessage = e => {
+      const msg = JSON.parse(e.data);
+      if (msg.type === "lobby") paint(msg);
+    };
+    ws.onclose = () => { setTimeout(connect, wait); wait = Math.min(wait * 2, 15000); };
+    ws.onerror = () => ws.close();
+  }
+  connect();
+})();
+</script>
+{% endblock %}
