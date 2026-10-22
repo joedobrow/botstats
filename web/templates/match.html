@@ -9,6 +9,20 @@
   <a href="https://www.dotabuff.com/matches/{{ m.match_id }}" rel="noopener">Dotabuff</a> ·
   <a href="https://www.opendota.com/matches/{{ m.match_id }}" rel="noopener">OpenDota</a>
 </p>
+{% if q.get('notice') %}<p class="notice">{{ q.get('notice') }}</p>{% endif %}
+{% if is_admin %}
+<form method="post" class="match-admin" action="/matches/{{ m.match_id }}/{{ 'restore' if m.excluded else 'exclude' }}">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <input type="hidden" name="next" value="/match/{{ m.match_id }}">
+  {% if m.excluded %}
+  <span class="tag">Taken out{% if m.excluded_reason %} · {{ m.excluded_reason }}{% endif %}</span>
+  <button class="linklike">Restore</button>
+  {% else %}
+  <input type="text" name="reason" maxlength="200" placeholder="Why it shouldn't count">
+  <button class="linklike">Take out</button>
+  {% endif %}
+</form>
+{% endif %}
 {% for side in ("radiant", "dire") %}
   {% set team = m[side ~ "_team"] %}
   {% set won = (m.radiant_win and side == "radiant") or (not m.radiant_win and side == "dire") %}
