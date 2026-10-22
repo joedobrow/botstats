@@ -115,6 +115,28 @@
     $("pool-count").textContent = v.pool.length ? v.pool.length + " left" : "";
   }
 
+  function drawUndo(v) {
+    const row = $("undo-row");
+    if (!row) return;
+    row.hidden = !(ADMIN && v.phase === "running" && v.undoable);
+    if (!row.hidden) $("undo-what").textContent = v.undoable;
+  }
+
+  function drawCommit(v) {
+    const panel = $("commit-panel");
+    if (!panel) return;
+    panel.hidden = !(ADMIN && v.done && v.phase === "running");
+    if (!panel.hidden) {
+      const n = v.teams.reduce((a, t) => a + t.roster.length, 0);
+      $("commit-note").textContent = v.teams.length + " teams, " + n + " players drafted.";
+    }
+    if (v.phase === "done") {
+      const note = $("commit-note");
+      if (note) { panel.hidden = false; $("commit-form").hidden = true;
+                  note.textContent = "Written into the season."; }
+    }
+  }
+
   function paint(v) {
     view = v;
     $("phase").textContent = PHASES[v.phase] || v.phase;
@@ -124,6 +146,8 @@
     drawLot(v);
     drawTurn(v);
     drawTeams(v);
+    drawUndo(v);
+    drawCommit(v);
     closesAt = v.lot ? Date.now() + v.lot.closes_in * 1000 : 0;
     tick();
     if (v.stuck) say("Nobody is left to nominate and rosters aren't full — add more signups.");
@@ -141,6 +165,10 @@
   document.addEventListener("click", e => {
     const bid = e.target.closest("[data-bid]");
     if (bid && view.lot) send("/bid", {captain: bid.dataset.bid, amount: view.lot.bid + 1});
+  });
+  const undoBtn = $("undo");
+  if (undoBtn) undoBtn.addEventListener("click", () => {
+    if (confirm("Take back " + $("undo-what").textContent + "?")) send("/undo", {});
   });
   const go = $("nom-go");
   if (go) go.addEventListener("click", () => {

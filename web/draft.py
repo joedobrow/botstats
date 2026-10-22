@@ -52,8 +52,9 @@ class State:
     started_at: str | None = None
     rules: dict = field(default_factory=lambda: dict(DEFAULT_RULES))
     budgets: dict[int, int] = field(default_factory=dict)     # captain -> their own purse
-    order: list[int] = field(default_factory=list)            # whose turn to nominate, in turn
-    turn: int = 0                                             # index into order
+    # The order captains were entered in, which is only ever a tiebreak now:
+    # whose turn it is comes from who has the most money left.
+    order: list[int] = field(default_factory=list)
     lot: Lot | None = None
     rosters: dict[int, list[dict]] = field(default_factory=dict)   # captain -> [{account_id, cost}]
 
@@ -88,9 +89,22 @@ class State:
 
 
 def replay(events: list[dict]) -> State:
-    """Fold the log into the state it describes."""
+    """Fold the log into the state it describes.
+
+    An undo doesn't remove anything: it names the event it takes back, and
+    the fold skips it. So taking back a sale puts the player into the pool,
+    the money into the captain's purse and the captain back up the order
+    without any of that being worked out by hand — it's just what the log
+    says once that one row stops counting.
+    """
+    cancelled: set = set()
+    for e in events:
+        if e["kind"] == "undo":
+            cancelled.update(e["payload"].get("events") or [])
     st = State()
     for e in events:
+        if e["kind"] == "undo" or e.get("id") in cancelled:
+            continue
         kind, p = e["kind"], e["payload"]
         if kind == "surrogate":
             captain, who = p.get("captain"), p.get("surrogate")
@@ -110,7 +124,6 @@ def replay(events: list[dict]) -> State:
             st.phase, st.started_at = RUNNING, e["at"]
             st.order = list(p.get("order") or [])
             st.rosters = {c: [] for c in st.order}
-            st.turn = 0
         elif kind == "nominate":
             st.lot = Lot(player=p["player"], nominated_by=p["by"], bid=p["bid"],
                          bidder=p["by"], closes_at=p["closes_at"])
@@ -122,32 +135,29 @@ def replay(events: list[dict]) -> State:
             st.rosters.setdefault(p["captain"], []).append(
                 {"account_id": p["player"], "cost": p["cost"]})
             st.lot = None
-            st.turn = _next_turn(st, p.get("after_turn", st.turn))
         elif kind == "commit":
             st.phase = DONE
     return st
 
 
-def _next_turn(st: State, from_turn: int) -> int:
-    """The next captain with a slot to fill. Everyone full ends the draft,
-    and the index stops moving."""
-    if not st.order:
-        return 0
-    for step in range(1, len(st.order) + 1):
-        i = (from_turn + step) % len(st.order)
-        if st.slots_left(st.order[i]) > 0:
-            return i
-    return from_turn
+def nomination_order(st: State) -> list[int]:
+    """Captains who still have someone to buy, richest first.
+
+    Whoever has the most left to spend nominates — so the order moves every
+    time a lot is sold, and a captain who has spent big drops behind the
+    ones who haven't. Ties go to the order the draft started in, which is
+    recorded, so this is the same every time the log is replayed.
+    """
+    waiting = [c for c in st.order if st.slots_left(c) > 0]
+    return sorted(waiting, key=lambda c: (-(st.budget(c) - st.spent(c)), st.order.index(c)))
 
 
 def whose_turn(st: State) -> int | None:
     """The captain who nominates next, or None when nobody can."""
-    if st.phase != RUNNING or not st.order:
+    if st.phase != RUNNING:
         return None
-    if st.slots_left(st.order[st.turn]) > 0:
-        return st.order[st.turn]
-    i = _next_turn(st, st.turn)
-    return st.order[i] if st.slots_left(st.order[i]) > 0 else None
+    order = nomination_order(st)
+    return order[0] if order else None
 
 
 def state(season: dict) -> State:
@@ -250,6 +260,75 @@ def bid(season: dict, st: State, *, actor: int | None, is_admin: bool,
                           {"captain": captain, "amount": amount, "closes_at": closes_at})
 
 
+def commit(season: dict, st: State) -> dict:
+    """Write the draft into the season.
+
+    The output is the shape the league already reads: player_costs rows of
+    (account, cost, captain), plus a team per captain so the rosters have
+    somewhere to hang. That's the same thing the CSV import writes, so
+    standings, team pages and value stats need to know nothing about any of
+    this having been an auction.
+    """
+    if st.phase != RUNNING:
+        raise Refused("The draft isn't running.")
+    if not st.done():
+        waiting = [n["name"] for c in st.order if st.slots_left(c) > 0
+                   for n in [names(season).get(c, {"name": str(c)})]]
+        raise Refused("Not every roster is full — still short: " + ", ".join(waiting))
+    who = names(season)
+    costs, teams = [], []
+    for captain in st.order:
+        label = (who.get(captain) or {}).get("name") or str(captain)
+        teams.append({"captain": label, "team_name": label})
+        for pick in st.rosters.get(captain, ()):
+            costs.append({"account_id": pick["account_id"], "cost": pick["cost"],
+                          "captain": label})
+    db.upsert_player_costs(season["id"], season["division_id"], costs)
+    db.upsert_season_teams(season["id"], season["division_id"], teams)
+    db.append_draft_event(season["id"], season["division_id"], "commit", None,
+                          {"players": len(costs), "teams": len(teams)})
+    return {"players": len(costs), "teams": len(teams)}
+
+
+def undoable(season: dict) -> tuple[str, list[int]] | None:
+    """(what it is, the events that have to stop counting) for the one thing
+    an admin can take back: the lot that's open, or the last sale. Nothing
+    further — an undo that reached back past a sale would quietly change
+    what every bid since had been measured against.
+
+    A sale takes its nomination with it. Leave the nomination standing and
+    the lot simply reopens at the price it just sold for, with a clock that
+    expired minutes ago, and sells again on the next tick.
+    """
+    events = db.get_draft_events(season["id"], season["division_id"])
+    cancelled: set = set()
+    for e in events:
+        if e["kind"] == "undo":
+            cancelled.update(e["payload"].get("events") or [])
+    live = [e for e in events if e["id"] not in cancelled and e["kind"] != "undo"]
+    for i in range(len(live) - 1, -1, -1):
+        e = live[i]
+        if e["kind"] == "nominate":
+            return "the nomination", [e["id"]]
+        if e["kind"] == "sold":
+            opening = next((x["id"] for x in reversed(live[:i]) if x["kind"] == "nominate"), None)
+            return "the last sale", [e["id"]] + ([opening] if opening else [])
+    return None
+
+
+def undo(season: dict, st: State) -> str:
+    """Take back the open lot, or the last sale. Returns what was undone."""
+    if st.phase != RUNNING:
+        raise Refused("The draft isn't running.")
+    target = undoable(season)
+    if not target:
+        raise Refused("There's nothing to take back.")
+    what, events = target
+    db.append_draft_event(season["id"], season["division_id"], "undo", None,
+                          {"events": events, "what": what})
+    return what
+
+
 def close_lot(season: dict, st: State) -> bool:
     """Sell, if the clock has run out. The server decides this, never a
     client — and it's safe to ask as often as you like, because a lot that
@@ -258,7 +337,7 @@ def close_lot(season: dict, st: State) -> bool:
         return False
     db.append_draft_event(season["id"], season["division_id"], "sold", None,
                           {"player": st.lot.player, "captain": st.lot.bidder,
-                           "cost": st.lot.bid, "after_turn": st.turn})
+                           "cost": st.lot.bid})
     return True
 
 
@@ -393,15 +472,20 @@ def view(season: dict, st: State, present: set[int]) -> dict:
     out = lobby(season, st, present)
     out["rules"] = st.rules
     out["turn"] = whose_turn(st)
+    # Richest first, so the list on screen is the order they nominate in,
+    # with the full teams settled at the bottom.
+    ranked = nomination_order(st) + [c for c in st.order if st.slots_left(c) <= 0]
     out["teams"] = [{"captain": c, "spent": st.spent(c), "budget": st.budget(c),
                      "left": st.budget(c) - st.spent(c),
                      "slots_left": st.slots_left(c), "max_bid": st.max_bid(c),
-                     "roster": st.rosters.get(c, [])} for c in st.order]
+                     "roster": st.rosters.get(c, [])} for c in ranked]
     out["pool"] = draftees(season, st) if st.phase == RUNNING else []
     out["lot"] = (None if not st.lot else
                   {"player": st.lot.player, "bid": st.lot.bid, "bidder": st.lot.bidder,
                    "closes_in": max(0.0, st.lot.closes_at - time.time())})
     out["done"] = st.done()
+    undo_target = undoable(season) if st.phase == RUNNING else None
+    out["undoable"] = undo_target[0] if undo_target else None
     out["stuck"] = bool(st.phase == RUNNING and not st.done() and not out["pool"] and not st.lot)
     return out
 

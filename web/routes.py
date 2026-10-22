@@ -1452,6 +1452,27 @@ async def _draft_action(request: web.Request, run) -> web.Response:
     return web.json_response({"ok": True})
 
 
+@routes.post("/season/{season_id}/{division}/draft/commit")
+async def draft_commit(request: web.Request):
+    """Turn the finished draft into the season's teams."""
+    _require_admin(request)
+
+    def run(season, st, user, data):
+        draft.commit(season, st)
+    return await _draft_action(request, run)
+
+
+@routes.post("/season/{season_id}/{division}/draft/undo")
+async def draft_undo(request: web.Request):
+    """Take back the open lot, or the last sale. Admins only — it's the
+    button for a misclick, not a way to re-think a bid."""
+    _require_admin(request)
+
+    def run(season, st, user, data):
+        request["undone"] = draft.undo(season, st)
+    return await _draft_action(request, run)
+
+
 @routes.post("/season/{season_id}/{division}/draft/nominate")
 async def draft_nominate(request: web.Request):
     def run(season, st, user, data):
