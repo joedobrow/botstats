@@ -87,7 +87,8 @@ def main() -> int:
 
     st = start()
     check("starting fixes the nomination order", st.order == CAPS and st.phase == draft.RUNNING)
-    check("the first turn is the first captain", draft.whose_turn(st) == 101)
+    check("with equal purses the first turn goes to the first captain",
+          draft.whose_turn(st) == 101)
     check("a stand-in isn't in the draft",
           STANDIN not in {p["account_id"] for p in draft.draftees(SEASON, st)})
     check("neither is a captain",
@@ -137,7 +138,9 @@ def main() -> int:
     check("the winner gets the player at their bid",
           st.rosters[102] == [{"account_id": 201, "cost": 9}] and st.spent(102) == 9)
     check("the lot is over", st.lot is None)
-    check("the turn moves on", draft.whose_turn(st) == 102)
+    check("the buyer drops behind the captains who still have their money",
+          draft.whose_turn(st) == 101 and draft.nomination_order(st) == [101, 103, 102],
+          str(draft.nomination_order(st)))
     check("a bought player is out of the pool",
           201 not in {p["account_id"] for p in draft.draftees(SEASON, st)})
 
@@ -159,6 +162,34 @@ def main() -> int:
     refuses("nominating after the draft is done is refused",
             lambda: draft.nominate(SEASON, draft.state(SEASON), actor=101, is_admin=False,
                                    player=PLAYERS[-1], amount=1))
+
+    rich = {"id": 99003, "division_id": 9}
+    with store._conn() as conn:
+        for aid, level in [(c, "captain") for c in CAPS] + [(p, "player") for p in PLAYERS]:
+            conn.execute(
+                "INSERT INTO site_signups (season_id, division_id, account_id, positions, "
+                "captain, level, created_at, updated_at) VALUES (?, ?, ?, '1', 'no', ?, 'x', 'x')",
+                (rich["id"], rich["division_id"], aid, level))
+    db.append_draft_event(rich["id"], rich["division_id"], "rules", 1,
+                          {"rules": {"budget": 100, "slots": 3, "min_bid": 1, "bid_seconds": 0}})
+    db.append_draft_event(rich["id"], rich["division_id"], "budgets", 1,
+                          {"budgets": {101: 10, 102: 90, 103: 50}})
+    db.append_draft_event(rich["id"], rich["division_id"], "start", 1, {"order": CAPS})
+    r = draft.state(rich)
+    check("the richest captain nominates first, whatever order they were entered in",
+          draft.nomination_order(r) == [102, 103, 101], str(draft.nomination_order(r)))
+    db.append_draft_event(rich["id"], rich["division_id"], "sold", None,
+                          {"player": 201, "captain": 102, "cost": 60})
+    r = draft.state(rich)
+    check("spending moves you down the order",
+          draft.nomination_order(r) == [103, 102, 101], str(draft.nomination_order(r)))
+    db.append_draft_event(rich["id"], rich["division_id"], "sold", None,
+                          {"player": 202, "captain": 103, "cost": 48})
+    r = draft.state(rich)
+    check("and the order keeps following the money",
+          draft.nomination_order(r) == [102, 101, 103], str(draft.nomination_order(r)))
+    check("a captain with every slot filled drops out of the order",
+          102 in draft.nomination_order(r))
 
     # Budgets are set per captain, by hand, and have to survive the round
     # trip through JSON — which has no integer keys.
@@ -192,10 +223,76 @@ def main() -> int:
     check("spending comes off their own budget, not the house one",
           o.budget(103) - o.spent(103) == 39, f"{o.budget(103)} - {o.spent(103)}")
 
+    # Taking something back. This is the draft-night button, so it gets
+    # checked properly: the player comes back, so does the money, and so
+    # does the captain's place in the order.
+    undo_s = {"id": 99004, "division_id": 9}
+    with store._conn() as conn:
+        for aid, level in [(c, "captain") for c in CAPS] + [(p, "player") for p in PLAYERS]:
+            conn.execute(
+                "INSERT INTO site_signups (season_id, division_id, account_id, positions, "
+                "captain, level, created_at, updated_at) VALUES (?, ?, ?, '1', 'no', ?, 'x', 'x')",
+                (undo_s["id"], undo_s["division_id"], aid, level))
+    db.append_draft_event(undo_s["id"], undo_s["division_id"], "rules", 1,
+                          {"rules": {"budget": 100, "slots": 2, "min_bid": 1, "bid_seconds": 0}})
+    db.append_draft_event(undo_s["id"], undo_s["division_id"], "start", 1, {"order": CAPS})
+    u = draft.state(undo_s)
+    draft.nominate(undo_s, u, actor=101, is_admin=False, player=201, amount=30)
+    u = draft.state(undo_s)
+    check("taking back a nomination closes the lot",
+          draft.undo(undo_s, u) == "the nomination" and draft.state(undo_s).lot is None)
+    u = draft.state(undo_s)
+    check("and the player goes back in the pool",
+          201 in {p["account_id"] for p in draft.draftees(undo_s, u)})
+
+    draft.nominate(undo_s, u, actor=101, is_admin=False, player=201, amount=30)
+    u = draft.state(undo_s)
+    draft.bid(undo_s, u, actor=102, is_admin=False, captain=102, amount=40)
+    u = draft.state(undo_s)
+    draft.close_lot(undo_s, u)
+    u = draft.state(undo_s)
+    check("a sale puts the player on the team", u.rosters[102][0]["account_id"] == 201)
+    check("and takes the money", u.budget(102) - u.spent(102) == 60)
+    draft.undo(undo_s, draft.state(undo_s))
+    u = draft.state(undo_s)
+    check("taking back a sale empties the roster slot", u.rosters[102] == [], str(u.rosters))
+    check("gives the money back", u.budget(102) - u.spent(102) == 100)
+    check("puts the player back in the pool",
+          201 in {p["account_id"] for p in draft.draftees(undo_s, u)})
+    check("and puts the captain back up the order",
+          draft.nomination_order(u) == [101, 102, 103], str(draft.nomination_order(u)))
+    refuses("undoing twice over doesn't reach further back",
+            lambda: draft.undo(undo_s, draft.state(undo_s))
+                    if draft.undoable(undo_s) is None else (_ for _ in ()).throw(
+                        draft.Refused("there was still something to undo")))
+
+    # Committing writes the shape the rest of the league already reads.
+    refuses("an unfinished draft can't be committed",
+            lambda: draft.commit(undo_s, draft.state(undo_s)))
+    while not draft.state(undo_s).done():
+        u = draft.state(undo_s)
+        pool = draft.draftees(undo_s, u)
+        if not pool:
+            break
+        turn = draft.whose_turn(u)
+        draft.nominate(undo_s, u, actor=turn, is_admin=False,
+                       player=pool[0]["account_id"], amount=1)
+        draft.close_lot(undo_s, draft.state(undo_s))
+    wrote = draft.commit(undo_s, draft.state(undo_s))
+    check("committing writes every pick", wrote["players"] == len(CAPS) * 2, str(wrote))
+    costs = db.get_player_costs(undo_s["id"], undo_s["division_id"])
+    check("player_costs has the account, the price and the captain",
+          len(costs) == len(CAPS) * 2
+          and all(c.get("captain") for c in costs.values()), str(costs)[:120])
+    check("a team exists per captain",
+          len(db.get_season_teams(undo_s["id"], undo_s["division_id"])) == len(CAPS))
+    check("and the draft is done", draft.state(undo_s).phase == draft.DONE)
+
     # The log is the draft: reading it twice gives the same answer.
     again = draft.replay(db.get_draft_events(SEASON["id"], SEASON["division_id"]))
     check("replaying the log is deterministic",
-          again.rosters == st.rosters and again.turn == st.turn and again.phase == st.phase)
+          again.rosters == st.rosters and again.phase == st.phase
+          and draft.nomination_order(again) == draft.nomination_order(st))
 
     # A lot left open by a server that went away is sold on the next look,
     # not lost and not sold twice.
