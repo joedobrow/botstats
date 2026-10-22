@@ -27,7 +27,7 @@ LOBBY, RUNNING, DONE = "lobby", "running", "done"
 # What the auction is played with. An admin can change these before it
 # starts; they go into the log, so what the rules were is part of the record.
 DEFAULT_RULES = {
-    "budget": 1000,        # what each captain has to spend
+    "budget": 1000,        # what a captain has to spend unless they're given their own
     "slots": 4,            # players each captain drafts, on top of themselves
     "min_bid": 1,          # the smallest a player can go for
     "bid_seconds": 20,     # how long a lot stays open after the last bid
@@ -51,12 +51,19 @@ class State:
     surrogates: dict[int, int] = field(default_factory=dict)  # captain -> who may act for them
     started_at: str | None = None
     rules: dict = field(default_factory=lambda: dict(DEFAULT_RULES))
+    budgets: dict[int, int] = field(default_factory=dict)     # captain -> their own purse
     order: list[int] = field(default_factory=list)            # whose turn to nominate, in turn
     turn: int = 0                                             # index into order
     lot: Lot | None = None
     rosters: dict[int, list[dict]] = field(default_factory=dict)   # captain -> [{account_id, cost}]
 
     # -- what the rules say, given what has happened ---------------------
+    def budget(self, captain: int) -> int:
+        """What this captain has to spend. Admins set these one by one, so a
+        captain with no figure of their own falls back to the house default
+        rather than to nothing."""
+        return self.budgets.get(captain, self.rules["budget"])
+
     def spent(self, captain: int) -> int:
         return sum(p["cost"] for p in self.rosters.get(captain, ()))
 
@@ -71,7 +78,7 @@ class State:
         if left <= 0:
             return 0
         reserve = self.rules["min_bid"] * (left - 1)
-        return max(0, self.rules["budget"] - self.spent(captain) - reserve)
+        return max(0, self.budget(captain) - self.spent(captain) - reserve)
 
     def taken(self) -> set[int]:
         return {p["account_id"] for roster in self.rosters.values() for p in roster}
@@ -95,6 +102,10 @@ def replay(events: list[dict]) -> State:
                 st.surrogates.pop(captain, None)
         elif kind == "rules":
             st.rules = {**DEFAULT_RULES, **(p.get("rules") or {})}
+        elif kind == "budgets":
+            # JSON has no integer keys, so they come back as strings.
+            for captain, amount in (p.get("budgets") or {}).items():
+                st.budgets[int(captain)] = int(amount)
         elif kind == "start":
             st.phase, st.started_at = RUNNING, e["at"]
             st.order = list(p.get("order") or [])
@@ -272,7 +283,7 @@ def lobby(season: dict, st: State, present: set[int]) -> dict:
         sub = st.surrogates.get(c["account_id"])
         here = c["account_id"] in present
         sub_here = bool(sub and sub in present)
-        rows.append({**c, "surrogate": sub, "present": here,
+        rows.append({**c, "surrogate": sub, "present": here, "budget": st.budget(c["account_id"]),
                      "surrogate_present": sub_here, "seated": here or sub_here})
         if not (here or sub_here):
             missing.append(c["name"])
@@ -382,7 +393,8 @@ def view(season: dict, st: State, present: set[int]) -> dict:
     out = lobby(season, st, present)
     out["rules"] = st.rules
     out["turn"] = whose_turn(st)
-    out["teams"] = [{"captain": c, "spent": st.spent(c), "left": st.rules["budget"] - st.spent(c),
+    out["teams"] = [{"captain": c, "spent": st.spent(c), "budget": st.budget(c),
+                     "left": st.budget(c) - st.spent(c),
                      "slots_left": st.slots_left(c), "max_bid": st.max_bid(c),
                      "roster": st.rosters.get(c, [])} for c in st.order]
     out["pool"] = draftees(season, st) if st.phase == RUNNING else []

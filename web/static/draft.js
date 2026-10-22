@@ -46,6 +46,7 @@
       <li>
         <span class="dot ${c.seated ? "on" : "off"}"></span>${face(c.account_id)}
         <a href="/player/${c.account_id}">${esc(c.name)}</a>
+        <span class="muted small">${c.budget}</span>
         <span class="seat-note muted small">${
           c.surrogate ? (c.surrogate_present ? "seat filled for them" : "someone is sitting in, but isn't here")
                       : (c.present ? "" : "not here")}</span>
@@ -118,7 +119,7 @@
     view = v;
     $("phase").textContent = PHASES[v.phase] || v.phase;
     $("lobby-panel").hidden = v.phase !== "lobby";
-    ["admin-lobby", "admin-rules"].forEach(id => { const e = $(id); if (e) e.hidden = v.phase !== "lobby"; });
+    ["admin-lobby", "admin-rules", "admin-budgets"].forEach(id => { const e = $(id); if (e) e.hidden = v.phase !== "lobby"; });
     drawSeats(v);
     drawLot(v);
     drawTurn(v);
