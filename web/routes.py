@@ -1403,6 +1403,37 @@ async def draft_rules(request: web.Request):
     raise web.HTTPFound(back)
 
 
+@routes.post("/season/{season_id}/{division}/draft/budgets")
+async def draft_budgets(request: web.Request):
+    """What each captain has to spend. Admins set these by hand, and only
+    before the draft starts — a budget changed halfway through would rewrite
+    what every bid so far meant."""
+    season = _season_or_404(request)
+    _require_admin(request)
+    data = await request.post()
+    back = season_url(season) + "/draft"
+    st = draft.state(season)
+    if st.phase != draft.LOBBY:
+        raise web.HTTPFound(back + "?" + urlencode({"notice": "The draft has already started."}))
+    budgets, known = {}, {c["account_id"] for c in draft.captains(season)}
+    for key in data.keys():
+        if not key.startswith("budget-"):
+            continue
+        captain = int(re.sub(r"\D", "", key) or 0)
+        if captain not in known:
+            continue
+        raw = re.sub(r"\D", "", data.get(key, ""))
+        if not raw or not 1 <= int(raw) <= 1_000_000:
+            raise web.HTTPFound(back + "?" + urlencode(
+                {"notice": "Every budget has to be a number of at least 1."}))
+        budgets[captain] = int(raw)
+    if budgets:
+        db.append_draft_event(season["id"], season["division_id"], "budgets",
+                              request["user"]["account_id"], {"budgets": budgets})
+        await draft.push(season)
+    raise web.HTTPFound(back)
+
+
 async def _draft_action(request: web.Request, run) -> web.Response:
     """Every change to a draft goes through here: one at a time, re-read
     from the log, and the room told afterwards."""

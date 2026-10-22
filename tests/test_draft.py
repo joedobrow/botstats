@@ -154,11 +154,43 @@ def main() -> int:
     check("every roster filled", all(st.slots_left(c) == 0 for c in CAPS), str(st.rosters))
     check("nobody was sold twice",
           len(st.taken()) == sum(len(r) for r in st.rosters.values()))
-    check("nobody overspent", all(st.spent(c) <= st.rules["budget"] for c in CAPS))
+    check("nobody overspent", all(st.spent(c) <= st.budget(c) for c in CAPS))
     check("the draft knows it's finished", st.done())
     refuses("nominating after the draft is done is refused",
             lambda: draft.nominate(SEASON, draft.state(SEASON), actor=101, is_admin=False,
                                    player=PLAYERS[-1], amount=1))
+
+    # Budgets are set per captain, by hand, and have to survive the round
+    # trip through JSON — which has no integer keys.
+    other = {"id": 99002, "division_id": 9}
+    with store._conn() as conn:
+        for aid, level in [(c, "captain") for c in CAPS] + [(p, "player") for p in PLAYERS]:
+            conn.execute(
+                "INSERT INTO site_signups (season_id, division_id, account_id, positions, "
+                "captain, level, created_at, updated_at) VALUES (?, ?, ?, '1', 'no', ?, 'x', 'x')",
+                (other["id"], other["division_id"], aid, level))
+    db.append_draft_event(other["id"], other["division_id"], "rules", 1,
+                          {"rules": {"budget": 100, "slots": 2, "min_bid": 1, "bid_seconds": 0}})
+    db.append_draft_event(other["id"], other["division_id"], "budgets", 1,
+                          {"budgets": {101: 500, 102: 50}})
+    db.append_draft_event(other["id"], other["division_id"], "start", 1, {"order": CAPS})
+    o = draft.state(other)
+    check("a captain's own budget is read back as a number, not a string",
+          o.budget(101) == 500 and o.budget(102) == 50, str(o.budgets))
+    check("a captain with no budget of their own gets the default", o.budget(103) == 100)
+    check("the rich captain can bid more", o.max_bid(101) == 499)
+    check("the poor captain can't", o.max_bid(102) == 49)
+    draft.nominate(other, o, actor=101, is_admin=False, player=201, amount=60)
+    o = draft.state(other)
+    refuses("a captain can't bid past their own purse",
+            lambda: draft.bid(other, o, actor=102, is_admin=False, captain=102, amount=61))
+    draft.bid(other, o, actor=103, is_admin=False, captain=103, amount=61)
+    o = draft.state(other)
+    check("a captain on the default budget can", o.lot.bid == 61 and o.lot.bidder == 103)
+    draft.close_lot(other, draft.state(other))
+    o = draft.state(other)
+    check("spending comes off their own budget, not the house one",
+          o.budget(103) - o.spent(103) == 39, f"{o.budget(103)} - {o.spent(103)}")
 
     # The log is the draft: reading it twice gives the same answer.
     again = draft.replay(db.get_draft_events(SEASON["id"], SEASON["division_id"]))
