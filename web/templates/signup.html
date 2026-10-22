@@ -20,6 +20,16 @@
   </fieldset>
 
   <fieldset>
+    <legend>Signing up as</legend>
+    {% set level_help = {"captain": "You draft a team", "player": "You're in the draft to be picked",
+                         "standin": "Not in the draft — on record as someone who can fill in"} %}
+    {% for v, label in signup_levels %}
+    <label class="check" title="{{ level_help[v] }}"><input type="radio" name="level" value="{{ v }}"
+      {% if (form.level or "player") == v %}checked{% endif %}> {{ label }}</label>
+    {% endfor %}
+  </fieldset>
+
+  <fieldset>
     <legend>Willing to captain?</legend>
     {% for v, label in [("yes", "Yes"), ("maybe", "If needed"), ("no", "No")] %}
     <label class="check"><input type="radio" name="captain" value="{{ v }}" {% if form.captain == v %}checked{% endif %}> {{ label }}</label>

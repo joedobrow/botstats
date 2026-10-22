@@ -108,7 +108,9 @@ def init_site_tables() -> None:
                 account_id    INTEGER NOT NULL,
                 mmr           INTEGER,
                 positions     TEXT NOT NULL,        -- e.g. "1,3"
-                captain       TEXT NOT NULL,        -- yes / maybe / no
+                captain       TEXT NOT NULL,        -- yes / maybe / no (would they captain)
+                level         TEXT NOT NULL DEFAULT 'player',  -- what they signed up as
+                level_override TEXT,                  -- what an admin made it instead
                 discord       TEXT,
                 statement     TEXT,
                 created_at    TEXT NOT NULL,
@@ -152,6 +154,16 @@ def init_site_tables() -> None:
         for col in ("champion_team", "champion_note"):   # note is legacy, never read
             if col not in have:
                 conn.execute(f"ALTER TABLE site_season_settings ADD COLUMN {col} TEXT")
+
+        # What someone signed up as, and what an admin decided instead. Both,
+        # because "they asked to captain and we said no" is worth being able
+        # to see — see SIGNUP_LEVELS.
+        have = {r[1] for r in conn.execute("PRAGMA table_info(site_signups)")}
+        if "level" not in have:
+            conn.execute("ALTER TABLE site_signups ADD COLUMN level TEXT NOT NULL DEFAULT 'player'")
+            conn.execute("UPDATE site_signups SET level = 'captain' WHERE LOWER(captain) = 'yes'")
+        if "level_override" not in have:
+            conn.execute("ALTER TABLE site_signups ADD COLUMN level_override TEXT")
 
 
 
@@ -836,28 +848,67 @@ def season_of_match(seasons: list[dict], match: dict) -> dict | None:
 # Signups
 # ---------------------------------------------------------------------------
 
+# What someone is in a season. A captain drafts a team; a player is in the
+# draft to be picked; a stand-in isn't drafted at all and is only on record
+# as someone who can fill in. People pick their own, and an admin's choice
+# wins — a season needs a particular number of captains, and wanting to be
+# one isn't the same as being given one.
+SIGNUP_LEVELS = [
+    ("captain", "Captain"),
+    ("player", "Player"),
+    ("standin", "Stand-in"),
+]
+SIGNUP_LEVEL_LABELS = dict(SIGNUP_LEVELS)
+DEFAULT_SIGNUP_LEVEL = "player"
+
+
+def signup_level(row: dict) -> str:
+    """What a signup counts as: the admin's decision, or theirs."""
+    return (row.get("level_override") or row.get("level") or DEFAULT_SIGNUP_LEVEL)
+
+
+def set_signup_level(season: dict, account_id: int, level: str | None) -> None:
+    """An admin's decision about one signup. None clears it, leaving whatever
+    the player asked for."""
+    if level is not None and level not in SIGNUP_LEVEL_LABELS:
+        raise ValueError(f"unknown signup level {level!r}")
+    with _conn() as conn:
+        conn.execute("UPDATE site_signups SET level_override = ?, updated_at = ? "
+                     "WHERE season_id = ? AND division_id = ? AND account_id = ?",
+                     (level, _now(), season["id"], season["division_id"], account_id))
+
+
 def get_signup(season: dict, account_id: int) -> dict | None:
     with _conn() as conn:
         row = conn.execute(
             "SELECT * FROM site_signups WHERE season_id = ? AND division_id = ? AND account_id = ?",
             (season["id"], season["division_id"], account_id)).fetchone()
-    return dict(row) if row else None
+    if not row:
+        return None
+    out = dict(row)
+    out["level_is"] = signup_level(out)
+    return out
 
 
 def save_signup(season: dict, account_id: int, *, mmr: int | None, positions: list[int],
-                captain: str, discord: str | None, statement: str | None) -> None:
+                captain: str, discord: str | None, statement: str | None,
+                level: str = DEFAULT_SIGNUP_LEVEL) -> None:
+    """Record a signup. `level` is what they signed up as; an admin's override
+    is left alone, so editing your own signup can't undo their decision."""
+    if level not in SIGNUP_LEVEL_LABELS:
+        level = DEFAULT_SIGNUP_LEVEL
     now = _now()
     with _conn() as conn:
         conn.execute("""
             INSERT INTO site_signups (season_id, division_id, account_id, mmr, positions,
-                                      captain, discord, statement, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                      captain, level, discord, statement, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(season_id, division_id, account_id) DO UPDATE SET
                 mmr = excluded.mmr, positions = excluded.positions, captain = excluded.captain,
-                discord = excluded.discord, statement = excluded.statement,
-                updated_at = excluded.updated_at
+                level = excluded.level, discord = excluded.discord,
+                statement = excluded.statement, updated_at = excluded.updated_at
         """, (season["id"], season["division_id"], account_id, mmr, ",".join(map(str, positions)),
-              captain, discord, statement, now, now))
+              captain, level, discord, statement, now, now))
 
 
 def delete_signup(season: dict, account_id: int) -> None:
@@ -882,6 +933,8 @@ def list_signups(season: dict) -> list[dict]:
         r["name"] = ident.get("name") or r["steam_name"] or str(r["account_id"])
         r["badge"] = ident.get("badge")
         r["positions"] = [int(p) for p in r["positions"].split(",") if p]
+        r["level_is"] = signup_level(r)
+        r["level_label"] = SIGNUP_LEVEL_LABELS[r["level_is"]]
     return out
 
 
