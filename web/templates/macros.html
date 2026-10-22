@@ -73,3 +73,10 @@
 </span>
 {% else %}{{ season.season_start }}{% endif %}
 {%- endmacro %}
+
+{# A person on the Hall of Fame: their picture and their name, linked when we
+   know which account they are. #}
+{% macro winner_chip(w) -%}
+<span class="chip">{% if w.avatar_url %}<img class="avatar" src="{{ w.avatar_url }}" alt="">{% endif %}
+{%- if w.account_id %}{{ player_link(w.account_id, w.name) }}{% else %}{{ w.name }}{% endif %}</span>
+{%- endmacro %}

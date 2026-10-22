@@ -16,6 +16,7 @@
       <a href="https://www.dotabuff.com/players/{{ account_id }}" rel="noopener">Dotabuff</a> ·
       <a href="https://www.opendota.com/players/{{ account_id }}" rel="noopener">OpenDota</a>
       {% if overall.games_played %} · <a href="/fantasy/{{ account_id }}">Fantasy</a>{% endif %}
+      {% if discord %} · <span class="discord" title="Discord">{{ discord }}</span>{% endif %}
     </div>
   </div>
 </div>

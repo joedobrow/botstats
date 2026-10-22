@@ -361,17 +361,17 @@
   </div>
 
 {% elif tab == "signups" %}
+  {% if notice %}<p class="notice">{{ notice }}</p>{% endif %}
   {% if is_admin %}<p class="small"><a href="{{ season_url(season) }}/signups.csv">Download signups as CSV</a></p>{% endif %}
   <div class="scroll">
   <table>
-    <thead><tr><th>#</th><th>Player</th><th>Badge</th><th class="num">MMR</th><th>Positions</th><th>Signed up as</th><th>Captain?</th><th>About</th>{% if is_admin %}<th>Discord</th><th></th>{% endif %}</tr></thead>
+    <thead><tr><th>#</th><th>Player</th><th>Badge</th><th>Positions</th><th>Signed up as</th><th>Captain?</th><th>Comment</th>{% if is_admin %}<th>Discord</th><th></th>{% endif %}</tr></thead>
     <tbody>
     {% for s in signups %}
       <tr>
         <td class="muted">{{ loop.index }}</td>
         <td>{{ player_link(s.account_id, s.name) }}</td>
         <td>{{ s.badge or "" }}</td>
-        <td class="num">{{ s.mmr or "" }}</td>
         <td>{{ s.positions|join(", ") }}</td>
         <td class="nowrap">
           {% if is_admin %}
@@ -412,5 +412,34 @@
     </tbody>
   </table>
   </div>
+  {% if is_admin %}
+  <section class="panel">
+    <h2>Add a signup</h2>
+    <form method="post" action="/admin/signup/add" class="form">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <input type="hidden" name="season_id" value="{{ season.id }}">
+      <input type="hidden" name="division_id" value="{{ season.division_id }}">
+      <label>Player <span class="muted small">(name or account id)</span>
+        <input type="text" name="player" required>
+      </label>
+      <fieldset>
+        <legend>Signing up as</legend>
+        {% for key, label in signup_levels %}
+        <label class="check"><input type="radio" name="level" value="{{ key }}"
+          {% if key == "player" %}checked{% endif %}> {{ label }}</label>
+        {% endfor %}
+      </fieldset>
+      <fieldset>
+        <legend>Positions</legend>
+        {% for n, label in POSITION_NAMES.items() %}
+        <label class="check"><input type="checkbox" name="positions" value="{{ n }}"> {{ n }} · {{ label }}</label>
+        {% endfor %}
+      </fieldset>
+      <label>Discord name <input type="text" name="discord" maxlength="64"></label>
+      <label>Comment <textarea name="statement" maxlength="1000" rows="2"></textarea></label>
+      <div class="actions"><button class="primary">Add</button></div>
+    </form>
+  </section>
+  {% endif %}
 {% endif %}
 {% endblock %}

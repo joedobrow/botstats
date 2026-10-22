@@ -381,6 +381,7 @@ async def season_page(request: web.Request):
     elif tab == "signups":
         ctx["signup_levels"] = store.SIGNUP_LEVELS
         ctx["store_level_labels"] = store.SIGNUP_LEVEL_LABELS
+        ctx["notice"] = request.query.get("notice")
         ctx["signups"] = store.list_signups(season)
     elif tab == "champions":
         ctx["champions"] = store.season_champions(season)
@@ -1139,6 +1140,7 @@ async def player_page(request: web.Request):
                   season_rows=season_rows, matches=matches[:10], match_total=len(matches),
                   rating=store.player_ratings().get(account_id),
                   breakdown=breakdown, unavailable=unavailable,
+                  discord=store.player_discord(account_id),
                   notice=request.query.get("notice"))
 
 
@@ -1217,13 +1219,7 @@ async def signup_submit(request: web.Request):
         errors.append("Say whether you're signing up to captain, to play, or to stand in.")
     elif level == "captain":
         captain = "yes"          # asking for a team is the same as willing
-    mmr_raw = (data.get("mmr") or "").strip()
-    mmr = None
-    if mmr_raw:
-        if not mmr_raw.isdigit() or not 0 <= int(mmr_raw) <= 20000:
-            errors.append("MMR should be a number, or left blank.")
-        else:
-            mmr = int(mmr_raw)
+    mmr = existing.get("mmr") if existing else None
     discord = (data.get("discord") or "").strip()[:64]
     if not discord:
         errors.append("Enter your Discord name so admins and captains can reach you.")
@@ -1238,6 +1234,40 @@ async def signup_submit(request: web.Request):
     if not user.get("discord"):
         store.set_user_discord(aid, discord)
     raise web.HTTPFound(season_url(season) + "?tab=signups")
+
+
+@routes.post("/admin/signup/add")
+async def admin_signup_add(request: web.Request):
+    """Sign someone up who didn't do it themselves — they asked in Discord,
+    or they're a stand-in an admin is putting on record."""
+    _require_admin(request)
+    data = await request.post()
+    season = next((s for s in store.all_seasons()
+                    if s["id"] == int(data["season_id"])
+                    and s["division_id"] == int(data["division_id"])), None)
+    if not season:
+        raise web.HTTPFound("/seasons")
+    back = season_url(season) + "?tab=signups"
+    who = (data.get("player") or "").strip()
+    matched = store.resolve_champion_names("@" + who) if who else []
+    account_id = matched[0]["account_id"] if matched else None
+    if account_id is None:
+        notice = (f"No player here matches “{who}”. An account id always works."
+                  if who else "Say who to sign up.")
+        raise web.HTTPFound(back + "&" + urlencode({"notice": notice}))
+    if store.get_signup(season, account_id):
+        raise web.HTTPFound(back + "&" + urlencode(
+            {"notice": f"{matched[0]['name']} is already signed up."}))
+    level = data.get("level") if data.get("level") in store.SIGNUP_LEVEL_LABELS else store.DEFAULT_SIGNUP_LEVEL
+    positions = sorted({int(p) for p in data.getall("positions", [])
+                        if p.isdigit() and int(p) in store.POSITIONS})
+    store.save_signup(season, account_id, mmr=None, positions=positions,
+                      captain="yes" if level == "captain" else "no",
+                      discord=(data.get("discord") or "").strip()[:64] or None,
+                      statement=(data.get("statement") or "").strip()[:1000] or None,
+                      level=level)
+    raise web.HTTPFound(back + "&" + urlencode(
+        {"notice": f"Signed up {matched[0]['name']} as {store.SIGNUP_LEVEL_LABELS[level]}."}))
 
 
 @routes.post("/admin/signup/level")

@@ -190,6 +190,21 @@ def get_user(account_id: int) -> dict | None:
     return dict(row) if row else None
 
 
+def player_discord(account_id: int) -> str | None:
+    """How to reach someone on Discord: what they told the site when they
+    signed in, or failing that the most recent signup that carries one —
+    an admin can sign someone up who has never logged in here."""
+    with _conn() as conn:
+        row = conn.execute("SELECT discord FROM site_users WHERE account_id = ?",
+                           (account_id,)).fetchone()
+        if row and (row["discord"] or "").strip():
+            return row["discord"].strip()
+        row = conn.execute(
+            "SELECT discord FROM site_signups WHERE account_id = ? AND discord IS NOT NULL "
+            "AND TRIM(discord) <> '' ORDER BY updated_at DESC LIMIT 1", (account_id,)).fetchone()
+    return row["discord"].strip() if row else None
+
+
 def set_user_discord(account_id: int, discord: str | None) -> None:
     with _conn() as conn:
         conn.execute("UPDATE site_users SET discord = ? WHERE account_id = ?", (discord, account_id))
