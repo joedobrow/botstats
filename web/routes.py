@@ -379,6 +379,8 @@ async def season_page(request: web.Request):
         ctx["weeks"] = store.season_weeks(season)
         ctx["notice"] = request.query.get("notice")
     elif tab == "signups":
+        ctx["signup_levels"] = store.SIGNUP_LEVELS
+        ctx["store_level_labels"] = store.SIGNUP_LEVEL_LABELS
         ctx["signups"] = store.list_signups(season)
     elif tab == "champions":
         ctx["champions"] = store.season_champions(season)
@@ -1183,9 +1185,10 @@ async def signup_form(request: web.Request):
     if not season["signups_open"] and not existing:
         return render(request, "message.html", title="Signups closed",
                       message="Signups for this season aren't open.")
-    form = existing or {"discord": user.get("discord"), "positions": "", "captain": "no"}
+    form = existing or {"discord": user.get("discord"), "positions": "", "captain": "no",
+                        "level": store.DEFAULT_SIGNUP_LEVEL}
     return render(request, "signup.html", title="Sign up", season=season, form=form,
-                  existing=existing, errors=[])
+                  existing=existing, errors=[], signup_levels=store.SIGNUP_LEVELS)
 
 
 @routes.post("/season/{season_id}/{division}/signup")
@@ -1209,6 +1212,11 @@ async def signup_submit(request: web.Request):
     captain = data.get("captain", "")
     if captain not in store.CAPTAIN_CHOICES:
         errors.append("Say whether you'd captain.")
+    level = data.get("level", store.DEFAULT_SIGNUP_LEVEL)
+    if level not in store.SIGNUP_LEVEL_LABELS:
+        errors.append("Say whether you're signing up to captain, to play, or to stand in.")
+    elif level == "captain":
+        captain = "yes"          # asking for a team is the same as willing
     mmr_raw = (data.get("mmr") or "").strip()
     mmr = None
     if mmr_raw:
@@ -1223,11 +1231,28 @@ async def signup_submit(request: web.Request):
     if errors:
         form = dict(data, positions=",".join(map(str, positions)))
         return render(request, "signup.html", status=400, title="Sign up", season=season,
-                      form=form, existing=existing, errors=errors)
+                      form=form, existing=existing, errors=errors,
+                      signup_levels=store.SIGNUP_LEVELS)
     store.save_signup(season, aid, mmr=mmr, positions=positions, captain=captain,
-                      discord=discord, statement=statement or None)
+                      discord=discord, statement=statement or None, level=level)
     if not user.get("discord"):
         store.set_user_discord(aid, discord)
+    raise web.HTTPFound(season_url(season) + "?tab=signups")
+
+
+@routes.post("/admin/signup/level")
+async def admin_signup_level(request: web.Request):
+    """Make someone a captain, a player or a stand-in, whatever they asked
+    for. Clearing it puts them back to their own answer."""
+    _require_admin(request)
+    data = await request.post()
+    season = next((s for s in store.all_seasons()
+                    if s["id"] == int(data["season_id"])
+                    and s["division_id"] == int(data["division_id"])), None)
+    if not season:
+        raise web.HTTPFound("/seasons")
+    level = data.get("level") or None
+    store.set_signup_level(season, int(data["account_id"]), level)
     raise web.HTTPFound(season_url(season) + "?tab=signups")
 
 
