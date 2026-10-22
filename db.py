@@ -153,9 +153,24 @@ CREATE TABLE IF NOT EXISTS match_drafts (
 )"""
 
 
+AWARDS_TABLE = """
+CREATE TABLE IF NOT EXISTS season_awards (
+    season_id    INTEGER NOT NULL REFERENCES seasons(id),
+    division_id  INTEGER NOT NULL REFERENCES divisions(id),
+    award        TEXT NOT NULL,
+    position     INTEGER NOT NULL DEFAULT 0,  -- the All-AD Team's 1-5; 0 for a single winner
+    account_id   INTEGER,                     -- NULL for a winner we can't resolve
+    name         TEXT NOT NULL,
+    citation     TEXT,
+    recorded_at  TEXT NOT NULL,
+    PRIMARY KEY (season_id, division_id, award, position)
+)
+"""
+
+
 # Bumped by each structural migration in _MIGRATIONS; stored in the database
 # as PRAGMA user_version so every migration runs exactly once, in order.
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 
 def init_db():
@@ -350,6 +365,8 @@ def init_db():
             {PLAYERS_TABLE};
 
             {DRAFTS_TABLE};
+
+            {AWARDS_TABLE};
 
             CREATE INDEX IF NOT EXISTS idx_players_match   ON players(match_id);
             CREATE INDEX IF NOT EXISTS idx_players_account ON players(account_id);
@@ -1109,8 +1126,24 @@ def _player_cost_nullable(conn: sqlite3.Connection) -> None:
 
 # Structural migrations, in order; the database's PRAGMA user_version is the
 # number of the last one applied. Append new ones; never reorder or edit.
+
+
+def _add_season_awards(conn: sqlite3.Connection) -> None:
+    """Migration 5: end-of-season awards (season_awards)."""
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute(AWARDS_TABLE)
+        conn.execute("PRAGMA user_version = 5")
+        conn.execute("COMMIT")
+        logger.info("Migration 5: added season_awards")
+    except Exception:
+        if conn.in_transaction:
+            conn.execute("ROLLBACK")
+        raise
+
+
 _MIGRATIONS = [_migrate_seasons_to_ids, _migrate_to_divisions, _add_match_drafts,
-               _player_cost_nullable]
+               _player_cost_nullable, _add_season_awards]
 
 
 def _migrate_ranked_mmr_overrides_to_rank():
@@ -3978,15 +4011,59 @@ def get_match_draft(match_id: int) -> dict[int, list[int]]:
     return {aid: sorted(ids, key=lambda i: i >= 0) for aid, ids in out.items()}  # model first, stable
 
 
-def games_missing_drafts(season_id: int) -> list[int]:
-    """Ability Draft games of a season with no stored draft."""
+def get_season_awards(season_id: int, division_id: int) -> list[dict]:
+    """Every award recorded for a season, winners in position order."""
+    with _conn() as conn:
+        return [dict(r) for r in conn.execute(
+            "SELECT * FROM season_awards WHERE season_id = ? AND division_id = ? "
+            "ORDER BY award, position", (season_id, division_id))]
+
+
+def set_season_award(season_id: int, division_id: int, award: str,
+                     winners: list[dict], citation: str | None = None) -> None:
+    """Record one award, replacing whatever was there. An empty winners list
+    clears it. `winners` is [{account_id, name}] — one for a single award, one
+    per position for the All-AD Team."""
+    now = datetime.now(timezone.utc).isoformat()
+    with _conn() as conn:
+        conn.execute("DELETE FROM season_awards WHERE season_id = ? AND division_id = ? AND award = ?",
+                     (season_id, division_id, award))
+        conn.executemany(
+            "INSERT INTO season_awards (season_id, division_id, award, position, account_id, name, "
+            "citation, recorded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            [(season_id, division_id, award, i if len(winners) > 1 else 0,
+              w.get("account_id"), w["name"], citation, now)
+             for i, w in enumerate(winners, start=1)])
+
+
+def awards_by_account() -> dict[int, list[dict]]:
+    """{account_id: [{season_id, division_id, award, position}]} for everyone
+    who has won something — for showing a player what they've won."""
+    out: dict[int, list[dict]] = {}
+    with _conn() as conn:
+        for r in conn.execute("SELECT season_id, division_id, award, position, account_id "
+                              "FROM season_awards WHERE account_id IS NOT NULL"):
+            out.setdefault(r["account_id"], []).append(dict(r))
+    return out
+
+
+def games_missing_drafts(season_id: int, max_age_days: int = 30) -> list[int]:
+    """Ability Draft games of a season with no stored draft.
+
+    Only recent ones: windrun parses a replay within days of the game, so a
+    game still without a draft a month later never will have one, and asking
+    again every week costs five seconds of its rate limit for nothing.
+    Hand-entered results (negative ids) were never windrun's to know.
+    """
+    cutoff = int(datetime.now(timezone.utc).timestamp()) - max_age_days * 86400
     with _conn() as conn:
         return [r[0] for r in conn.execute("""
             SELECT m.match_id FROM matches m
-            WHERE m.league_id = ? AND m.game_mode = 18
+            WHERE m.league_id = ? AND m.game_mode = 18 AND m.match_id > 0
+              AND m.start_time >= ?
               AND NOT EXISTS (SELECT 1 FROM match_drafts d WHERE d.match_id = m.match_id)
             ORDER BY m.start_time
-        """, (season_id,))]
+        """, (season_id, cutoff))]
 
 
 def match_is_complete(match_id: int) -> bool:

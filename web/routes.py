@@ -382,6 +382,8 @@ async def season_page(request: web.Request):
         ctx["signups"] = store.list_signups(season)
     elif tab == "champions":
         ctx["champions"] = store.season_champions(season)
+        ctx["awards"] = store.season_awards(season)
+        ctx["award_choices"] = list(store.AWARD_LABELS.items())
         ctx["season_team_names"] = sorted(t["name"] for t in store.season_teams(season))
         ctx["notice"] = request.query.get("notice")
     elif tab == "leaders":
@@ -457,7 +459,7 @@ async def teams_page(request: web.Request):
 @routes.get("/hall-of-fame")
 async def hall_of_fame(request: web.Request):
     return render(request, "hall_of_fame.html", title="Hall of Fame",
-                  champions=store.all_champions())
+                  seasons=store.hall_of_fame())
 
 
 def _weeks_redirect(season: dict, notice: str):
@@ -514,6 +516,23 @@ async def season_weeks_delete(request: web.Request):
     removed = db.delete_season_week(season["id"], season["division_id"], week)
     raise _weeks_redirect(season, f"Week {week} removed." if removed
                           else f"Week {week} wasn't defined.")
+
+
+@routes.post("/season/{season_id}/{division}/awards")
+async def season_award_set(request: web.Request):
+    """Record one end-of-season award. Winners are pasted the same way the
+    champions are, so the announcement itself can go straight in."""
+    season = _season_or_404(request)
+    _require_admin(request)
+    data = await request.post()
+    award = data.get("award", "")
+    if award not in store.AWARD_LABELS:
+        raise web.HTTPFound(season_url(season) + "?" + urlencode(
+            {"tab": "champions", "notice": "Pick an award."}))
+    n = store.set_season_award(season, award, data.get("winners", ""), data.get("citation", ""))
+    label = store.AWARD_LABELS[award]
+    notice = f"{label} cleared." if not n else f"{label}: {n} winner{'' if n == 1 else 's'} recorded."
+    raise web.HTTPFound(season_url(season) + "?" + urlencode({"tab": "champions", "notice": notice}))
 
 
 @routes.post("/season/{season_id}/{division}/champions")

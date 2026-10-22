@@ -2586,6 +2586,18 @@ async def weekly_fetch():
 
     logger.info(f"Weekly fetch complete: {total_count} total match(es) across {len(divisions)} division(s)")
 
+    # Drafts are asked for once, as each game is stored, and windrun usually
+    # hasn't parsed the replay that soon — which is why games fetched the
+    # morning after they were played never got their picks at all. Ask again
+    # for the ones still missing. Wrapped: windrun being down must not take
+    # the fetch loop with it.
+    try:
+        from fetcher import backfill_drafts
+        for season_id in sorted({d["current_season_id"] for d in divisions if d.get("current_season_id")}):
+            await backfill_drafts(season_id)
+    except Exception:
+        logger.exception("Draft backfill failed")
+
     # Then re-rate everyone who has played, while the new results are the
     # freshest thing in the database — the fantasy adjustment is fitted from
     # them, and ratings are on the team pages now, so a stale number is a

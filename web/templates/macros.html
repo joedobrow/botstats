@@ -2,8 +2,11 @@
 <a href="/player/{{ account_id }}">{{ name or account_id }}</a>{{ rings(account_id) }}
 {%- endmacro %}
 
-{% macro hero_icon(h) -%}
-{% if h.slug %}<img class="hero" src="https://cdn.cloudflare.steamstatic.com/apps/dota2/images/dota_react/heroes/icons/{{ h.slug }}.png" alt="" title="{{ h.name }}">{% endif %}
+{# `alone` when no name is printed beside the icon: the alt then carries it,
+   so a picture that doesn't load leaves the hero's name rather than a gap. #}
+{% macro hero_icon(h, alone=False) -%}
+{% if h.slug %}<img class="hero" src="https://cdn.cloudflare.steamstatic.com/apps/dota2/images/dota_react/heroes/icons/{{ h.slug }}.png" alt="{{ h.name if alone else '' }}" title="{{ h.name }}">
+{%- elif alone %}{{ h.name }}{% endif %}
 {%- endmacro %}
 
 {# A player's Ability Draft picks as icons: the hero model, then abilities. #}
