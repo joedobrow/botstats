@@ -224,6 +224,12 @@ button, .button {
 .button:hover { text-decoration: none; }
 button.primary, .button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
 button.danger { color: var(--loss); }
+/* A destructive action that should be unmissable rather than merely red
+   text — the same red as the tiles, filled, so it reads as a button. */
+button.danger.solid, .button.danger.solid {
+  background: var(--loss); border-color: var(--loss); color: var(--accent-text); font-weight: 600;
+}
+button.danger.solid:hover, .button.danger.solid:hover { filter: brightness(1.1); }
 button.linklike { border: 0; background: none; padding: 0; color: var(--link); font-weight: 400; }
 button.linklike.danger { color: var(--loss); }
 form.inline { display: inline; }
