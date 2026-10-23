@@ -277,9 +277,21 @@ async def home(request: web.Request):
         rows, _, _ = store.season_leaders(season)
         leaders += [dict(r, season=season) for r in rows]
     leaders.sort(key=lambda r: -r["fantasy_points"])
+    open_seasons = _open_seasons()
+    mine = _my_signups(request)
+    # Until they're in one, everyone is asked — signed in or not. Signing up
+    # for one region is the answer, so the other doesn't keep asking.
+    signup_seasons = ([] if any((s["id"], s["division_id"]) in mine for s in open_seasons)
+                      else open_seasons)
     return render(request, "home.html", blocks=blocks, many_divisions=many,
                   results=results[:8], leaders=leaders[:5], team_names=team_names,
-                  open_seasons=_open_seasons(), matchup_links=_matchup_links(request, current))
+                  open_seasons=open_seasons, signup_seasons=signup_seasons,
+                  matchup_links=_matchup_links(request, current))
+
+
+def _my_signups(request: web.Request) -> set[tuple[int, int]]:
+    user = request.get("user")
+    return set(store.signed_up_seasons(user["account_id"])) if user else set()
 
 
 def _matchup_links(request: web.Request, current: list[dict]) -> list[dict]:
@@ -308,7 +320,8 @@ async def signup_hub(request: web.Request):
     open_seasons = _open_seasons()
     if len(open_seasons) == 1:
         raise web.HTTPFound(season_url(open_seasons[0]) + "/signup")
-    return render(request, "signup_hub.html", title="Sign up", open_seasons=open_seasons)
+    return render(request, "signup_hub.html", title="Sign up", open_seasons=open_seasons,
+                  mine=_my_signups(request))
 
 
 @routes.get("/info")

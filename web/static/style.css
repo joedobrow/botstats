@@ -773,3 +773,13 @@ a.tile:focus-visible { outline: 3px solid var(--accent); outline-offset: 4px; }
 .team-roster { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 4px 14px;
                font-size: .85rem; }
 .team-roster .chip { gap: 4px; }
+
+/* Front page, while signups are open and the viewer isn't in one yet. */
+.signup-callout {
+  display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap;
+  gap: 10px 20px; margin: 0 0 18px; padding: 14px 18px;
+  background: var(--surface); border: 1px solid var(--accent); border-left-width: 6px;
+  border-radius: 8px;
+}
+.signup-callout h2 { margin: 0; font-size: 1.15rem; }
+.signup-callout .button { min-width: 6em; justify-content: center; text-align: center; }
