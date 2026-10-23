@@ -777,7 +777,9 @@ a.tile:focus-visible { outline: 3px solid var(--accent); outline-offset: 4px; }
 .dot.off { background: var(--loss); opacity: .55; }
 
 /* The auction floor. */
-.admin-bid { display: inline-flex; gap: 6px; align-items: center; }
+.admin-bid, .bid-buttons { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.bid-row #bid-amount { width: 7em; font-size: 1.05rem; font-weight: 700; }
+#phase.paused { background: var(--call-bg); color: var(--call-ink); }
 .admin-bid select { width: auto; }
 .lot { display: flex; align-items: center; justify-content: space-between; gap: 16px;
        flex-wrap: wrap; margin: 6px 0 12px; }

@@ -1432,8 +1432,9 @@ async def draft_start(request: web.Request):
 
 @routes.post("/season/{season_id}/{division}/draft/rules")
 async def draft_rules(request: web.Request):
-    """The lowest bid and the clock. Only before it starts. Budgets are set
-    captain by captain, and every team drafts four, so neither is here."""
+    """The clock. Only before it starts. Budgets are set captain by captain,
+    every team drafts four and any bid of at least 1 counts, so nothing else
+    is here."""
     season = _season_or_404(request)
     _require_admin(request)
     data = await request.post()
@@ -1441,7 +1442,7 @@ async def draft_rules(request: web.Request):
     if draft.state(season).phase != draft.LOBBY:
         raise web.HTTPFound(back + "?" + urlencode({"notice": "The draft has already started."}))
     rules = {}
-    for key, low, high in (("min_bid", 1, 1000), ("bid_seconds", 3, 300)):
+    for key, low, high in (("bid_seconds", 3, 300),):
         raw = re.sub(r"\D", "", data.get(key, ""))
         if not raw or not low <= int(raw) <= high:
             raise web.HTTPFound(back + "?" + urlencode(
@@ -1531,6 +1532,24 @@ async def draft_undo(request: web.Request):
 
     def run(season, st, user, data):
         request["undone"] = draft.undo(season, st)
+    return await _draft_action(request, run)
+
+
+@routes.post("/season/{season_id}/{division}/draft/pause")
+async def draft_pause(request: web.Request):
+    _require_admin(request)
+
+    def run(season, st, user, data):
+        draft.pause(season, st, user["account_id"])
+    return await _draft_action(request, run)
+
+
+@routes.post("/season/{season_id}/{division}/draft/resume")
+async def draft_resume(request: web.Request):
+    _require_admin(request)
+
+    def run(season, st, user, data):
+        draft.resume(season, st, user["account_id"])
     return await _draft_action(request, run)
 
 
