@@ -26,7 +26,14 @@
   <section class="panel" id="lot-panel" hidden>
     <h2 class="with-action">Up now <span class="clock" id="clock"></span></h2>
     <div class="lot" id="lot"></div>
-    <div class="actions" id="bids"></div>
+    <div class="actions bid-row" id="bid-row" hidden>
+      <input type="number" id="bid-amount" min="1" step="1" inputmode="numeric" aria-label="Bid amount">
+      <span class="bid-buttons" id="bid-buttons"></span>
+      {% if is_admin %}<span class="admin-bid" id="admin-bid" hidden>
+        <select id="admin-bid-as" aria-label="Team to bid for"></select>
+        <button id="admin-bid-go">Bid as them</button>
+      </span>{% endif %}
+    </div>
   </section>
 
   <section class="panel" id="commit-panel" hidden>
@@ -39,6 +46,7 @@
   </section>
 
   <div class="actions" id="undo-row" hidden>
+    <button id="pause">Pause</button>
     <button class="danger solid" id="undo">Take back <span id="undo-what"></span></button>
   </div>
 
@@ -82,7 +90,6 @@
   <h2>Rules</h2>
   <form method="post" action="{{ season_url(season) }}/draft/rules" class="form grid">
     <input type="hidden" name="csrf" value="{{ csrf }}">
-    <label>Lowest bid <input type="number" name="min_bid" min="1" value="{{ view.rules.min_bid }}"></label>
     <label>Seconds on the clock <input type="number" name="bid_seconds" min="3" max="300" value="{{ view.rules.bid_seconds }}"></label>
     <div class="actions"><button class="primary">Save</button></div>
   </form>

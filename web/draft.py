@@ -24,14 +24,17 @@ logger = logging.getLogger(__name__)
 # Where a draft is. The log decides which: no start event means lobby.
 LOBBY, RUNNING, DONE = "lobby", "running", "done"
 
-# What the auction is played with. An admin can change these before it
-# starts; they go into the log, so what the rules were is part of the record.
+# What the auction is played with. Only the clock is an admin's to change
+# (before it starts; it goes into the log, so what it was is part of the
+# record). Every team drafts four, any bid of at least 1 is a bid, and
+# budgets are set captain by captain.
 DEFAULT_RULES = {
-    "budget": 1000,        # what a captain has to spend unless they're given their own
+    "budget": 1000,        # only for a log from before budgets had to be set
     "slots": 4,            # players each captain drafts, on top of themselves
     "min_bid": 1,          # the smallest a player can go for
     "bid_seconds": 20,     # how long a lot stays open after the last bid
 }
+ADJUSTABLE_RULES = ("bid_seconds",)
 
 
 @dataclass
@@ -57,6 +60,10 @@ class State:
     order: list[int] = field(default_factory=list)
     lot: Lot | None = None
     rosters: dict[int, list[dict]] = field(default_factory=dict)   # captain -> [{account_id, cost}]
+    # Paused: nothing can be bid or nominated, and an open lot's clock is
+    # stopped with this much left on it.
+    paused: bool = False
+    paused_left: float | None = None
 
     # -- what the rules say, given what has happened ---------------------
     def budget(self, captain: int) -> int:
@@ -115,7 +122,9 @@ def replay(events: list[dict]) -> State:
             else:
                 st.surrogates.pop(captain, None)
         elif kind == "rules":
-            st.rules = {**DEFAULT_RULES, **(p.get("rules") or {})}
+            # Older logs set rules that are now fixed; only the clock counts.
+            given = p.get("rules") or {}
+            st.rules = {**DEFAULT_RULES, **{k: given[k] for k in ADJUSTABLE_RULES if k in given}}
         elif kind == "budgets":
             # JSON has no integer keys, so they come back as strings.
             for captain, amount in (p.get("budgets") or {}).items():
@@ -135,6 +144,12 @@ def replay(events: list[dict]) -> State:
             st.rosters.setdefault(p["captain"], []).append(
                 {"account_id": p["player"], "cost": p["cost"]})
             st.lot = None
+        elif kind == "pause":
+            st.paused, st.paused_left = True, p.get("left")
+        elif kind == "resume":
+            st.paused, st.paused_left = False, None
+            if st.lot and p.get("closes_at"):
+                st.lot.closes_at = p["closes_at"]
         elif kind == "commit":
             st.phase = DONE
     return st
@@ -219,6 +234,8 @@ def nominate(season: dict, st: State, *, actor: int | None, is_admin: bool,
     is — the order is fixed when the draft starts and never jumps."""
     if st.phase != RUNNING:
         raise Refused("The draft isn't running.")
+    if st.paused:
+        raise Refused("The draft is paused.")
     if st.lot is not None:
         raise Refused("Someone is already up for auction.")
     turn = whose_turn(st)
@@ -243,6 +260,8 @@ def bid(season: dict, st: State, *, actor: int | None, is_admin: bool,
     last one always has the same chance to be answered as the first."""
     if st.phase != RUNNING or st.lot is None:
         raise Refused("Nobody is up for auction.")
+    if st.paused:
+        raise Refused("The draft is paused.")
     _actor_for(st, captain, actor, is_admin)
     if captain not in st.rosters:
         raise Refused("That isn't a captain in this draft.")
@@ -333,12 +352,37 @@ def close_lot(season: dict, st: State) -> bool:
     """Sell, if the clock has run out. The server decides this, never a
     client — and it's safe to ask as often as you like, because a lot that
     has already been sold isn't a lot any more."""
-    if st.phase != RUNNING or st.lot is None or time.time() < st.lot.closes_at:
+    if st.phase != RUNNING or st.paused or st.lot is None or time.time() < st.lot.closes_at:
         return False
     db.append_draft_event(season["id"], season["division_id"], "sold", None,
                           {"player": st.lot.player, "captain": st.lot.bidder,
                            "cost": st.lot.bid})
     return True
+
+
+def pause(season: dict, st: State, actor: int | None) -> None:
+    """Stop everything where it is. An open lot keeps the time it had left."""
+    if st.phase != RUNNING:
+        raise Refused("The draft isn't running.")
+    if st.paused:
+        raise Refused("The draft is already paused.")
+    left = max(0.0, st.lot.closes_at - time.time()) if st.lot else None
+    db.append_draft_event(season["id"], season["division_id"], "pause", actor, {"left": left})
+
+
+def resume(season: dict, st: State, actor: int | None) -> None:
+    """Carry on. The open lot gets back exactly the time it was paused with —
+    but never less than a few seconds, so nobody is sold the instant the
+    room comes back."""
+    if st.phase != RUNNING:
+        raise Refused("The draft isn't running.")
+    if not st.paused:
+        raise Refused("The draft isn't paused.")
+    closes_at = None
+    if st.lot:
+        closes_at = time.time() + max(st.paused_left or 0.0, 5.0)
+    db.append_draft_event(season["id"], season["division_id"], "resume", actor,
+                          {"closes_at": closes_at})
 
 
 def may_act_for(st: State, captain_id: int, account_id: int | None) -> bool:
@@ -444,7 +488,7 @@ async def _run_clock(season: dict) -> None:
     try:
         while True:
             st = state(season)
-            if st.phase != RUNNING or st.lot is None:
+            if st.phase != RUNNING or st.lot is None or st.paused:
                 return
             wait = st.lot.closes_at - time.time()
             if wait > 0:
@@ -486,9 +530,11 @@ def view(season: dict, st: State, present: set[int]) -> dict:
                      "slots_left": st.slots_left(c), "max_bid": st.max_bid(c),
                      "roster": st.rosters.get(c, [])} for c in ranked]
     out["pool"] = draftees(season, st) if st.phase == RUNNING else []
+    out["paused"] = st.paused
     out["lot"] = (None if not st.lot else
                   {"player": st.lot.player, "bid": st.lot.bid, "bidder": st.lot.bidder,
-                   "closes_in": max(0.0, st.lot.closes_at - time.time())})
+                   "closes_in": (st.paused_left or 0.0) if st.paused
+                                else max(0.0, st.lot.closes_at - time.time())})
     out["done"] = st.done()
     undo_target = undoable(season) if st.phase == RUNNING else None
     out["undoable"] = undo_target[0] if undo_target else None

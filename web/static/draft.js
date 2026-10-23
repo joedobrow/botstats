@@ -69,34 +69,52 @@
     }
   }
 
+  // The amount box survives every repaint: other people's bids arrive
+  // while you're typing, and a box that reset itself would eat your number.
+  // It only moves on its own when what's in it is no longer a raise.
+  let lotKey = null, typed = false;
+
   function drawLot(v) {
     const panel = $("lot-panel");
     panel.hidden = !v.lot;
-    if (!v.lot) { $("bids").innerHTML = ""; return; }
+    if (!v.lot) { lotKey = null; return; }
     $("lot").innerHTML = `<div class="lot-player">${face(v.lot.player)}
         <a href="/player/${v.lot.player}">${esc(who(v.lot.player))}</a></div>
       <div class="lot-bid"><b>${v.lot.bid}</b> <span class="muted small">to ${esc(who(v.lot.bidder))}</span></div>`;
-    // One button per team you may bid for, at the next price up.
-    const next = v.lot.bid + 1;
-    const canBid = c => {
-      const team = v.teams.find(t => t.captain === c) || {};
-      return c !== v.lot.bidder && team.slots_left > 0 && team.max_bid >= next;
-    };
-    let html = MINE.filter(c => c !== v.lot.bidder).map(c =>
-      `<button class="primary" data-bid="${c}" ${canBid(c) ? "" : "disabled"}>
-        Bid ${next}${MINE.length > 1 ? " as " + esc(who(c)) : ""}</button>`).join("");
+    const amount = $("bid-amount");
+    if (lotKey !== v.lot.player) { lotKey = v.lot.player; typed = false; }
+    if (!typed || !(Number(amount.value) > v.lot.bid)) amount.value = v.lot.bid + 1;
+    amount.min = v.lot.bid + 1;
+
+    const ours = MINE.filter(c => v.teams.some(t => t.captain === c));
+    $("bid-buttons").innerHTML = ours.map(c => `<button class="primary" data-bid="${c}">
+        Bid${ours.length > 1 ? " as " + esc(who(c)) : ""}</button>`).join("");
     // An admin can bid for any team: the captain who lost their connection,
     // or every team at once when the draft is being tried out.
-    if (ADMIN) {
-      const keep = $("admin-bid-as") && $("admin-bid-as").value;
-      const opts = v.teams.map(t => t.captain).filter(c => !MINE.includes(c) && canBid(c));
-      if (opts.length) {
-        html += `<span class="admin-bid"><select id="admin-bid-as" aria-label="Team to bid for">${
-          opts.map(c => `<option value="${c}"${String(c) === keep ? " selected" : ""}>${esc(who(c))}</option>`).join("")
-        }</select><button id="admin-bid-go">Bid ${next} as them</button></span>`;
-      }
+    const adminBox = $("admin-bid");
+    if (adminBox) {
+      const sel = $("admin-bid-as"), keep = sel.value;
+      const others = v.teams.map(t => t.captain).filter(c => !ours.includes(c) && c !== v.lot.bidder);
+      adminBox.hidden = !others.length;
+      sel.innerHTML = others.map(c => `<option value="${c}"${String(c) === keep ? " selected" : ""}>${esc(who(c))}</option>`).join("");
     }
-    $("bids").innerHTML = html;
+    $("bid-row").hidden = !(ours.length || (adminBox && !adminBox.hidden));
+    checkBids();
+  }
+
+  // Grey out a bid button when that team can't make the bid in the box.
+  function checkBids() {
+    const v = view;
+    if (!v.lot) return;
+    const amount = Number($("bid-amount").value);
+    const ok = c => {
+      const team = v.teams.find(t => String(t.captain) === String(c)) || {};
+      return !v.paused && String(c) !== String(v.lot.bidder) && team.slots_left > 0
+        && amount > v.lot.bid && team.max_bid >= amount;
+    };
+    document.querySelectorAll("#bid-buttons [data-bid]").forEach(b => { b.disabled = !ok(b.dataset.bid); });
+    const go = $("admin-bid-go");
+    if (go) go.disabled = !ok($("admin-bid-as").value);
   }
 
   function drawTurn(v) {
@@ -104,8 +122,8 @@
     const running = v.phase === "running" && !v.done;
     panel.hidden = !running || !!v.lot;
     if (panel.hidden) return;
-    const mineTurn = v.turn && (MINE.includes(v.turn) || ADMIN);
-    $("turn-head").textContent = v.turn
+    const mineTurn = v.turn && (MINE.includes(v.turn) || ADMIN) && !v.paused;
+    $("turn-head").textContent = v.paused ? "Paused" : v.turn
       ? (MINE.includes(v.turn) ? "Your nomination"
          : ADMIN ? "Nominate for " + who(v.turn) : who(v.turn) + " is nominating")
       : "Nobody left to nominate";
@@ -117,8 +135,8 @@
     sel.innerHTML = v.pool.map(p => `<option value="${p.account_id}">${esc(p.name)}</option>`).join("");
     if (keep && v.pool.some(p => String(p.account_id) === keep)) sel.value = keep;
     const team = v.teams.find(t => t.captain === v.turn) || {};
-    $("nom-amount").min = v.rules.min_bid;
-    $("nom-amount").max = team.max_bid || v.rules.min_bid;
+    $("nom-amount").min = 1;
+    $("nom-amount").max = team.max_bid || 1;
   }
 
   function drawTeams(v) {
@@ -136,8 +154,12 @@
   function drawUndo(v) {
     const row = $("undo-row");
     if (!row) return;
-    row.hidden = !(ADMIN && v.phase === "running" && v.undoable);
-    if (!row.hidden) $("undo-what").textContent = v.undoable;
+    row.hidden = !(ADMIN && v.phase === "running" && !v.done);
+    $("undo").hidden = !v.undoable;
+    if (v.undoable) $("undo-what").textContent = v.undoable;
+    const pause = $("pause");
+    pause.textContent = v.paused ? "Resume" : "Pause";
+    pause.classList.toggle("primary", !!v.paused);
   }
 
   function drawCommit(v) {
@@ -157,7 +179,8 @@
 
   function paint(v) {
     view = v;
-    $("phase").textContent = PHASES[v.phase] || v.phase;
+    $("phase").textContent = v.paused ? "Paused" : (PHASES[v.phase] || v.phase);
+    $("phase").classList.toggle("paused", !!v.paused);
     $("lobby-panel").hidden = v.phase !== "lobby";
     ["admin-lobby", "admin-rules", "admin-budgets"].forEach(id => { const e = $(id); if (e) e.hidden = v.phase !== "lobby"; });
     drawSeats(v);
@@ -166,13 +189,16 @@
     drawTeams(v);
     drawUndo(v);
     drawCommit(v);
-    closesAt = v.lot ? Date.now() + v.lot.closes_in * 1000 : 0;
+    closesAt = v.lot && !v.paused ? Date.now() + v.lot.closes_in * 1000 : 0;
+    frozen = v.lot && v.paused ? v.lot.closes_in : null;
     tick();
     if (v.stuck) say("Nobody is left to nominate and rosters aren't full — add more signups.");
   }
 
+  let frozen = null;              // seconds left on a paused lot
   function tick() {
     const clock = $("clock");
+    if (frozen !== null) { clock.textContent = "paused · " + frozen.toFixed(0) + "s"; clock.classList.remove("soon"); return; }
     if (!closesAt) { clock.textContent = ""; return; }
     const left = Math.max(0, (closesAt - Date.now()) / 1000);
     clock.textContent = left.toFixed(0) + "s";
@@ -182,10 +208,26 @@
 
   document.addEventListener("click", e => {
     const bid = e.target.closest("[data-bid]");
-    if (bid && view.lot) send("/bid", {captain: bid.dataset.bid, amount: view.lot.bid + 1});
-    if (e.target.id === "admin-bid-go" && view.lot)
-      send("/bid", {captain: $("admin-bid-as").value, amount: view.lot.bid + 1});
+    if (bid && view.lot) placeBid(bid.dataset.bid);
+    if (e.target.id === "admin-bid-go" && view.lot) placeBid($("admin-bid-as").value);
+    if (e.target.id === "pause") send(view.paused ? "/resume" : "/pause", {});
   });
+  function placeBid(captain) {
+    send("/bid", {captain, amount: $("bid-amount").value});
+    typed = false;
+  }
+  const amountBox = $("bid-amount");
+  amountBox.addEventListener("input", () => { typed = true; checkBids(); });
+  // Enter bids for your own team, or for the one picked in the admin box.
+  amountBox.addEventListener("keydown", e => {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    const own = document.querySelector("#bid-buttons [data-bid]:not([disabled])");
+    if (own) own.click();
+    else if ($("admin-bid-go") && !$("admin-bid-go").disabled) placeBid($("admin-bid-as").value);
+  });
+  const adminAs = $("admin-bid-as");
+  if (adminAs) adminAs.addEventListener("change", checkBids);
   const undoBtn = $("undo");
   if (undoBtn) undoBtn.addEventListener("click", () => {
     if (confirm("Take back " + $("undo-what").textContent + "?")) send("/undo", {});
