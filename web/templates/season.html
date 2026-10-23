@@ -368,36 +368,51 @@
 
 {% elif tab == "signups" %}
   {% if notice %}<p class="notice">{{ notice }}</p>{% endif %}
-  {% if is_admin %}<p class="small"><a href="{{ season_url(season) }}/signups.csv">Download signups as CSV</a></p>{% endif %}
+  <div class="subtabs-row">
+    <nav class="subtabs" aria-label="Signups">
+      {% for key, label in signup_levels %}
+      <a href="?tab=signups&amp;list={{ key }}"{% if signup_list == key %} class="active" aria-current="page"{% endif %}>
+        {{- label }}s <span class="count">{{ signups_by_level[key]|length }}</span></a>
+      {% endfor %}
+    </nav>
+    {% if is_admin %}<a class="small" href="{{ season_url(season) }}/signups.csv">Download all {{ signup_total }} as CSV</a>{% endif %}
+  </div>
   <div class="scroll">
-  <table>
-    <thead><tr><th>#</th><th>Player</th><th>Badge</th><th>Positions</th><th>Signed up as</th><th>Captain?</th><th>Comment</th>{% if is_admin %}<th>Discord</th><th></th>{% endif %}</tr></thead>
+  <table class="sortable">
+    <thead><tr>
+      <th class="num" data-sort-type="num">#</th>
+      <th data-sort-type="text">Player</th>
+      <th class="num" data-sort-type="num" data-sort-first="desc" title="Internal rating">Rating</th>
+      <th data-sort-type="text">Positions</th>
+      {% if is_admin %}<th title="Move them to another list">List</th>{% endif %}
+      <th>Comment</th>
+      {% if is_admin %}<th data-sort-type="text">Discord</th><th></th>{% endif %}
+    </tr></thead>
     <tbody>
     {% for s in signups %}
       <tr>
-        <td class="muted">{{ loop.index }}</td>
-        <td>{{ player_link(s.account_id, s.name) }}</td>
-        <td>{{ s.badge or "" }}</td>
+        <td class="num muted">{{ loop.index }}</td>
+        <td data-sort="{{ s.name|lower }}">{{ player_link(s.account_id, s.name) }}
+          {%- if s.level_override and s.level_override != s.level %}
+          <span class="tag" title="They signed up as {{ store_level_labels[s.level] }}">moved</span>{% endif %}</td>
+        <td class="num" data-sort="{{ ratings.get(s.account_id, '') }}">{{ ratings.get(s.account_id) or "—" }}</td>
         <td>{{ s.positions|join(", ") }}</td>
+        {% if is_admin %}
         <td class="nowrap">
-          {% if is_admin %}
           <form method="post" action="/admin/signup/level" class="inline level-pick">
             <input type="hidden" name="csrf" value="{{ csrf }}">
             <input type="hidden" name="season_id" value="{{ season.id }}">
             <input type="hidden" name="division_id" value="{{ season.division_id }}">
             <input type="hidden" name="account_id" value="{{ s.account_id }}">
-            <select name="level" onchange="this.form.submit()">
+            <input type="hidden" name="list" value="{{ signup_list }}">
+            <select name="level" onchange="this.form.submit()" aria-label="List for {{ s.name }}">
               {% for key, label in signup_levels %}
               <option value="{{ key }}"{% if s.level_is == key %} selected{% endif %}>{{ label }}</option>
               {% endfor %}
             </select>
           </form>
-          {% else %}{{ s.level_label }}{% endif %}
-          {% if s.level_override and s.level_override != s.level %}
-          <span class="tag" title="They signed up as {{ store_level_labels[s.level] }}">changed</span>
-          {% endif %}
         </td>
-        <td>{{ s.captain|capitalize }}</td>
+        {% endif %}
         <td class="statement">{{ s.statement or "" }}</td>
         {% if is_admin %}
         <td>{{ s.discord or "" }}</td>
@@ -405,15 +420,16 @@
           <form method="post" action="/admin/signup/delete" class="inline" onsubmit="return confirm('Remove {{ s.name|e }} from signups?')">
             <input type="hidden" name="csrf" value="{{ csrf }}">
             <input type="hidden" name="season_id" value="{{ season.id }}">
-    <input type="hidden" name="division_id" value="{{ season.division_id }}">
+            <input type="hidden" name="division_id" value="{{ season.division_id }}">
             <input type="hidden" name="account_id" value="{{ s.account_id }}">
+            <input type="hidden" name="list" value="{{ signup_list }}">
             <button class="linklike danger">Remove</button>
           </form>
         </td>
         {% endif %}
       </tr>
     {% else %}
-      <tr><td colspan="10" class="muted">No signups yet.</td></tr>
+      <tr><td colspan="8" class="muted">Nobody yet.</td></tr>
     {% endfor %}
     </tbody>
   </table>

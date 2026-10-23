@@ -2,32 +2,11 @@
 {% from "macros.html" import player_link, team_cell, season_status %}
 {% block content %}
 <section class="banner">
+  <h1 class="visually-hidden">Ability Draft Community League</h1>
   <picture class="themed banner-logo">
     <source media="(prefers-color-scheme: dark)" srcset="/static/adcl-logo-dark.png?v={{ asset_version }}">
     <img src="/static/adcl-logo-light.png?v={{ asset_version }}" alt="ADCL">
   </picture>
-  <div class="banner-text">
-    <h1 class="banner-title">Ability Draft Community League</h1>
-    {% if blocks %}
-    {# Divisions usually run the same season, so its name is said once and the
-       links are the divisions; when they've drifted apart each link says both. #}
-    {% set labels = blocks | map(attribute="season.label") | unique | list %}
-    <div class="banner-sub">
-      {% if many_divisions and labels | length == 1 %}{{ labels[0] }} · {% endif %}
-      {%- for b in blocks %}{% if not loop.first %} · {% endif %}
-      <a href="{{ season_url(b.season) }}">{% if not many_divisions %}{{ b.season.label }}
-        {%- elif labels | length == 1 %}{{ b.season.division }}
-        {%- else %}{{ b.season.label }} · {{ b.season.division }}{% endif %}</a>
-      {{ season_status(b.season) }}{% endfor %}
-    </div>
-    {% endif %}
-    {% if matchup_links or open_seasons %}
-    <div class="actions">
-      {% for m in matchup_links %}<a class="button matchup-cta" href="{{ m.url }}">{{ m.label }} →</a>{% endfor %}
-      {% if open_seasons and not signup_seasons %}<a class="button" href="/signup">My signup</a>{% endif %}
-    </div>
-    {% endif %}
-  </div>
   <picture class="themed banner-mascot">
     <source media="(prefers-color-scheme: dark)" srcset="/static/mascot-dark.png?v={{ asset_version }}">
     <img src="/static/mascot-light.png?v={{ asset_version }}" alt="">
@@ -37,16 +16,50 @@
 {% if signup_seasons %}
 {% set names = signup_seasons | map(attribute="label") | unique | list %}
 <section class="signup-callout">
-  <h2>Sign up for {{ names | join(" or ") }}</h2>
+  <div>
+    <span class="signup-eyebrow">Signups open</span>
+    <h2>Sign up for {{ names | join(" or ") }}</h2>
+  </div>
   <div class="actions">
     {% for s in signup_seasons %}
-    <a class="button primary" href="{{ season_url(s) }}/signup">
-      {%- if signup_seasons | length == 1 %}Sign up
-      {%- elif names | length == 1 %}{{ s.division }}
+    <a class="button" href="{{ season_url(s) }}/signup">
+      {%- if signup_seasons | length == 1 and not s.show_division %}Sign up
+      {%- elif names | length == 1 %}Sign up · {{ s.division }}
       {%- else %}{{ s.label }} · {{ s.division }}{% endif %}</a>
     {% endfor %}
   </div>
 </section>
+{% endif %}
+
+{% if season_cards %}
+<div class="season-cards">
+  {% for c in season_cards %}
+  <section class="season-card">
+    <h2>{% if c.rows|length == 1 %}<a href="{{ season_url(c.rows[0].season) }}">{{ c.label }}</a>{% else %}{{ c.label }}{% endif %}</h2>
+    {% for r in c.rows %}
+    <div class="season-row">
+      <div class="season-row-info">
+        {% if r.season.show_division %}<a class="season-div" href="{{ season_url(r.season) }}">{{ r.season.division }}</a>{% endif %}
+        {{ season_status(r.season) }}
+        {% if r.kind == "playing" %}
+          {% if r.week %}<span class="muted">{{ r.week }}</span>{% endif %}
+        {% else %}
+          <a class="muted" href="{{ season_url(r.season) }}?tab=signups">{{ r.season.signup_count }} signed up</a>
+          <span class="muted">starts {{ r.starts }}</span>
+        {% endif %}
+      </div>
+      {% if r.kind == "playing" %}
+      <a class="button{% if r.yours %} matchup-cta{% endif %}" href="{{ season_url(r.season) }}?tab=matchups">Matchups</a>
+      {% elif r.signed_up %}
+      <a class="button" href="{{ season_url(r.season) }}/signup">Your signup</a>
+      {% else %}
+      <a class="button primary" href="{{ season_url(r.season) }}/signup">Sign up</a>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </section>
+  {% endfor %}
+</div>
 {% endif %}
 
 <div class="feed">

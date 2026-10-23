@@ -279,14 +279,38 @@ async def home(request: web.Request):
     leaders.sort(key=lambda r: -r["fantasy_points"])
     open_seasons = _open_seasons()
     mine = _my_signups(request)
-    # Until they're in one, everyone is asked — signed in or not. Signing up
-    # for one region is the answer, so the other doesn't keep asking.
-    signup_seasons = ([] if any((s["id"], s["division_id"]) in mine for s in open_seasons)
-                      else open_seasons)
+    # Every open region the viewer isn't in yet, signed in or not: someone in
+    # NA may want EU too, so signing up for one doesn't hide the other.
+    signup_seasons = [s for s in open_seasons if (s["id"], s["division_id"]) not in mine]
     return render(request, "home.html", blocks=blocks, many_divisions=many,
                   results=results[:8], leaders=leaders[:5], team_names=team_names,
-                  open_seasons=open_seasons, signup_seasons=signup_seasons,
-                  matchup_links=_matchup_links(request, current))
+                  signup_seasons=signup_seasons,
+                  season_cards=_season_cards(request, blocks, open_seasons, mine))
+
+
+def _season_cards(request: web.Request, blocks: list[dict], open_seasons: list[dict],
+                  mine: set[tuple[int, int]]) -> list[dict]:
+    """One card per season on the front page — the ones being played and the
+    ones taking signups — with a row for each division in it."""
+    yours = {(s["id"], s["division_id"]) for s in
+             (_matchup_seasons(request, [b["season"] for b in blocks]))}
+    cards: dict[int, dict] = {}
+    for b in blocks:
+        s = b["season"]
+        card = cards.setdefault(s["id"], {"label": s["label"], "start": s["season_start"], "rows": []})
+        card["rows"].append({"season": s, "kind": "playing",
+                             "week": b["this_week"]["label"] if b["this_week"] else None,
+                             "yours": (s["id"], s["division_id"]) in yours})
+    playing = {(b["season"]["id"], b["season"]["division_id"]) for b in blocks}
+    for s in open_seasons:
+        if (s["id"], s["division_id"]) in playing:
+            continue
+        card = cards.setdefault(s["id"], {"label": s["label"], "start": s["season_start"], "rows": []})
+        card["rows"].append({"season": s, "kind": "signups",
+                             "signed_up": (s["id"], s["division_id"]) in mine,
+                             "starts": datetime.strptime(s["season_start"], "%Y-%m-%d")
+                                       .strftime("%b %-d, %Y")})
+    return sorted(cards.values(), key=lambda c: c["start"])
 
 
 def _my_signups(request: web.Request) -> set[tuple[int, int]]:
@@ -294,8 +318,8 @@ def _my_signups(request: web.Request) -> set[tuple[int, int]]:
     return set(store.signed_up_seasons(user["account_id"])) if user else set()
 
 
-def _matchup_links(request: web.Request, current: list[dict]) -> list[dict]:
-    """The banner's matchups button: the viewer's own league, or nothing.
+def _matchup_seasons(request: web.Request, current: list[dict]) -> list[dict]:
+    """Which of the seasons being played are the viewer's own league.
 
     Theirs is a league they signed up for here, or — since the seasons
     played so far were drafted from lists that predate the site — one they
@@ -308,20 +332,18 @@ def _matchup_links(request: web.Request, current: list[dict]) -> list[dict]:
         return []
     aid = user["account_id"]
     signed = set(store.signed_up_seasons(aid))
-    return [{"label": f"{s['division']} matchups", "url": season_url(s) + "?tab=matchups"}
-            for s in current
+    return [s for s in current
             if (s["id"], s["division_id"]) in signed or store.plays_in(s, aid)]
 
 
 @routes.get("/signup")
 async def signup_hub(request: web.Request):
-    """The home page's Sign-Up tile: straight to the form when one season is
-    open, a choice when several are."""
+    """Straight to the form when one season is open; otherwise the front
+    page, whose signup strip and season cards are the choice."""
     open_seasons = _open_seasons()
     if len(open_seasons) == 1:
         raise web.HTTPFound(season_url(open_seasons[0]) + "/signup")
-    return render(request, "signup_hub.html", title="Sign up", open_seasons=open_seasons,
-                  mine=_my_signups(request))
+    raise web.HTTPFound("/")
 
 
 @routes.get("/info")
@@ -397,7 +419,15 @@ async def season_page(request: web.Request):
         ctx["signup_levels"] = store.SIGNUP_LEVELS
         ctx["store_level_labels"] = store.SIGNUP_LEVEL_LABELS
         ctx["notice"] = request.query.get("notice")
-        ctx["signups"] = store.list_signups(season)
+        signups = store.list_signups(season)
+        by_level = {key: [r for r in signups if r["level_is"] == key] for key, _ in store.SIGNUP_LEVELS}
+        level = request.query.get("list")
+        if level not in by_level:
+            level = next((k for k, rows in by_level.items() if rows), store.SIGNUP_LEVELS[0][0])
+        ctx["signup_list"], ctx["signups_by_level"] = level, by_level
+        ctx["signups"] = by_level[level]
+        ctx["signup_total"] = len(signups)
+        ctx["ratings"] = db.displayed_ratings(season["division_id"])
     elif tab == "champions":
         ctx["champions"] = store.season_champions(season)
         ctx["awards"] = store.season_awards(season)
@@ -1298,7 +1328,7 @@ async def admin_signup_level(request: web.Request):
         raise web.HTTPFound("/seasons")
     level = data.get("level") or None
     store.set_signup_level(season, int(data["account_id"]), level)
-    raise web.HTTPFound(season_url(season) + "?tab=signups")
+    raise web.HTTPFound(_signups_back(season, data))
 
 
 # ---------------------------------------------------------------------------
@@ -1728,7 +1758,15 @@ async def admin_delete_signup(request: web.Request):
     data = await request.post()
     season = _form_season(data)
     store.delete_signup(season, int(data["account_id"]))
-    raise web.HTTPFound(season_url(season) + "?tab=signups")
+    raise web.HTTPFound(_signups_back(season, data))
+
+
+def _signups_back(season: dict, data) -> str:
+    """Back to the signups list the form was on."""
+    back = season_url(season) + "?tab=signups"
+    if data.get("list") in store.SIGNUP_LEVEL_LABELS:
+        back += "&list=" + data["list"]
+    return back
 
 
 @routes.get("/season/{season_id}/{division}/signups.csv")
@@ -1737,13 +1775,8 @@ async def admin_signups_csv(request: web.Request):
     season = _season_or_404(request)
     buf = io.StringIO()
     w = csv.writer(buf)
-    w.writerow(["Account ID", "Name", "Badge", "MMR", "Positions", "Captain", "Discord",
-                "Statement", "Dotabuff", "Signed up"])
-    for r in store.list_signups(season):
-        w.writerow([r["account_id"], r["name"], r["badge"] or "", r["mmr"] or "",
-                    " ".join(map(str, r["positions"])), r["captain"], r["discord"] or "",
-                    r["statement"] or "", f"https://www.dotabuff.com/players/{r['account_id']}",
-                    r["created_at"]])
+    w.writerow(store.SIGNUP_EXPORT_COLUMNS)
+    w.writerows(store.signup_export(season, _base_url(request)))
     return web.Response(
         text=buf.getvalue(), content_type="text/csv",
         headers={"Content-Disposition": f'attachment; filename="signups-{season["id"]}-{season["division_slug"]}.csv"'},
