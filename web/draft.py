@@ -33,8 +33,9 @@ DEFAULT_RULES = {
     "slots": 4,            # players each captain drafts, on top of themselves
     "min_bid": 1,          # the smallest a player can go for
     "bid_seconds": 20,     # how long a lot stays open after the last bid
+    "nominate_seconds": 30,  # how long a captain has to put someone up
 }
-ADJUSTABLE_RULES = ("bid_seconds",)
+ADJUSTABLE_RULES = ("bid_seconds", "nominate_seconds")
 
 
 @dataclass
@@ -64,6 +65,11 @@ class State:
     # stopped with this much left on it.
     paused: bool = False
     paused_left: float | None = None
+    # When the captain whose turn it is must have nominated by; past it, the
+    # best-rated player left is put up for them. Set by whatever ends a lot
+    # (or starts the draft), so it's in the log like everything else.
+    nominate_by: float | None = None
+    paused_nominate_left: float | None = None
 
     # -- what the rules say, given what has happened ---------------------
     def budget(self, captain: int) -> int:
@@ -110,7 +116,12 @@ def replay(events: list[dict]) -> State:
             cancelled.update(e["payload"].get("events") or [])
     st = State()
     for e in events:
-        if e["kind"] == "undo" or e.get("id") in cancelled:
+        if e["kind"] == "undo":
+            # Taking back a lot hands the turn back, with a fresh clock.
+            if e["payload"].get("nominate_by"):
+                st.nominate_by = e["payload"]["nominate_by"]
+            continue
+        if e.get("id") in cancelled:
             continue
         kind, p = e["kind"], e["payload"]
         if kind == "surrogate":
@@ -133,6 +144,7 @@ def replay(events: list[dict]) -> State:
             st.phase, st.started_at = RUNNING, e["at"]
             st.order = list(p.get("order") or [])
             st.rosters = {c: [] for c in st.order}
+            st.nominate_by = p.get("nominate_by")
         elif kind == "nominate":
             st.lot = Lot(player=p["player"], nominated_by=p["by"], bid=p["bid"],
                          bidder=p["by"], closes_at=p["closes_at"])
@@ -144,12 +156,17 @@ def replay(events: list[dict]) -> State:
             st.rosters.setdefault(p["captain"], []).append(
                 {"account_id": p["player"], "cost": p["cost"]})
             st.lot = None
+            st.nominate_by = p.get("nominate_by")
         elif kind == "pause":
             st.paused, st.paused_left = True, p.get("left")
+            st.paused_nominate_left = p.get("nominate_left")
         elif kind == "resume":
             st.paused, st.paused_left = False, None
             if st.lot and p.get("closes_at"):
                 st.lot.closes_at = p["closes_at"]
+            if p.get("nominate_by"):
+                st.nominate_by = p["nominate_by"]
+            st.paused_nominate_left = None
         elif kind == "commit":
             st.phase = DONE
     return st
@@ -344,8 +361,30 @@ def undo(season: dict, st: State) -> str:
         raise Refused("There's nothing to take back.")
     what, events = target
     db.append_draft_event(season["id"], season["division_id"], "undo", None,
-                          {"events": events, "what": what})
+                          {"events": events, "what": what, "nominate_by": nomination_deadline(st)})
     return what
+
+
+def nomination_deadline(st: State) -> float:
+    return time.time() + st.rules["nominate_seconds"]
+
+
+def auto_nominate(season: dict, st: State) -> bool:
+    """When the nominating captain's time is up, put up the best-rated player
+    still available, at the lowest bid, for them. True if it did."""
+    if (st.phase != RUNNING or st.paused or st.lot is not None or st.nominate_by is None
+            or time.time() < st.nominate_by):
+        return False
+    turn = whose_turn(st)
+    pool = draftees(season, st)
+    if turn is None or not pool:
+        return False
+    ratings = db.displayed_ratings(season["division_id"])
+    pick = max(pool, key=lambda p: (ratings.get(p["account_id"]) or -1, p["name"].lower()))
+    db.append_draft_event(season["id"], season["division_id"], "nominate", None,
+                          {"player": pick["account_id"], "by": turn, "bid": st.rules["min_bid"],
+                           "closes_at": time.time() + st.rules["bid_seconds"], "auto": True})
+    return True
 
 
 def close_lot(season: dict, st: State) -> bool:
@@ -356,7 +395,7 @@ def close_lot(season: dict, st: State) -> bool:
         return False
     db.append_draft_event(season["id"], season["division_id"], "sold", None,
                           {"player": st.lot.player, "captain": st.lot.bidder,
-                           "cost": st.lot.bid})
+                           "cost": st.lot.bid, "nominate_by": nomination_deadline(st)})
     return True
 
 
@@ -367,7 +406,10 @@ def pause(season: dict, st: State, actor: int | None) -> None:
     if st.paused:
         raise Refused("The draft is already paused.")
     left = max(0.0, st.lot.closes_at - time.time()) if st.lot else None
-    db.append_draft_event(season["id"], season["division_id"], "pause", actor, {"left": left})
+    nominate_left = (max(0.0, st.nominate_by - time.time())
+                     if st.lot is None and st.nominate_by else None)
+    db.append_draft_event(season["id"], season["division_id"], "pause", actor,
+                          {"left": left, "nominate_left": nominate_left})
 
 
 def resume(season: dict, st: State, actor: int | None) -> None:
@@ -378,11 +420,17 @@ def resume(season: dict, st: State, actor: int | None) -> None:
         raise Refused("The draft isn't running.")
     if not st.paused:
         raise Refused("The draft isn't paused.")
-    closes_at = None
+    closes_at = nominate_by = None
     if st.lot:
         closes_at = time.time() + max(st.paused_left or 0.0, 5.0)
+    else:
+        # The turn's time left when paused — or, if the lot open then was
+        # taken back since, a full turn.
+        left = (st.paused_nominate_left if st.paused_nominate_left is not None
+                else st.rules["nominate_seconds"])
+        nominate_by = time.time() + max(left, 5.0)
     db.append_draft_event(season["id"], season["division_id"], "resume", actor,
-                          {"closes_at": closes_at})
+                          {"closes_at": closes_at, "nominate_by": nominate_by})
 
 
 def may_act_for(st: State, captain_id: int, account_id: int | None) -> bool:
@@ -488,16 +536,24 @@ async def _run_clock(season: dict) -> None:
     try:
         while True:
             st = state(season)
-            if st.phase != RUNNING or st.lot is None or st.paused:
+            if st.phase != RUNNING or st.paused or st.done():
                 return
-            wait = st.lot.closes_at - time.time()
+            if st.lot is not None:
+                deadline, act = st.lot.closes_at, close_lot
+            elif st.nominate_by is not None:
+                deadline, act = st.nominate_by, auto_nominate
+            else:
+                return
+            wait = deadline - time.time()
             if wait > 0:
                 await asyncio.sleep(min(wait, 0.5))
                 continue
             async with lock(season):
-                if close_lot(season, state(season)):
-                    await push(season)
-                    return
+                acted = act(season, state(season))
+            if acted:
+                await push(season)
+            else:
+                await asyncio.sleep(0.5)     # nothing to do yet; look again
     except asyncio.CancelledError:
         raise
     except Exception:
@@ -531,6 +587,9 @@ def view(season: dict, st: State, present: set[int]) -> dict:
                      "roster": st.rosters.get(c, [])} for c in ranked]
     out["pool"] = draftees(season, st) if st.phase == RUNNING else []
     out["paused"] = st.paused
+    out["nominate_in"] = (None if st.lot is not None or st.phase != RUNNING or st.nominate_by is None
+                          else (st.paused_nominate_left or 0.0) if st.paused
+                          else max(0.0, st.nominate_by - time.time()))
     out["lot"] = (None if not st.lot else
                   {"player": st.lot.player, "bid": st.lot.bid, "bidder": st.lot.bidder,
                    "closes_in": (st.paused_left or 0.0) if st.paused

@@ -776,12 +776,27 @@ a.tile:focus-visible { outline: 3px solid var(--accent); outline-offset: 4px; }
 .dot.on { background: var(--win); opacity: 1; }
 .dot.off { background: var(--loss); opacity: .55; }
 
-/* The auction floor. */
-/* A player's name in the draft room opens their card, so it's a button
-   dressed as a link. */
-.player-name { border: 0; background: none; padding: 0; height: auto; font: inherit;
-               color: var(--link); cursor: pointer; text-align: left; }
-.player-name:hover { text-decoration: underline; }
+/* The auction floor. Every name is a pill that opens the player's card:
+   captains in the league's red, players on plain stock. */
+.pill { display: inline-flex; align-items: center; gap: 6px; height: auto; min-height: 26px;
+        padding: 2px 9px; border-radius: 999px; font: inherit; font-size: .88rem; font-weight: 600;
+        line-height: 1.2; cursor: pointer; white-space: nowrap; max-width: 100%; }
+.pill.player { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+.pill.captain { background: var(--accent); color: var(--accent-text); border: 1px solid var(--accent); }
+.pill:hover { border-color: var(--text); }
+.pill .avatar { width: 20px; height: 20px; margin: 0 0 0 -6px; }
+.pill-name { flex: 0 0 auto; }
+.pill.big { font-size: 1.15rem; min-height: 36px; padding: 4px 14px; }
+.pill.big .avatar { width: 28px; height: 28px; }
+/* Rating as signal bars, in the pill's own ink. */
+.bars { display: inline-flex; align-items: flex-end; gap: 1px; height: 11px; margin-left: 1px; }
+.bars i { display: block; width: 3px; background: currentColor; opacity: .22; border-radius: 1px; }
+.bars i:nth-child(1) { height: 3px; } .bars i:nth-child(2) { height: 5px; }
+.bars i:nth-child(3) { height: 7px; } .bars i:nth-child(4) { height: 9px; }
+.bars i:nth-child(5) { height: 11px; }
+.bars i.on { opacity: 1; }
+.chips { gap: 6px; }
+.bought { display: inline-flex; align-items: center; gap: 4px; }
 #player-card .box-head h2 { display: flex; align-items: center; gap: 8px; text-transform: none;
                             letter-spacing: 0; font-size: 1rem; }
 .pc-row { display: flex; justify-content: space-between; gap: 12px; padding: 3px 0;
@@ -805,7 +820,7 @@ a.tile:focus-visible { outline: 3px solid var(--accent); outline-offset: 4px; }
 .team-line:last-child { border-bottom: 0; }
 .team-line.up { background: var(--tag-bg); }
 .team-money { text-align: right; }
-.team-roster { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 4px 14px;
+.team-roster { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 5px 10px;
                font-size: .85rem; }
 .team-roster .chip { gap: 4px; }
 

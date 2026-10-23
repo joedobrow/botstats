@@ -17,11 +17,32 @@
     return a ? `<img class="avatar" src="${a}" alt="">` : "";
   };
   const esc = s => String(s).replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
-  // A name opens that player's card under the pool rather than leaving the
-  // room; everything on the card came with the page, so it opens at once.
-  const nameBtn = (id, text) => `<button type="button" class="player-name" data-player="${id}">${esc(text)}</button>`;
-  const chip = id => `<span class="chip">${face(id)}${nameBtn(id, who(id))}</span>`;
   const PROFILES = D.profiles || {};
+  let CAPTAINS = new Set(((D.view || {}).captains || []).map(c => String(c.account_id)));
+
+  // Rating as signal bars: one to five, by where a player stands among this
+  // season's signups — a top fifth player shows all five. Relative, because
+  // what matters in a draft is who's better than whom in this room.
+  const rated = Object.values(PROFILES).map(p => p.rating).filter(r => r != null).sort((a, b) => a - b);
+  const tier = id => {
+    const r = PROFILES[id] && PROFILES[id].rating;
+    if (r == null || !rated.length) return 0;
+    const below = rated.filter(x => x < r).length;
+    return Math.min(5, 1 + Math.floor(5 * below / rated.length));
+  };
+  const bars = id => {
+    const t = tier(id);
+    return `<span class="bars" aria-hidden="true">${[1, 2, 3, 4, 5].map(n => `<i class="${n <= t ? "on" : ""}"></i>`).join("")}</span>`;
+  };
+  // Every name is a pill: captains in the league's red, players plain. A
+  // pill opens that player's card under the pool rather than leaving the
+  // room; everything on the card came with the page, so it opens at once.
+  const pill = (id, text, extra = "") => {
+    const r = PROFILES[id] && PROFILES[id].rating;
+    return `<button type="button" class="pill ${CAPTAINS.has(String(id)) ? "captain" : "player"} ${extra}"
+      data-player="${id}" title="${r != null ? "Rating " + r : "Not rated"}">${face(id)}<span class="pill-name">${
+      esc(text == null ? who(id) : text)}</span>${bars(id)}</button>`;
+  };
   const POSITIONS = {1: "Safe lane", 2: "Mid", 3: "Off lane", 4: "Soft support", 5: "Hard support"};
 
   let view = D.view || {};
@@ -49,8 +70,7 @@
     const ul = $("seats");
     ul.innerHTML = v.captains.map(c => `
       <li>
-        <span class="dot ${c.seated ? "on" : "off"}"></span>${face(c.account_id)}
-        ${nameBtn(c.account_id, c.name)}
+        <span class="dot ${c.seated ? "on" : "off"}"></span>${pill(c.account_id, c.name)}
         <span class="muted small">${c.budget == null ? "no budget" : c.budget}</span>
         <span class="seat-note muted small">${
           c.surrogate ? (c.surrogate_present ? "seat filled for them" : "someone is sitting in, but isn't here")
@@ -83,8 +103,7 @@
     const panel = $("lot-panel");
     panel.hidden = !v.lot;
     if (!v.lot) { lotKey = null; return; }
-    $("lot").innerHTML = `<div class="lot-player">${face(v.lot.player)}
-        ${nameBtn(v.lot.player, who(v.lot.player))}</div>
+    $("lot").innerHTML = `<div class="lot-player">${pill(v.lot.player, null, "big")}</div>
       <div class="lot-bid"><b>${v.lot.bid}</b> <span class="muted small">to ${esc(who(v.lot.bidder))}</span></div>`;
     const amount = $("bid-amount");
     if (lotKey !== v.lot.player) { lotKey = v.lot.player; typed = false; }
@@ -148,11 +167,11 @@
     $("running").hidden = v.phase === "lobby";
     $("teams").innerHTML = v.teams.map(t => `
       <div class="team-line${t.captain === v.turn ? " up" : ""}">
-        <div class="team-who">${chip(t.captain)}</div>
+        <div class="team-who">${pill(t.captain)}</div>
         <div class="team-money muted small">${t.left} left · ${t.slots_left} to fill</div>
-        <div class="team-roster">${t.roster.map(p => `${chip(p.account_id)}<span class="muted small">${p.cost}</span>`).join("")}</div>
+        <div class="team-roster">${t.roster.map(p => `<span class="bought">${pill(p.account_id)}<span class="muted small">${p.cost}</span></span>`).join("")}</div>
       </div>`).join("");
-    $("pool").innerHTML = v.pool.map(p => `<li>${chip(p.account_id)}</li>`).join("");
+    $("pool").innerHTML = v.pool.map(p => `<li>${pill(p.account_id)}</li>`).join("");
     $("pool-count").textContent = v.pool.length ? v.pool.length + " left" : "";
   }
 
@@ -217,6 +236,7 @@
 
   function paint(v) {
     view = v;
+    CAPTAINS = new Set((v.captains || []).map(c => String(c.account_id)));
     $("phase").textContent = v.paused ? "Paused" : (PHASES[v.phase] || v.phase);
     $("phase").classList.toggle("paused", !!v.paused);
     $("lobby-panel").hidden = v.phase !== "lobby";
@@ -228,13 +248,23 @@
     drawUndo(v);
     drawCommit(v);
     closesAt = v.lot && !v.paused ? Date.now() + v.lot.closes_in * 1000 : 0;
+    nominateAt = v.nominate_in != null && !v.paused ? Date.now() + v.nominate_in * 1000 : 0;
+    nominateFrozen = v.nominate_in != null && v.paused ? v.nominate_in : null;
     frozen = v.lot && v.paused ? v.lot.closes_in : null;
     tick();
     if (v.stuck) say("Nobody is left to nominate and rosters aren't full — add more signups.");
   }
 
   let frozen = null;              // seconds left on a paused lot
+  let nominateAt = 0, nominateFrozen = null;
   function tick() {
+    const nc = $("nom-clock");
+    if (nominateFrozen !== null) nc.textContent = "paused · " + nominateFrozen.toFixed(0) + "s";
+    else if (nominateAt) {
+      const n = Math.max(0, (nominateAt - Date.now()) / 1000);
+      nc.textContent = n.toFixed(0) + "s";
+      nc.classList.toggle("soon", n <= 5);
+    } else nc.textContent = "";
     const clock = $("clock");
     if (frozen !== null) { clock.textContent = "paused · " + frozen.toFixed(0) + "s"; clock.classList.remove("soon"); return; }
     if (!closesAt) { clock.textContent = ""; return; }
