@@ -17,7 +17,12 @@
     return a ? `<img class="avatar" src="${a}" alt="">` : "";
   };
   const esc = s => String(s).replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
-  const chip = id => `<span class="chip">${face(id)}<a href="/player/${id}">${esc(who(id))}</a></span>`;
+  // A name opens that player's card under the pool rather than leaving the
+  // room; everything on the card came with the page, so it opens at once.
+  const nameBtn = (id, text) => `<button type="button" class="player-name" data-player="${id}">${esc(text)}</button>`;
+  const chip = id => `<span class="chip">${face(id)}${nameBtn(id, who(id))}</span>`;
+  const PROFILES = D.profiles || {};
+  const POSITIONS = {1: "Safe lane", 2: "Mid", 3: "Off lane", 4: "Soft support", 5: "Hard support"};
 
   let view = D.view || {};
   let closesAt = 0;                 // local clock, resynced on every message
@@ -45,7 +50,7 @@
     ul.innerHTML = v.captains.map(c => `
       <li>
         <span class="dot ${c.seated ? "on" : "off"}"></span>${face(c.account_id)}
-        <a href="/player/${c.account_id}">${esc(c.name)}</a>
+        ${nameBtn(c.account_id, c.name)}
         <span class="muted small">${c.budget == null ? "no budget" : c.budget}</span>
         <span class="seat-note muted small">${
           c.surrogate ? (c.surrogate_present ? "seat filled for them" : "someone is sitting in, but isn't here")
@@ -79,7 +84,7 @@
     panel.hidden = !v.lot;
     if (!v.lot) { lotKey = null; return; }
     $("lot").innerHTML = `<div class="lot-player">${face(v.lot.player)}
-        <a href="/player/${v.lot.player}">${esc(who(v.lot.player))}</a></div>
+        ${nameBtn(v.lot.player, who(v.lot.player))}</div>
       <div class="lot-bid"><b>${v.lot.bid}</b> <span class="muted small">to ${esc(who(v.lot.bidder))}</span></div>`;
     const amount = $("bid-amount");
     if (lotKey !== v.lot.player) { lotKey = v.lot.player; typed = false; }
@@ -177,6 +182,39 @@
     }
   }
 
+  function showCard(id) {
+    const p = PROFILES[id], card = $("player-card");
+    if (!card) return;
+    const row = (label, value) => value === null || value === undefined || value === "" ? ""
+      : `<div class="pc-row"><span class="label">${label}</span><span>${value}</span></div>`;
+    $("pc-name").innerHTML = face(id) + esc(who(id));
+    if (!p) {
+      $("pc-body").innerHTML = `<p class="muted">Not signed up for this season.</p>
+        <p class="small"><a href="/player/${id}" target="_blank" rel="noopener">Full profile</a></p>`;
+    } else {
+      const record = p.games
+        ? `${p.games} games · ${p.wins}–${p.games - p.wins} · ${Math.round(100 * p.wins / p.games)}%` : "No league games";
+      const history = p.history.length ? `<table class="compact pc-history"><tbody>${p.history.map(h => `
+          <tr><td>${esc(h.season)}</td><td>${esc(h.team || "")}</td>
+              <td class="num">${h.captain ? '<span class="tag">C</span>' : (h.cost != null ? "$" + h.cost : "")}</td></tr>`).join("")}
+        </tbody></table>` : "";
+      $("pc-body").innerHTML =
+        row("Rating", p.rating != null ? `<b>${p.rating}</b>` : "") +
+        row("Rank", p.badge ? esc(p.badge) : "") +
+        row("Positions", p.positions.map(n => `${n} · ${POSITIONS[n] || ""}`).join(", ")) +
+        row("Signed up as", esc(p.level)) +
+        row("League", record) +
+        (p.games ? row("Per game", `${p.fantasy} fantasy · ${p.kda} KDA · ${p.gpm} GPM`) : "") +
+        row("Titles", p.titles ? "\u{1F48D}".repeat(p.titles) : "") +
+        row("Also signed up", p.other_divisions.length ? esc(p.other_divisions.join(", ")) : "") +
+        (p.comment ? `<p class="pc-comment">“${esc(p.comment)}”</p>` : "") +
+        history +
+        `<p class="small"><a href="/player/${id}" target="_blank" rel="noopener">Full profile</a></p>`;
+    }
+    card.hidden = false;
+    card.dataset.player = id;
+  }
+
   function paint(v) {
     view = v;
     $("phase").textContent = v.paused ? "Paused" : (PHASES[v.phase] || v.phase);
@@ -207,6 +245,9 @@
   setInterval(tick, 200);
 
   document.addEventListener("click", e => {
+    const name = e.target.closest("[data-player]");
+    if (name) { showCard(name.dataset.player); return; }
+    if (e.target.id === "pc-close") { $("player-card").hidden = true; return; }
     const bid = e.target.closest("[data-bid]");
     if (bid && view.lot) placeBid(bid.dataset.bid);
     if (e.target.id === "admin-bid-go" && view.lot) placeBid($("admin-bid-as").value);

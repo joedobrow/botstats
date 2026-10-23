@@ -12,7 +12,7 @@
    quote that would end an attribute, and it does escape the < that could
    end this block. #}
 <script type="application/json" id="draft-data">{{ {
-  "me": me or 0, "mine": my_teams, "names": names, "admin": is_admin,
+  "me": me or 0, "mine": my_teams, "names": names, "profiles": profiles, "admin": is_admin,
   "base": season_url(season) ~ "/draft", "view": view } | tojson }}</script>
 <div id="room" data-csrf="{{ csrf }}">
 
@@ -68,6 +68,10 @@
       <section class="box"><header class="box-head"><h2>Still available</h2>
         <span class="muted small" id="pool-count"></span></header>
         <ul class="chips" id="pool"></ul></section>
+      <section class="box" id="player-card" hidden>
+        <header class="box-head"><h2 id="pc-name"></h2>
+          <button type="button" class="linklike" id="pc-close" aria-label="Close">Close</button></header>
+        <div class="box-body" id="pc-body"></div></section>
     </aside>
   </div>
 </div>
