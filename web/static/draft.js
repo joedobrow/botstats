@@ -46,7 +46,7 @@
       <li>
         <span class="dot ${c.seated ? "on" : "off"}"></span>${face(c.account_id)}
         <a href="/player/${c.account_id}">${esc(c.name)}</a>
-        <span class="muted small">${c.budget}</span>
+        <span class="muted small">${c.budget == null ? "no budget" : c.budget}</span>
         <span class="seat-note muted small">${
           c.surrogate ? (c.surrogate_present ? "seat filled for them" : "someone is sitting in, but isn't here")
                       : (c.present ? "" : "not here")}</span>
@@ -61,7 +61,11 @@
     const start = $("start");
     if (start) {
       start.disabled = !v.can_start;
-      $("blocked").textContent = v.can_start ? "" : ("waiting on " + v.missing.join(", "));
+      const force = $("force-start");
+      if (force) force.hidden = v.can_start || !v.can_force;
+      $("blocked").textContent = v.can_start ? ""
+        : v.unbudgeted && v.unbudgeted.length ? "no budget yet: " + v.unbudgeted.join(", ")
+        : "waiting on " + v.missing.join(", ");
     }
   }
 
@@ -74,12 +78,25 @@
       <div class="lot-bid"><b>${v.lot.bid}</b> <span class="muted small">to ${esc(who(v.lot.bidder))}</span></div>`;
     // One button per team you may bid for, at the next price up.
     const next = v.lot.bid + 1;
-    $("bids").innerHTML = MINE.filter(c => c !== v.lot.bidder).map(c => {
+    const canBid = c => {
       const team = v.teams.find(t => t.captain === c) || {};
-      const can = (team.slots_left > 0) && (team.max_bid >= next);
-      return `<button class="primary" data-bid="${c}" ${can ? "" : "disabled"}>
-        Bid ${next}${MINE.length > 1 ? " as " + esc(who(c)) : ""}</button>`;
-    }).join("");
+      return c !== v.lot.bidder && team.slots_left > 0 && team.max_bid >= next;
+    };
+    let html = MINE.filter(c => c !== v.lot.bidder).map(c =>
+      `<button class="primary" data-bid="${c}" ${canBid(c) ? "" : "disabled"}>
+        Bid ${next}${MINE.length > 1 ? " as " + esc(who(c)) : ""}</button>`).join("");
+    // An admin can bid for any team: the captain who lost their connection,
+    // or every team at once when the draft is being tried out.
+    if (ADMIN) {
+      const keep = $("admin-bid-as") && $("admin-bid-as").value;
+      const opts = v.teams.map(t => t.captain).filter(c => !MINE.includes(c) && canBid(c));
+      if (opts.length) {
+        html += `<span class="admin-bid"><select id="admin-bid-as" aria-label="Team to bid for">${
+          opts.map(c => `<option value="${c}"${String(c) === keep ? " selected" : ""}>${esc(who(c))}</option>`).join("")
+        }</select><button id="admin-bid-go">Bid ${next} as them</button></span>`;
+      }
+    }
+    $("bids").innerHTML = html;
   }
 
   function drawTurn(v) {
@@ -89,7 +106,8 @@
     if (panel.hidden) return;
     const mineTurn = v.turn && (MINE.includes(v.turn) || ADMIN);
     $("turn-head").textContent = v.turn
-      ? (mineTurn ? "Your nomination" : who(v.turn) + " is nominating")
+      ? (MINE.includes(v.turn) ? "Your nomination"
+         : ADMIN ? "Nominate for " + who(v.turn) : who(v.turn) + " is nominating")
       : "Nobody left to nominate";
     const box = $("nominate");
     box.hidden = !mineTurn;
@@ -165,6 +183,8 @@
   document.addEventListener("click", e => {
     const bid = e.target.closest("[data-bid]");
     if (bid && view.lot) send("/bid", {captain: bid.dataset.bid, amount: view.lot.bid + 1});
+    if (e.target.id === "admin-bid-go" && view.lot)
+      send("/bid", {captain: $("admin-bid-as").value, amount: view.lot.bid + 1});
   });
   const undoBtn = $("undo");
   if (undoBtn) undoBtn.addEventListener("click", () => {

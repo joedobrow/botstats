@@ -69,8 +69,12 @@
   <h2>Start</h2>
   <form method="post" action="{{ season_url(season) }}/draft/start">
     <input type="hidden" name="csrf" value="{{ csrf }}">
-    <button class="primary" id="start">Start the draft</button>
-    <span class="muted small" id="blocked"></span>
+    <div class="actions">
+      <button class="primary" id="start">Start the draft</button>
+      <button name="force" value="1" id="force-start" hidden
+              title="Start with seats empty — you bid for anyone who isn't here">Start without everyone</button>
+      <span class="muted small" id="blocked"></span>
+    </div>
   </form>
 </section>
 
@@ -78,8 +82,6 @@
   <h2>Rules</h2>
   <form method="post" action="{{ season_url(season) }}/draft/rules" class="form grid">
     <input type="hidden" name="csrf" value="{{ csrf }}">
-    <label>Budget each <input type="number" name="budget" min="1" value="{{ view.rules.budget }}"></label>
-    <label>Players each <input type="number" name="slots" min="1" max="10" value="{{ view.rules.slots }}"></label>
     <label>Lowest bid <input type="number" name="min_bid" min="1" value="{{ view.rules.min_bid }}"></label>
     <label>Seconds on the clock <input type="number" name="bid_seconds" min="3" max="300" value="{{ view.rules.bid_seconds }}"></label>
     <div class="actions"><button class="primary">Save</button></div>
@@ -90,12 +92,15 @@
   <h2>Budgets</h2>
   <form method="post" action="{{ season_url(season) }}/draft/budgets" class="form">
     <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label>Everyone <input type="number" name="everyone" min="1" style="width:8em"
+                           title="Sets every captain's budget; a figure changed below still wins"></label>
     <table class="compact">
       <tbody>
       {% for c in view.captains %}
         <tr><td>{{ c.name }}</td>
             <td class="num"><input type="number" name="budget-{{ c.account_id }}" min="1"
-                                   value="{{ c.budget }}" style="width:8em"></td></tr>
+                                   value="{{ c.budget if c.budget is not none else '' }}"
+                                   placeholder="Not set" style="width:8em"></td></tr>
       {% endfor %}
       </tbody>
     </table>

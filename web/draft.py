@@ -60,9 +60,9 @@ class State:
 
     # -- what the rules say, given what has happened ---------------------
     def budget(self, captain: int) -> int:
-        """What this captain has to spend. Admins set these one by one, so a
-        captain with no figure of their own falls back to the house default
-        rather than to nothing."""
+        """What this captain has to spend, as an admin set it. The draft
+        can't start until every captain has one; the house default only
+        covers a log from before that was required."""
         return self.budgets.get(captain, self.rules["budget"])
 
     def spent(self, captain: int) -> int:
@@ -357,17 +357,23 @@ def lobby(season: dict, st: State, present: set[int]) -> dict:
     question the draft will ask before accepting a bid — so "everyone is
     here" and "everyone can act" can't drift apart.
     """
-    rows, missing = [], []
+    rows, missing, unbudgeted = [], [], []
     for c in captains(season):
+        if c["account_id"] not in st.budgets:
+            unbudgeted.append(c["name"])
         sub = st.surrogates.get(c["account_id"])
         here = c["account_id"] in present
         sub_here = bool(sub and sub in present)
-        rows.append({**c, "surrogate": sub, "present": here, "budget": st.budget(c["account_id"]),
+        rows.append({**c, "surrogate": sub, "present": here, "budget": st.budgets.get(c["account_id"]),
                      "surrogate_present": sub_here, "seated": here or sub_here})
         if not (here or sub_here):
             missing.append(c["name"])
-    return {"phase": st.phase, "captains": rows, "missing": missing,
-            "can_start": bool(rows) and not missing, "started_at": st.started_at}
+    # Budgets are always an admin's call, so a captain without one blocks the
+    # start just as an empty seat does. An admin may start with seats empty
+    # (and bid for whoever isn't there); never with a budget missing.
+    return {"phase": st.phase, "captains": rows, "missing": missing, "unbudgeted": unbudgeted,
+            "can_force": bool(rows) and not unbudgeted,
+            "can_start": bool(rows) and not missing and not unbudgeted, "started_at": st.started_at}
 
 
 # ---------------------------------------------------------------------------

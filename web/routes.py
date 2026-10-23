@@ -1413,9 +1413,15 @@ async def draft_start(request: web.Request):
     if st.phase != draft.LOBBY:
         raise web.HTTPFound(back + "?" + urlencode({"notice": "The draft has already started."}))
     view = draft.lobby(season, st, draft.room(season).present())
-    if not view["can_start"]:
-        missing = ", ".join(view["missing"]) or "nobody is captaining this season"
-        raise web.HTTPFound(back + "?" + urlencode({"notice": f"Still waiting on {missing}."}))
+    force = bool((await request.post()).get("force"))
+    if not view["captains"]:
+        raise web.HTTPFound(back + "?" + urlencode({"notice": "Nobody is captaining this season."}))
+    if view["unbudgeted"]:
+        raise web.HTTPFound(back + "?" + urlencode(
+            {"notice": "Set a budget for " + ", ".join(view["unbudgeted"]) + " first."}))
+    if view["missing"] and not force:
+        raise web.HTTPFound(back + "?" + urlencode(
+            {"notice": "Still waiting on " + ", ".join(view["missing"]) + "."}))
     order = [c["account_id"] for c in draft.captains(season)]
     random.shuffle(order)                    # recorded, so the replay keeps it
     db.append_draft_event(season["id"], season["division_id"], "start",
@@ -1426,8 +1432,8 @@ async def draft_start(request: web.Request):
 
 @routes.post("/season/{season_id}/{division}/draft/rules")
 async def draft_rules(request: web.Request):
-    """What the auction is played with. Only before it starts — changing the
-    budget halfway through would rewrite what every bid so far meant."""
+    """The lowest bid and the clock. Only before it starts. Budgets are set
+    captain by captain, and every team drafts four, so neither is here."""
     season = _season_or_404(request)
     _require_admin(request)
     data = await request.post()
@@ -1435,8 +1441,7 @@ async def draft_rules(request: web.Request):
     if draft.state(season).phase != draft.LOBBY:
         raise web.HTTPFound(back + "?" + urlencode({"notice": "The draft has already started."}))
     rules = {}
-    for key, low, high in (("budget", 1, 1_000_000), ("slots", 1, 10),
-                           ("min_bid", 1, 1000), ("bid_seconds", 3, 300)):
+    for key, low, high in (("min_bid", 1, 1000), ("bid_seconds", 3, 300)):
         raw = re.sub(r"\D", "", data.get(key, ""))
         if not raw or not low <= int(raw) <= high:
             raise web.HTTPFound(back + "?" + urlencode(
@@ -1461,6 +1466,14 @@ async def draft_budgets(request: web.Request):
     if st.phase != draft.LOBBY:
         raise web.HTTPFound(back + "?" + urlencode({"notice": "The draft has already started."}))
     budgets, known = {}, {c["account_id"] for c in draft.captains(season)}
+    # "Everyone" fills every captain at once; a figure typed for one captain
+    # still wins over it.
+    everyone = re.sub(r"\D", "", data.get("everyone", ""))
+    if everyone:
+        if not 1 <= int(everyone) <= 1_000_000:
+            raise web.HTTPFound(back + "?" + urlencode(
+                {"notice": "Every budget has to be a number of at least 1."}))
+        budgets = {c: int(everyone) for c in known}
     for key in data.keys():
         if not key.startswith("budget-"):
             continue
@@ -1468,10 +1481,13 @@ async def draft_budgets(request: web.Request):
         if captain not in known:
             continue
         raw = re.sub(r"\D", "", data.get(key, ""))
-        if not raw or not 1 <= int(raw) <= 1_000_000:
+        if not raw:
+            continue                         # left blank: not set yet
+        if not 1 <= int(raw) <= 1_000_000:
             raise web.HTTPFound(back + "?" + urlencode(
                 {"notice": "Every budget has to be a number of at least 1."}))
-        budgets[captain] = int(raw)
+        if not everyone or int(raw) != (st.budgets.get(captain) or 0):
+            budgets[captain] = int(raw)
     if budgets:
         db.append_draft_event(season["id"], season["division_id"], "budgets",
                               request["user"]["account_id"], {"budgets": budgets})
