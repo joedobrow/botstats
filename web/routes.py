@@ -1425,7 +1425,8 @@ async def draft_start(request: web.Request):
     order = [c["account_id"] for c in draft.captains(season)]
     random.shuffle(order)                    # recorded, so the replay keeps it
     db.append_draft_event(season["id"], season["division_id"], "start",
-                          request["user"]["account_id"], {"order": order})
+                          request["user"]["account_id"], {"order": order, "nominate_by": draft.nomination_deadline(st)})
+    draft.start_clock(season)
     await draft.push(season)
     raise web.HTTPFound(back)
 
@@ -1442,7 +1443,7 @@ async def draft_rules(request: web.Request):
     if draft.state(season).phase != draft.LOBBY:
         raise web.HTTPFound(back + "?" + urlencode({"notice": "The draft has already started."}))
     rules = {}
-    for key, low, high in (("bid_seconds", 3, 300),):
+    for key, low, high in (("bid_seconds", 3, 300), ("nominate_seconds", 5, 600)):
         raw = re.sub(r"\D", "", data.get(key, ""))
         if not raw or not low <= int(raw) <= high:
             raise web.HTTPFound(back + "?" + urlencode(
