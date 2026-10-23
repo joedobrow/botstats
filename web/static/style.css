@@ -777,6 +777,8 @@ a.tile:focus-visible { outline: 3px solid var(--accent); outline-offset: 4px; }
 .dot.off { background: var(--loss); opacity: .55; }
 
 /* The auction floor. */
+.admin-bid { display: inline-flex; gap: 6px; align-items: center; }
+.admin-bid select { width: auto; }
 .lot { display: flex; align-items: center; justify-content: space-between; gap: 16px;
        flex-wrap: wrap; margin: 6px 0 12px; }
 .lot-player { display: flex; align-items: center; gap: 9px; font-size: 1.15rem; font-weight: 600; }
