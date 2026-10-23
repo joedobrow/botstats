@@ -24,7 +24,7 @@
     {% if matchup_links or open_seasons %}
     <div class="actions">
       {% for m in matchup_links %}<a class="button matchup-cta" href="{{ m.url }}">{{ m.label }} →</a>{% endfor %}
-      {% if open_seasons %}<a class="button primary" href="/signup">Sign up</a>{% endif %}
+      {% if open_seasons and not signup_seasons %}<a class="button" href="/signup">My signup</a>{% endif %}
     </div>
     {% endif %}
   </div>
@@ -33,6 +33,21 @@
     <img src="/static/mascot-light.png?v={{ asset_version }}" alt="">
   </picture>
 </section>
+
+{% if signup_seasons %}
+{% set names = signup_seasons | map(attribute="label") | unique | list %}
+<section class="signup-callout">
+  <h2>Sign up for {{ names | join(" or ") }}</h2>
+  <div class="actions">
+    {% for s in signup_seasons %}
+    <a class="button primary" href="{{ season_url(s) }}/signup">
+      {%- if signup_seasons | length == 1 %}Sign up
+      {%- elif names | length == 1 %}{{ s.division }}
+      {%- else %}{{ s.label }} · {{ s.division }}{% endif %}</a>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
 
 <div class="feed">
   <div class="feed-main">
