@@ -569,8 +569,12 @@ picture.themed { display: contents; }
 /* A themed <picture> is display:contents, so the <img> inside it is the flex
    item — the size belongs on the image, not on the picture, or the logo takes
    the whole row. */
-.banner-logo img { width: clamp(150px, 24vw, 250px); height: auto; display: block; flex: 0 0 auto; }
-.banner-mascot img { width: clamp(80px, 11vw, 125px); height: auto; display: block; flex: 0 0 auto; }
+/* The logo's drawing carries its own drop shadow: the bottom 26% of the image
+   is shadow, so centring the box leaves the letters high. Half that, down,
+   puts the letters on the banner's middle. */
+.banner-logo img { width: clamp(200px, 38vw, 400px); height: auto; display: block; flex: 0 0 auto;
+                   transform: translateY(13%); }
+.banner-mascot img { width: clamp(90px, 15vw, 180px); height: auto; display: block; flex: 0 0 auto; }
 /* The one button most people came to press, so it doesn't look like its
    neighbours: the league's red, outlined rather than filled, so it reads as
    the way in without competing with Sign up during signup season. */
@@ -614,9 +618,11 @@ td.rank { width: 1%; padding-right: 2px; }
 
 @media (max-width: 760px) {
   .feed { grid-template-columns: 1fr; }
-  .banner { flex-wrap: wrap; padding: 16px; }
-  .banner-logo img { width: clamp(140px, 44vw, 210px); }
-  .banner-mascot img { width: 84px; margin-left: auto; }
+  .banner { padding: 16px; gap: 12px; }
+  /* Shares of the banner rather than of the screen, so the pair stays on
+     one row however narrow it gets. */
+  .banner-logo img { width: 62%; max-width: 260px; flex: 0 1 auto; }
+  .banner-mascot img { width: 28%; max-width: 110px; flex: 0 1 auto; }
   .topbar-row { flex-wrap: wrap; }
   .brand { order: 1; }
   .topbar-end { order: 2; margin-left: auto; }
@@ -805,7 +811,9 @@ a.tile:focus-visible { outline: 3px solid var(--accent); outline-offset: 4px; }
 .signup-callout .button:hover { background: var(--call-ink); color: var(--call-bg); text-decoration: none; }
 
 /* A card per season under the banner, side by side. */
-.season-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+/* Each card as tall as what it holds: stretched to its neighbour, a short
+   one is mostly empty. */
+.season-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); align-items: start;
                 gap: 16px; margin: 0 0 18px; }
 .season-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
                padding: 12px 16px; min-width: 0; }

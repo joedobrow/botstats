@@ -279,9 +279,11 @@ async def home(request: web.Request):
     leaders.sort(key=lambda r: -r["fantasy_points"])
     open_seasons = _open_seasons()
     mine = _my_signups(request)
-    # Every open region the viewer isn't in yet, signed in or not: someone in
-    # NA may want EU too, so signing up for one doesn't hide the other.
-    signup_seasons = [s for s in open_seasons if (s["id"], s["division_id"]) not in mine]
+    # The strip is for someone not in any of them yet. Once they're in one,
+    # the season card offers the other regions, and the strip would only
+    # say it twice.
+    signup_seasons = ([] if any((s["id"], s["division_id"]) in mine for s in open_seasons)
+                      else open_seasons)
     return render(request, "home.html", blocks=blocks, many_divisions=many,
                   results=results[:8], leaders=leaders[:5], team_names=team_names,
                   signup_seasons=signup_seasons,
