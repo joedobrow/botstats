@@ -974,8 +974,48 @@ SIGNUP_EXPORT_COLUMNS = [
 ]
 
 
-def signup_export(season: dict, base_url: str = "") -> list[list]:
-    """Rows for the signups CSV, in SIGNUP_EXPORT_COLUMNS order."""
+_profile_cache: dict[tuple, tuple[float, tuple, list[dict]]] = {}
+_PROFILE_TTL = 300.0
+
+
+def draft_profiles(season: dict) -> dict[int, dict]:
+    """{account_id: what the draft room shows about them}, for everyone
+    signed up. Public — anyone can watch a draft — so nothing from the
+    signup that only admins see (Discord) and none of the rating's working.
+
+    Kept for a few minutes per season and signup list: the room is reloaded
+    all through a draft, and this is a fraction of a second of queries that
+    the draft itself never changes."""
+    key = (season["id"], season["division_id"])
+    with _conn() as conn:
+        stamp = tuple(conn.execute(
+            "SELECT COUNT(*), MAX(updated_at) FROM site_signups WHERE season_id = ? AND division_id = ?",
+            key).fetchone())
+    hit = _profile_cache.get(key)
+    if hit and hit[1] == stamp and time.monotonic() - hit[0] < _PROFILE_TTL:
+        return hit[2]
+    out = {}
+    for p in signup_profiles(season):
+        r = p["signup"]
+        out[p["account_id"]] = {
+            "name": p["name"], "avatar_url": r.get("avatar_url"), "rating": p["rating"],
+            "badge": p["badge"], "level": r["level_label"], "positions": r["positions"],
+            "comment": r["statement"], "games": p["games"], "wins": p["wins"],
+            "fantasy": round(p["fantasy"], 1) if p["fantasy"] is not None else None,
+            "kda": round(p["kda"], 2) if p["kda"] is not None else None,
+            "gpm": round(p["gpm"]) if p["gpm"] is not None else None,
+            "seasons_played": p["seasons_played"], "history": p["history"][:6],
+            "titles": p["titles"], "other_divisions": p["other_divisions"],
+        }
+    _profile_cache[key] = (time.monotonic(), stamp, out)
+    return out
+
+
+def signup_profiles(season: dict) -> list[dict]:
+    """Everything known about each signup that helps place them in a draft:
+    their signup, their rating and its inputs, their record here, and what
+    they went for and who they played for before. One dict per signup, in
+    signup order; the CSV and the draft room both read these."""
     signups = list_signups(season)
     if not signups:
         return []
@@ -984,24 +1024,31 @@ def signup_export(season: dict, base_url: str = "") -> list[list]:
     past = [s for s in seasons if (s["id"], s["division_id"]) != (season["id"], season["division_id"])
             and s["season_start"] < season["season_start"]]
     # Each earlier season's draft once, not once per player.
-    drafts = {(s["id"], s["division_id"]): (s, db.get_player_costs(s["id"], s["division_id"]),
-                                           set(db.get_captain_account_ids(s["id"], s["division_id"]).values()))
-              for s in past}
+    drafts = [(s, db.get_player_costs(s["id"], s["division_id"]),
+               set(db.get_captain_account_ids(s["id"], s["division_id"]).values()))
+              for s in past]
     titles = champion_counts()
     with _conn() as conn:
         steam = {r["account_id"]: r["steam_name"] for r in conn.execute("SELECT account_id, steam_name FROM site_users")}
-        others = {}
-        for r in conn.execute("SELECT season_id, division_id, account_id FROM site_signups WHERE season_id = ?",
+        others: dict[int, list[int]] = {}
+        for r in conn.execute("SELECT division_id, account_id FROM site_signups WHERE season_id = ?",
                               (season["id"],)):
             if r["division_id"] != season["division_id"]:
                 others.setdefault(r["account_id"], []).append(r["division_id"])
     div_names = {d["id"]: d["name"] for d in divisions()}
+    team_names: dict[tuple, dict[int, str]] = {}
 
-    def pct(x):
-        return f"{x * 100:.0f}%" if x is not None else ""
-
-    def num(x, fmt="{:.1f}"):
-        return fmt.format(x) if isinstance(x, (int, float)) else ""
+    def team_name(s: dict, aid: int) -> str | None:
+        """The team aid was on in season s. Each season's teams are worked
+        out once: doing it per player was most of this function's time."""
+        key = (s["id"], s["division_id"])
+        if key not in team_names:
+            team_names[key] = {}
+            for t in season_teams(s, matches=[]):
+                for member in [t.get("captain_account_id")] + [p["account_id"] for p in t["roster"]]:
+                    if member:
+                        team_names[key].setdefault(member, t["name"])
+        return team_names[key].get(aid)
 
     out = []
     for r in signups:
@@ -1009,41 +1056,66 @@ def signup_export(season: dict, base_url: str = "") -> list[list]:
         br = rating_breakdown(aid) or {}
         matches = player_matches(aid)
         agg = aggregate(matches) if matches else {"games_played": 0}
-        games = agg.get("games_played") or 0
-        wins = agg.get("wins") or 0
-        played = []
+        played: list[dict] = []
         for m in matches:   # newest first
             ms = season_of_match(seasons, m)
             if ms and ms not in played:
                 played.append(ms)
         last = played[0] if played else None
-        last_team = ""
-        if last:
-            last_team = (team_of(last, aid) or {}).get("name") or ""
-        costs = [(s, c[aid]["cost"]) for s, c, _ in drafts.values() if aid in c]
-        costs.sort(key=lambda sc: sc[0]["season_start"], reverse=True)
-        paid = [c for _, c in costs if c is not None]
-        captained = [s for s, _, caps in drafts.values() if aid in caps]
+        history = []        # earlier drafts, newest first: season, team, cost
+        for s, costs, caps in sorted(drafts, key=lambda d: d[0]["season_start"], reverse=True):
+            if aid in caps or aid in costs:
+                history.append({"season": s["label"], "captain": aid in caps,
+                                "cost": (costs.get(aid) or {}).get("cost"),
+                                "team": team_name(s, aid)})
+        paid = [h["cost"] for h in history if h["cost"] is not None]
+        out.append({
+            "signup": r, "account_id": aid, "name": r["name"], "steam_name": steam.get(aid),
+            "rating": ratings.get(aid), "breakdown": br, "badge": r["badge"] or br.get("badge"),
+            "games": agg.get("games_played") or 0, "wins": agg.get("wins") or 0,
+            "fantasy": agg.get("fantasy_points"), "kda": agg.get("kda"), "gpm": agg.get("gpm"),
+            "seasons_played": len(played), "last_season": last["label"] if last else None,
+            "last_team": team_name(last, aid) if last else None,
+            "history": history, "last_cost": history[0]["cost"] if history else None,
+            "seasons_drafted": len(paid), "average_cost": sum(paid) / len(paid) if paid else None,
+            "seasons_captained": sum(1 for h in history if h["captain"]),
+            "titles": titles.get(aid, 0),
+            "other_divisions": [div_names.get(d, str(d)) for d in others.get(aid, [])],
+        })
+    return out
+
+
+def signup_export(season: dict, base_url: str = "") -> list[list]:
+    """Rows for the signups CSV, in SIGNUP_EXPORT_COLUMNS order."""
+    def pct(x):
+        return f"{x * 100:.0f}%" if x is not None else ""
+
+    def num(x, fmt="{:.1f}"):
+        return fmt.format(x) if isinstance(x, (int, float)) else ""
+
+    out = []
+    for p in signup_profiles(season):
+        r, br, aid, games = p["signup"], p["breakdown"], p["account_id"], p["games"]
         positions = set(r["positions"])
         out.append([
-            aid, r["name"], steam.get(aid) or "", r["level_label"], SIGNUP_LEVEL_LABELS.get(r["level"], r["level"]),
+            aid, p["name"], p["steam_name"] or "", r["level_label"], SIGNUP_LEVEL_LABELS.get(r["level"], r["level"]),
             r["captain"], " ".join(map(str, r["positions"])),
             *["Y" if n in positions else "" for n in POSITIONS],
-            r["mmr"] or "", ratings.get(aid, ""), br.get("own_rating") or "", br.get("group_rating") or "",
-            r["badge"] or br.get("badge") or "",
+            r["mmr"] or "", p["rating"] if p["rating"] is not None else "",
+            br.get("own_rating") or "", br.get("group_rating") or "", p["badge"] or "",
             num(br.get("windrun"), "{:.0f}"), br.get("windrun_games") or "",
             br.get("ad_last_year") or "", br.get("ad_all_time") or "",
             br.get("ranked_last_year") or "", br.get("ranked_all_time") or "",
             (br.get("updated_at") or "")[:10], br.get("age_days") if br.get("age_days") is not None else "",
             br.get("explanation") or "", " ".join(map(str, br.get("linked_accounts") or [])),
-            games, wins if games else "", (games - wins) if games else "",
-            pct(wins / games) if games else "",
-            num(agg.get("fantasy_points")) if games else "", num(agg.get("kda"), "{:.2f}") if games else "",
-            num(agg.get("gpm"), "{:.0f}") if games else "",
-            len(played), last["label"] if last else "", last_team,
-            (costs[0][1] if costs and costs[0][1] is not None else ""), len(paid),
-            num(sum(paid) / len(paid), "{:.0f}") if paid else "", len(captained), titles.get(aid, 0) or "",
-            ", ".join(div_names.get(d, str(d)) for d in others.get(aid, [])),
+            games, p["wins"] if games else "", (games - p["wins"]) if games else "",
+            pct(p["wins"] / games) if games else "",
+            num(p["fantasy"]) if games else "", num(p["kda"], "{:.2f}") if games else "",
+            num(p["gpm"], "{:.0f}") if games else "",
+            p["seasons_played"], p["last_season"] or "", p["last_team"] or "",
+            p["last_cost"] if p["last_cost"] is not None else "", p["seasons_drafted"],
+            num(p["average_cost"], "{:.0f}"), p["seasons_captained"], p["titles"] or "",
+            ", ".join(p["other_divisions"]),
             r["discord"] or "", r["statement"] or "", r["created_at"], r["updated_at"],
             f"https://www.dotabuff.com/players/{aid}", f"https://www.opendota.com/players/{aid}",
             f"https://stratz.com/players/{aid}", f"{base_url}/player/{aid}",

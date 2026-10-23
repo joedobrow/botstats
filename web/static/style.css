@@ -777,6 +777,19 @@ a.tile:focus-visible { outline: 3px solid var(--accent); outline-offset: 4px; }
 .dot.off { background: var(--loss); opacity: .55; }
 
 /* The auction floor. */
+/* A player's name in the draft room opens their card, so it's a button
+   dressed as a link. */
+.player-name { border: 0; background: none; padding: 0; height: auto; font: inherit;
+               color: var(--link); cursor: pointer; text-align: left; }
+.player-name:hover { text-decoration: underline; }
+#player-card .box-head h2 { display: flex; align-items: center; gap: 8px; text-transform: none;
+                            letter-spacing: 0; font-size: 1rem; }
+.pc-row { display: flex; justify-content: space-between; gap: 12px; padding: 3px 0;
+          border-bottom: 1px solid var(--border); }
+.pc-row .label { flex: 0 0 auto; }
+.pc-row > span:last-child { text-align: right; }
+.pc-comment { margin: 10px 0; font-style: italic; }
+.pc-history { margin: 10px 0 4px; }
 .admin-bid, .bid-buttons { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .bid-row #bid-amount { width: 7em; font-size: 1.05rem; font-weight: 700; }
 #phase.paused { background: var(--call-bg); color: var(--call-ink); }

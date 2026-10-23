@@ -1347,7 +1347,7 @@ async def draft_page(request: web.Request):
     me = (user or {}).get("account_id")
     return render(request, "draft.html", title=f"{season['label']} draft", season=season,
                   view=draft.view(season, st, draft.room(season).present()),
-                  names=draft.names(season), me=me,
+                  names=draft.names(season), me=me, profiles=store.draft_profiles(season),
                   my_teams=[c for c in st.order if draft.may_act_for(st, c, me)],
                   notice=request.query.get("notice"))
 
