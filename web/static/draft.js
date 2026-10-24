@@ -195,7 +195,8 @@
     if (!card) return;
     const row = (label, value) => value === null || value === undefined || value === "" ? ""
       : `<div class="pc-row"><span class="label">${label}</span><span>${value}</span></div>`;
-    $("pc-name").innerHTML = face(id) + esc(who(id));
+    const won = p && p.titles ? `<span class="rings" title="Won ${p.titles} season${p.titles === 1 ? "" : "s"}">${"\u{1F48D}".repeat(p.titles)}</span>` : "";
+    $("pc-name").innerHTML = face(id) + esc(who(id)) + won;
     if (!p) {
       $("pc-body").innerHTML = `<p class="muted">Not signed up for this season.</p>
         <p class="small"><a href="/player/${id}" target="_blank" rel="noopener">Full profile</a></p>`;
@@ -214,7 +215,6 @@
           `<span class="pos pos-${n}" title="${POSITIONS[n] || ""}">${n}</span>`).join("")}</span>`) +
         row("League", record) +
         (p.games ? row("Per game", `${p.fantasy} fantasy · ${p.kda} KDA · ${p.gpm} GPM`) : "") +
-        row("Titles", p.titles ? "\u{1F48D}".repeat(p.titles) : "") +
         row("Also signed up", p.other_divisions.length ? esc(p.other_divisions.join(", ")) : "") +
         (p.comment ? `<p class="pc-comment">“${esc(p.comment)}”</p>` : "") +
         history +
