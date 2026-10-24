@@ -46,6 +46,11 @@
   --pos-3: #4d7d2c;
   --pos-4: #7a4a9c;
   --pos-5: #23827b;
+  /* A player's pill in the draft room: its own quiet steel, so it stands off
+     the paper without competing with a captain's red. */
+  --pill-bg: #bcc6c9;
+  --pill-edge: #9eabaf;
+  --pill-ink: #1d2629;
 
   /* The masthead: a deeper band of the same paper, ruled in red */
   --bar-bg:
@@ -111,6 +116,9 @@
     --pos-3: #5f923b;
     --pos-4: #8e5fb5;
     --pos-5: #2f9a92;
+    --pill-bg: #33403f;
+    --pill-edge: #485754;
+    --pill-ink: #dfe7e6;
     --bar-bg:
       radial-gradient(120% 140% at 15% 0%, rgba(255, 238, 208, 0.07), rgba(255, 238, 208, 0) 60%),
       linear-gradient(175deg, #272019, #1c1611);
@@ -162,6 +170,9 @@
   --pos-3: #5f923b;
   --pos-4: #8e5fb5;
   --pos-5: #2f9a92;
+  --pill-bg: #33403f;
+  --pill-edge: #485754;
+  --pill-ink: #dfe7e6;
   --bar-bg:
     radial-gradient(120% 140% at 15% 0%, rgba(255, 238, 208, 0.07), rgba(255, 238, 208, 0) 60%),
     linear-gradient(175deg, #272019, #1c1611);
@@ -800,7 +811,7 @@ a.tile:focus-visible { outline: 3px solid var(--accent); outline-offset: 4px; }
 .pill { display: inline-flex; align-items: center; gap: 6px; height: auto; min-height: 26px;
         padding: 2px 9px; border-radius: 999px; font: inherit; font-size: .88rem; font-weight: 600;
         line-height: 1.2; cursor: pointer; white-space: nowrap; max-width: 100%; }
-.pill.player { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+.pill.player { background: var(--pill-bg); color: var(--pill-ink); border: 1px solid var(--pill-edge); }
 .pill.captain { background: var(--accent); color: var(--accent-text); border: 1px solid var(--accent); }
 .pill:hover { border-color: var(--text); }
 .pill .avatar { width: 20px; height: 20px; margin: 0 0 0 -6px; }
@@ -893,3 +904,4 @@ a.tile:focus-visible { outline: 3px solid var(--accent); outline-offset: 4px; }
 .pos-5 { background: var(--pos-5); }
 .pos-list { display: inline-flex; gap: 3px; vertical-align: middle; }
 label.check .pos { margin-right: 2px; }
+#pc-name .rings { margin-left: 0; }
