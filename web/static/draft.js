@@ -28,10 +28,12 @@
   // Every name is a pill: captains in the league's red, players plain. A
   // pill opens that player's card under the pool rather than leaving the
   // room; everything on the card came with the page, so it opens at once.
-  const pill = (id, text, extra = "") =>
+  // price: what they sold for, written into the pill once they're bought.
+  const pill = (id, text, extra = "", price = null) =>
     `<button type="button" class="pill ${CAPTAINS.has(String(id)) ? "captain" : "player"} ${extra}"
       data-player="${id}">${face(id)}<span class="pill-name">${
-      esc(text == null ? who(id) : text)}</span>${ratingTag(id)}</button>`;
+      esc(text == null ? who(id) : text)}</span>${ratingTag(id)}${
+      price != null ? `<span class="pill-price">– $${price}</span>` : ""}</button>`;
   const POSITIONS = {1: "Safe lane", 2: "Mid", 3: "Off lane", 4: "Soft support", 5: "Hard support"};
 
   let view = D.view || {};
@@ -159,7 +161,7 @@
       <div class="team-line${t.captain === v.turn ? " up" : ""}">
         <div class="team-who">${pill(t.captain)}</div>
         <div class="team-money muted small">${t.left} left</div>
-        <div class="team-roster">${t.roster.map(p => `<span class="bought">${pill(p.account_id)}<span class="muted small">${p.cost}</span></span>`).join("")}</div>
+        <div class="team-roster">${t.roster.map(p => pill(p.account_id, null, "", p.cost)).join("")}</div>
       </div>`).join("");
     // A position picked in the header narrows the pool to those who'll play it.
     const shown = posFilter ? v.pool.filter(p => (p.positions || []).includes(posFilter)) : v.pool;
@@ -178,19 +180,20 @@
   // said they'd play, captain included, so the roles still missing show.
   const posDot = n => `<span class="pos pos-${n}" title="${POSITIONS[n] || ""}">${n}</span>`;
   function drawBreakdown(v) {
-    $("breakdown").innerHTML = v.teams.map(t => {
+    // Strongest team on average at the top; a team nobody has a rating for
+    // goes to the bottom.
+    const rows = v.teams.map(t => {
       const people = [t.captain, ...t.roster.map(p => p.account_id)];
       const ratings = people.map(id => PROFILES[id] && PROFILES[id].rating).filter(r => r != null);
-      const avg = ratings.length ? Math.round(ratings.reduce((a, b) => a + b, 0) / ratings.length) : "—";
-      // Most-covered role first: three 5s, then two 3s, then a 1.
-      const all = people.flatMap(id => (PROFILES[id] && PROFILES[id].positions) || []);
-      const count = {};
-      all.forEach(n => { count[n] = (count[n] || 0) + 1; });
-      const dots = all.sort((a, b) => (count[b] - count[a]) || (a - b)).map(posDot).join("");
-      return `<div class="tb-row"><div>${pill(t.captain)}</div>
-        <div class="tb-avg" title="Average rating">${avg}</div>
-        <div class="tb-dots pos-list">${dots}</div></div>`;
-    }).join("");
+      const avg = ratings.length ? Math.round(ratings.reduce((a, b) => a + b, 0) / ratings.length) : null;
+      const dots = people.flatMap(id => (PROFILES[id] && PROFILES[id].positions) || [])
+        .sort((a, b) => a - b).map(posDot).join("");
+      return {avg, html: `<div class="tb-row"><div>${pill(t.captain)}</div>
+        <div class="tb-avg"><span class="label">AVG:</span> ${avg == null ? "—" : avg}</div>
+        <div class="tb-dots pos-list">${dots}</div></div>`};
+    });
+    rows.sort((a, b) => (b.avg ?? -1) - (a.avg ?? -1));
+    $("breakdown").innerHTML = rows.map(r => r.html).join("");
   }
 
   function drawUndo(v) {

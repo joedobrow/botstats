@@ -949,6 +949,9 @@ def list_signups(season: dict) -> list[dict]:
     for r in out:
         ident = idents.get(r["account_id"], {})
         r["name"] = ident.get("name") or r["steam_name"] or str(r["account_id"])
+        # The bot knows nearly everyone's Steam avatar; the site only knows the
+        # few who've logged in. Identities respect an admin's hide-avatar.
+        r["avatar_url"] = ident.get("avatar_url")
         r["badge"] = ident.get("badge")
         r["positions"] = [int(p) for p in r["positions"].split(",") if p]
         r["level_is"] = signup_level(r)
