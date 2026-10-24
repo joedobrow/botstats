@@ -846,7 +846,10 @@ a.tile:focus-visible { outline: 3px solid var(--accent); outline-offset: 4px; }
 .team-line { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px;
              padding: 8px 14px; border-bottom: 1px solid var(--border); }
 .team-line:last-child { border-bottom: 0; }
-.team-line.up { background: var(--tag-bg); }
+/* The team whose turn it is to nominate: a brick stripe and a breath of
+   brick, so it can't be mistaken for a box's header. */
+.team-line.up { background: color-mix(in srgb, var(--accent) 9%, transparent);
+                box-shadow: inset 4px 0 0 var(--accent); }
 .team-money { text-align: right; }
 .team-roster { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 5px 10px;
                font-size: .85rem; }
