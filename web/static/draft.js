@@ -157,14 +157,16 @@
   let posFilter = 0;
   function drawTeams(v) {
     $("running").hidden = v.phase === "lobby";
-    $("teams").innerHTML = v.teams.map(t => `
+    $("teams").innerHTML = v.teams.map(t => { const g = teamGlance(t); return `
       <div class="team-line${t.captain === v.turn ? " up" : ""}">
-        <div class="team-who">${pill(t.captain)}</div>
-        <div class="team-money muted small">${t.left} left</div>
+        <div class="team-who">${pill(t.captain)}<span class="pos-list mini">${g.dots}</span></div>
+        <div class="team-money muted small"><span class="label">AVG:</span> <b>${g.avg == null ? "—" : g.avg}</b> · ${t.left} left</div>
         <div class="team-roster">${t.roster.map(p => pill(p.account_id, null, "", p.cost)).join("")}</div>
-      </div>`).join("");
+      </div>`; }).join("");
     // A position picked in the header narrows the pool to those who'll play it.
-    const shown = posFilter ? v.pool.filter(p => (p.positions || []).includes(posFilter)) : v.pool;
+    const rating = id => (PROFILES[id] && PROFILES[id].rating) ?? -1;
+    const shown = (posFilter ? v.pool.filter(p => (p.positions || []).includes(posFilter)) : v.pool.slice())
+      .sort((a, b) => rating(b.account_id) - rating(a.account_id));   // best first; unrated last
     $("pool").innerHTML = shown.map(p => `<li>${pill(p.account_id)}</li>`).join("");
     $("pool-count").textContent = !v.pool.length ? ""
       : posFilter ? `${shown.length} of ${v.pool.length}` : v.pool.length + " left";
@@ -173,27 +175,19 @@
       b.setAttribute("aria-pressed", on ? "true" : "false");
       b.classList.toggle("off", !!posFilter && !on);
     });
-    drawBreakdown(v);
   }
 
-  // Each team at a glance: its average rating and every position its people
-  // said they'd play, captain included, so the roles still missing show.
+  // A team at a glance: its average rating, and every position its people
+  // said they'd play (captain included), in order — so the roles a team is
+  // still short of show without opening anyone.
   const posDot = n => `<span class="pos pos-${n}" title="${POSITIONS[n] || ""}">${n}</span>`;
-  function drawBreakdown(v) {
-    // Strongest team on average at the top; a team nobody has a rating for
-    // goes to the bottom.
-    const rows = v.teams.map(t => {
-      const people = [t.captain, ...t.roster.map(p => p.account_id)];
-      const ratings = people.map(id => PROFILES[id] && PROFILES[id].rating).filter(r => r != null);
-      const avg = ratings.length ? Math.round(ratings.reduce((a, b) => a + b, 0) / ratings.length) : null;
-      const dots = people.flatMap(id => (PROFILES[id] && PROFILES[id].positions) || [])
-        .sort((a, b) => a - b).map(posDot).join("");
-      return {avg, html: `<div class="tb-row"><div>${pill(t.captain)}</div>
-        <div class="tb-avg"><span class="label">AVG:</span> ${avg == null ? "—" : avg}</div>
-        <div class="tb-dots pos-list">${dots}</div></div>`};
-    });
-    rows.sort((a, b) => (b.avg ?? -1) - (a.avg ?? -1));
-    $("breakdown").innerHTML = rows.map(r => r.html).join("");
+  function teamGlance(t) {
+    const people = [t.captain, ...t.roster.map(p => p.account_id)];
+    const ratings = people.map(id => PROFILES[id] && PROFILES[id].rating).filter(r => r != null);
+    const avg = ratings.length ? Math.round(ratings.reduce((a, b) => a + b, 0) / ratings.length) : null;
+    const dots = people.flatMap(id => (PROFILES[id] && PROFILES[id].positions) || [])
+      .sort((a, b) => a - b).map(posDot).join("");
+    return {avg, dots};
   }
 
   function drawUndo(v) {
