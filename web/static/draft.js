@@ -152,6 +152,7 @@
     $("nom-amount").max = team.max_bid || 1;
   }
 
+  let posFilter = 0;
   function drawTeams(v) {
     $("running").hidden = v.phase === "lobby";
     $("teams").innerHTML = v.teams.map(t => `
@@ -160,8 +161,36 @@
         <div class="team-money muted small">${t.left} left</div>
         <div class="team-roster">${t.roster.map(p => `<span class="bought">${pill(p.account_id)}<span class="muted small">${p.cost}</span></span>`).join("")}</div>
       </div>`).join("");
-    $("pool").innerHTML = v.pool.map(p => `<li>${pill(p.account_id)}</li>`).join("");
-    $("pool-count").textContent = v.pool.length ? v.pool.length + " left" : "";
+    // A position picked in the header narrows the pool to those who'll play it.
+    const shown = posFilter ? v.pool.filter(p => (p.positions || []).includes(posFilter)) : v.pool;
+    $("pool").innerHTML = shown.map(p => `<li>${pill(p.account_id)}</li>`).join("");
+    $("pool-count").textContent = !v.pool.length ? ""
+      : posFilter ? `${shown.length} of ${v.pool.length}` : v.pool.length + " left";
+    document.querySelectorAll("#pos-filter [data-pos]").forEach(b => {
+      const on = Number(b.dataset.pos) === posFilter;
+      b.setAttribute("aria-pressed", on ? "true" : "false");
+      b.classList.toggle("off", !!posFilter && !on);
+    });
+    drawBreakdown(v);
+  }
+
+  // Each team at a glance: its average rating and every position its people
+  // said they'd play, captain included, so the roles still missing show.
+  const posDot = n => `<span class="pos pos-${n}" title="${POSITIONS[n] || ""}">${n}</span>`;
+  function drawBreakdown(v) {
+    $("breakdown").innerHTML = v.teams.map(t => {
+      const people = [t.captain, ...t.roster.map(p => p.account_id)];
+      const ratings = people.map(id => PROFILES[id] && PROFILES[id].rating).filter(r => r != null);
+      const avg = ratings.length ? Math.round(ratings.reduce((a, b) => a + b, 0) / ratings.length) : "—";
+      // Most-covered role first: three 5s, then two 3s, then a 1.
+      const all = people.flatMap(id => (PROFILES[id] && PROFILES[id].positions) || []);
+      const count = {};
+      all.forEach(n => { count[n] = (count[n] || 0) + 1; });
+      const dots = all.sort((a, b) => (count[b] - count[a]) || (a - b)).map(posDot).join("");
+      return `<div class="tb-row"><div>${pill(t.captain)}</div>
+        <div class="tb-avg" title="Average rating">${avg}</div>
+        <div class="tb-dots pos-list">${dots}</div></div>`;
+    }).join("");
   }
 
   function drawUndo(v) {
@@ -264,6 +293,13 @@
   setInterval(tick, 200);
 
   document.addEventListener("click", e => {
+    const posBtn = e.target.closest("#pos-filter [data-pos]");
+    if (posBtn) {
+      const n = Number(posBtn.dataset.pos);
+      posFilter = posFilter === n ? 0 : n;
+      drawTeams(view);
+      return;
+    }
     const name = e.target.closest("[data-player]");
     if (name) { showCard(name.dataset.player); return; }
     const bid = e.target.closest("[data-bid]");
