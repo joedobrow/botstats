@@ -157,7 +157,7 @@
     $("teams").innerHTML = v.teams.map(t => `
       <div class="team-line${t.captain === v.turn ? " up" : ""}">
         <div class="team-who">${pill(t.captain)}</div>
-        <div class="team-money muted small">${t.left} left · ${t.slots_left} to fill</div>
+        <div class="team-money muted small">${t.left} left</div>
         <div class="team-roster">${t.roster.map(p => `<span class="bought">${pill(p.account_id)}<span class="muted small">${p.cost}</span></span>`).join("")}</div>
       </div>`).join("");
     $("pool").innerHTML = v.pool.map(p => `<li>${pill(p.account_id)}</li>`).join("");
@@ -210,8 +210,8 @@
         row("Rating", p.rating != null ? `<b>${p.rating}</b>` : "") +
         row("Windrun", p.windrun != null ? `${p.windrun}${p.windrun_games ? ` <span class="muted small">· ${p.windrun_games} games</span>` : ""}` : "") +
         row("Rank", p.badge ? esc(p.badge) : "") +
-        row("Positions", p.positions.map(n => `${n} · ${POSITIONS[n] || ""}`).join(", ")) +
-        row("Signed up as", esc(p.level)) +
+        row("Positions", `<span class="pos-list">${p.positions.map(n =>
+          `<span class="pos pos-${n}" title="${POSITIONS[n] || ""}">${n}</span>`).join("")}</span>`) +
         row("League", record) +
         (p.games ? row("Per game", `${p.fantasy} fantasy · ${p.kda} KDA · ${p.gpm} GPM`) : "") +
         row("Titles", p.titles ? "\u{1F48D}".repeat(p.titles) : "") +
@@ -221,7 +221,6 @@
         `<p class="small"><a href="/player/${id}" target="_blank" rel="noopener">Full profile</a></p>`;
     }
     card.hidden = false;
-    card.dataset.player = id;
   }
 
   function paint(v) {
@@ -267,7 +266,6 @@
   document.addEventListener("click", e => {
     const name = e.target.closest("[data-player]");
     if (name) { showCard(name.dataset.player); return; }
-    if (e.target.id === "pc-close") { $("player-card").hidden = true; return; }
     const bid = e.target.closest("[data-bid]");
     if (bid && view.lot) placeBid(bid.dataset.bid);
     if (e.target.id === "admin-bid-go" && view.lot) placeBid($("admin-bid-as").value);

@@ -39,6 +39,13 @@
   --call-ink: #2a1d08;
   --call-button: #2a1d08;
   --call-button-ink: #f6e7c4;
+  /* Positions: a colour each, so 1 and 5 can be told apart at a glance. */
+  --pos-ink: #ffffff;
+  --pos-1: #b5452a;
+  --pos-2: #2f6fa8;
+  --pos-3: #4d7d2c;
+  --pos-4: #7a4a9c;
+  --pos-5: #23827b;
 
   /* The masthead: a deeper band of the same paper, ruled in red */
   --bar-bg:
@@ -98,6 +105,12 @@
     --call-ink: #1f1505;
     --call-button: #1f1505;
     --call-button-ink: #f6e1ae;
+    --pos-ink: #ffffff;
+    --pos-1: #c95a3c;
+    --pos-2: #3f83c2;
+    --pos-3: #5f923b;
+    --pos-4: #8e5fb5;
+    --pos-5: #2f9a92;
     --bar-bg:
       radial-gradient(120% 140% at 15% 0%, rgba(255, 238, 208, 0.07), rgba(255, 238, 208, 0) 60%),
       linear-gradient(175deg, #272019, #1c1611);
@@ -143,6 +156,12 @@
   --call-ink: #1f1505;
   --call-button: #1f1505;
   --call-button-ink: #f6e1ae;
+  --pos-ink: #ffffff;
+  --pos-1: #c95a3c;
+  --pos-2: #3f83c2;
+  --pos-3: #5f923b;
+  --pos-4: #8e5fb5;
+  --pos-5: #2f9a92;
   --bar-bg:
     radial-gradient(120% 140% at 15% 0%, rgba(255, 238, 208, 0.07), rgba(255, 238, 208, 0) 60%),
     linear-gradient(175deg, #272019, #1c1611);
@@ -863,3 +882,14 @@ a.tile:focus-visible { outline: 3px solid var(--accent); outline-offset: 4px; }
 .subtabs a:hover { text-decoration: none; border-color: var(--accent); }
 .subtabs a.active { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
 .subtabs .count { font-weight: 400; opacity: 0.75; margin-left: 2px; }
+
+/* A position: its number in a circle of its own colour, everywhere one is
+   shown. The role's name is in the tooltip. */
+.pos { display: inline-grid; place-items: center; width: 1.5em; height: 1.5em; flex: 0 0 auto;
+       border-radius: 50%; font-size: .78rem; font-weight: 700; line-height: 1;
+       color: var(--pos-ink); font-variant-numeric: tabular-nums; vertical-align: middle; }
+.pos-1 { background: var(--pos-1); } .pos-2 { background: var(--pos-2); }
+.pos-3 { background: var(--pos-3); } .pos-4 { background: var(--pos-4); }
+.pos-5 { background: var(--pos-5); }
+.pos-list { display: inline-flex; gap: 3px; vertical-align: middle; }
+label.check .pos { margin-right: 2px; }

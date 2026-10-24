@@ -1,3 +1,12 @@
+{# A position as a numbered circle in its own colour. #}
+{% macro pos(n) -%}
+<span class="pos pos-{{ n }}" title="{{ POSITION_NAMES.get(n|int, '') }}">{{ n }}</span>
+{%- endmacro %}
+
+{% macro positions(ns) -%}
+<span class="pos-list">{% for n in ns %}{{ pos(n) }}{% endfor %}</span>
+{%- endmacro %}
+
 {% macro player_link(account_id, name) -%}
 <a href="/player/{{ account_id }}">{{ name or account_id }}</a>{{ rings(account_id) }}
 {%- endmacro %}

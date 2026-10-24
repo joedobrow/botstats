@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "macros.html" import player_link, winner_chip %}
+{% from "macros.html" import player_link, winner_chip, pos %}
 {% block content %}
 <h1>Hall of Fame</h1>
 {% if seasons %}
@@ -24,7 +24,7 @@
     <div class="award-body">
       {% if a.key == "all_ad_team" %}
       <ul class="chips positions">
-        {% for w in a.winners %}<li><span class="muted small">Pos {{ w.position }}</span> {{ winner_chip(w) }}</li>{% endfor %}
+        {% for w in a.winners %}<li>{{ pos(w.position) }} {{ winner_chip(w) }}</li>{% endfor %}
       </ul>
       {% endif %}
       {% if a.citation %}<p class="award-citation">{{ a.citation }}</p>{% endif %}

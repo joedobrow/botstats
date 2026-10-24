@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "macros.html" import pos %}
 {% block content %}
 <p class="small"><a href="{{ season_url(season) }}">← {{ season.label }}</a></p>
 <h1>{% if existing %}Edit your signup{% else %}Sign up{% endif %}</h1>
@@ -15,7 +16,7 @@
   <fieldset>
     <legend>Positions you'll play</legend>
     {% for n, label in POSITION_NAMES.items() %}
-    <label class="check"><input type="checkbox" name="positions" value="{{ n }}" {% if n|string in chosen %}checked{% endif %}> {{ n }} · {{ label }}</label>
+    <label class="check"><input type="checkbox" name="positions" value="{{ n }}" {% if n|string in chosen %}checked{% endif %}> {{ pos(n) }} {{ label }}</label>
     {% endfor %}
   </fieldset>
 
