@@ -22,7 +22,7 @@
   --border: #bdb198;
 
   /* Ink */
-  --accent: #9a2a1e;
+  --accent: #8a3a28;
   --accent-text: #f3ecdf;
   --link: #6a2f10;
   --win: #2e6b35;
@@ -63,16 +63,16 @@
   --hero-sub-ink: var(--accent);
 
   /* Book-cover tiles */
-  --tile-hi: #93291f;
-  --tile-lo: #84241b;
-  --tile-edge: #6e1e17;
+  --tile-hi: #8f3c2a;
+  --tile-lo: #833626;
+  --tile-edge: #6f2d1f;
   --tile-ink: #f6ecdc;
   --tile-ink-soft: rgba(244, 226, 200, 0.75);
   --tile-frame: rgba(244, 226, 200, 0.28);
   --tile-shadow: 0 1px 2px rgba(40, 15, 10, 0.25), 0 10px 24px -10px rgba(60, 20, 10, 0.45);
   --tile-shadow-hover: 0 1px 2px rgba(40, 15, 10, 0.25), 0 18px 32px -12px rgba(60, 20, 10, 0.5);
-  --tile-off-edge: rgba(147, 41, 31, 0.35);
-  --tile-off-frame: rgba(147, 41, 31, 0.2);
+  --tile-off-edge: rgba(138, 58, 40, 0.35);
+  --tile-off-frame: rgba(138, 58, 40, 0.2);
   --tile-off-ink: rgba(90, 40, 30, 0.45);
   --tile-off-ink-soft: rgba(90, 40, 30, 0.55);
 
@@ -95,7 +95,7 @@
     --text: #ece2cf;
     --muted: #a1947f;
     --border: #3b3026;
-    --accent: #c4392b;
+    --accent: #b0503a;
     --accent-text: #f7eee0;
     --link: #e0a368;
     --win: #74b566;
@@ -127,13 +127,13 @@
     --bar-text-shadow: none;
     --brand-ink: #ece2cf;
     --hero-sub-ink: var(--tile-ink);
-    --tile-hi: #a3301f;
-    --tile-lo: #8a2619;
-    --tile-edge: #5e1a13;
+    --tile-hi: #b0503a;
+    --tile-lo: #a24a36;
+    --tile-edge: #7f3626;
     --tile-shadow: 0 1px 2px rgba(0, 0, 0, 0.5), 0 10px 24px -10px rgba(0, 0, 0, 0.7);
     --tile-shadow-hover: 0 1px 2px rgba(0, 0, 0, 0.5), 0 18px 32px -12px rgba(0, 0, 0, 0.75);
-    --tile-off-edge: rgba(196, 57, 43, 0.4);
-    --tile-off-frame: rgba(196, 57, 43, 0.22);
+    --tile-off-edge: rgba(176, 80, 58, 0.4);
+    --tile-off-frame: rgba(176, 80, 58, 0.22);
     --tile-off-ink: rgba(236, 226, 207, 0.4);
     --tile-off-ink-soft: rgba(236, 226, 207, 0.5);
     --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5 6 6.5l5-5' fill='none' stroke='%23a1947f' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
@@ -149,7 +149,7 @@
   --text: #ece2cf;
   --muted: #a1947f;
   --border: #3b3026;
-  --accent: #c4392b;
+  --accent: #b0503a;
   --accent-text: #f7eee0;
   --link: #e0a368;
   --win: #74b566;
@@ -181,13 +181,13 @@
   --bar-text-shadow: none;
   --brand-ink: #ece2cf;
   --hero-sub-ink: var(--tile-ink);
-  --tile-hi: #a3301f;
-  --tile-lo: #8a2619;
-  --tile-edge: #5e1a13;
+  --tile-hi: #b0503a;
+  --tile-lo: #a24a36;
+  --tile-edge: #7f3626;
   --tile-shadow: 0 1px 2px rgba(0, 0, 0, 0.5), 0 10px 24px -10px rgba(0, 0, 0, 0.7);
   --tile-shadow-hover: 0 1px 2px rgba(0, 0, 0, 0.5), 0 18px 32px -12px rgba(0, 0, 0, 0.75);
-  --tile-off-edge: rgba(196, 57, 43, 0.4);
-  --tile-off-frame: rgba(196, 57, 43, 0.22);
+  --tile-off-edge: rgba(176, 80, 58, 0.4);
+  --tile-off-frame: rgba(176, 80, 58, 0.22);
   --tile-off-ink: rgba(236, 226, 207, 0.4);
   --tile-off-ink-soft: rgba(236, 226, 207, 0.5);
   --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5 6 6.5l5-5' fill='none' stroke='%23a1947f' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
