@@ -32,13 +32,13 @@
   --tag-bg: #cfc4ac;
   --open-bg: #c9dcbd;
   --open-text: #2d5a28;
-  /* Gold: the one colour that isn't the paper's own, kept for the call to
-     sign up so it stands out from everything printed in red. */
-  --call-bg: #e2a93b;
-  --call-edge: #b57f17;
-  --call-ink: #2a1d08;
-  --call-button: #2a1d08;
-  --call-button-ink: #f6e7c4;
+  /* The call to sign up: a band of the league's brick, its buttons in paper
+     so they're the lightest thing on it. */
+  --call-bg: #8a3a28;
+  --call-edge: #6f2d1f;
+  --call-ink: #f6ecdc;
+  --call-button: #f3ecdf;
+  --call-button-ink: #6f2d1f;
   /* Positions: a colour each, so 1 and 5 can be told apart at a glance. */
   --pos-ink: #ffffff;
   --pos-1: #b5452a;
@@ -105,11 +105,11 @@
     --tag-bg: #2f261e;
     --open-bg: #24361f;
     --open-text: #a3cf92;
-    --call-bg: #d9a032;
-    --call-edge: #f0c060;
-    --call-ink: #1f1505;
-    --call-button: #1f1505;
-    --call-button-ink: #f6e1ae;
+    --call-bg: #a24a36;
+    --call-edge: #b0503a;
+    --call-ink: #f7eee0;
+    --call-button: #f7eee0;
+    --call-button-ink: #7f3626;
     --pos-ink: #ffffff;
     --pos-1: #c95a3c;
     --pos-2: #3f83c2;
@@ -159,11 +159,11 @@
   --tag-bg: #2f261e;
   --open-bg: #24361f;
   --open-text: #a3cf92;
-  --call-bg: #d9a032;
-  --call-edge: #f0c060;
-  --call-ink: #1f1505;
-  --call-button: #1f1505;
-  --call-button-ink: #f6e1ae;
+  --call-bg: #a24a36;
+  --call-edge: #b0503a;
+  --call-ink: #f7eee0;
+  --call-button: #f7eee0;
+  --call-button-ink: #7f3626;
   --pos-ink: #ffffff;
   --pos-1: #c95a3c;
   --pos-2: #3f83c2;
@@ -852,9 +852,7 @@ a.tile:focus-visible { outline: 3px solid var(--accent); outline-offset: 4px; }
                font-size: .85rem; }
 .team-roster .chip { gap: 4px; }
 
-/* Front page, while signups are open: every region the viewer isn't in yet.
-   Gold rather than the league's red, so it reads as an invitation and not as
-   one more printed thing on the page. */
+/* Front page, while signups are open, for someone in none of them yet. */
 .signup-callout {
   display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap;
   gap: 12px 24px; margin: 0 0 18px; padding: 16px 20px;
