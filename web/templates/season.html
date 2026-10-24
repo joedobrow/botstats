@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "macros.html" import player_link, team_cell, signup_button, season_name, season_status, season_start %}
+{% from "macros.html" import player_link, team_cell, signup_button, season_name, season_status, season_start, pos, positions %}
 {% block content %}
 <div class="page-head">
   <div>
@@ -396,7 +396,7 @@
           {%- if s.level_override and s.level_override != s.level %}
           <span class="tag" title="They signed up as {{ store_level_labels[s.level] }}">moved</span>{% endif %}</td>
         <td class="num" data-sort="{{ ratings.get(s.account_id, '') }}">{{ ratings.get(s.account_id) or "—" }}</td>
-        <td>{{ s.positions|join(", ") }}</td>
+        <td data-sort="{{ s.positions|join(',') }}">{{ positions(s.positions) }}</td>
         {% if is_admin %}
         <td class="nowrap">
           <form method="post" action="/admin/signup/level" class="inline level-pick">
@@ -454,7 +454,7 @@
       <fieldset>
         <legend>Positions</legend>
         {% for n, label in POSITION_NAMES.items() %}
-        <label class="check"><input type="checkbox" name="positions" value="{{ n }}"> {{ n }} · {{ label }}</label>
+        <label class="check"><input type="checkbox" name="positions" value="{{ n }}"> {{ pos(n) }} {{ label }}</label>
         {% endfor %}
       </fieldset>
       <label>Discord name <input type="text" name="discord" maxlength="64"></label>
