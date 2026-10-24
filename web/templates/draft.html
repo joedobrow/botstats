@@ -67,11 +67,17 @@
     </div>
     <aside class="feed-side">
       <section class="box"><header class="box-head"><h2>Still available</h2>
+        <span class="pos-filter" id="pos-filter" role="group" aria-label="Show only one position">
+          {%- for n, label in POSITION_NAMES.items() %}<button type="button" class="pos pos-{{ n }}" data-pos="{{ n }}"
+            title="{{ label }}" aria-pressed="false">{{ n }}</button>{% endfor -%}
+        </span>
         <span class="muted small" id="pool-count"></span></header>
         <ul class="chips" id="pool"></ul></section>
       <section class="box" id="player-card" hidden>
         <header class="box-head"><h2 id="pc-name"></h2></header>
         <div class="box-body" id="pc-body"></div></section>
+      <section class="box"><header class="box-head"><h2>Team breakdown</h2></header>
+        <div class="team-breakdown" id="breakdown"></div></section>
     </aside>
   </div>
 </div>
