@@ -318,6 +318,10 @@ td input.short { max-width: 110px; }
 fieldset { border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; margin: 0; display: flex; flex-direction: column; gap: 4px; }
 legend { font-weight: 500; padding: 0 4px; }
 .actions { display: flex; gap: 10px; flex-wrap: wrap; }
+/* Hidden means hidden. A class that sets display (.actions, above) outranks
+   the browser's own rule for [hidden], which is how a hidden row of buttons
+   kept showing. */
+[hidden] { display: none !important; }
 .errors { background: var(--tag-bg); border-left: 4px solid var(--loss); padding: 6px 14px; border-radius: 4px; margin-bottom: 16px; }
 .errors p { margin: 4px 0; }
 .search { display: flex; gap: 8px; max-width: 480px; margin-bottom: 16px; }
@@ -821,7 +825,6 @@ a.tile:focus-visible { outline: 3px solid var(--accent); outline-offset: 4px; }
 /* The rating, quieter than the name it follows. */
 .pill-rating { font-weight: 500; font-size: .8em; opacity: .7; font-variant-numeric: tabular-nums; }
 .chips { gap: 6px; }
-.bought { display: inline-flex; align-items: center; gap: 4px; }
 #player-card .box-head h2 { display: flex; align-items: center; gap: 8px; text-transform: none;
                             letter-spacing: 0; font-size: 1rem; }
 .pc-row { display: flex; justify-content: space-between; gap: 12px; padding: 3px 0;
@@ -920,3 +923,6 @@ label.check .pos { margin-right: 2px; }
                    font-size: .78rem; font-weight: 700; }
 .pos-filter .pos.off { opacity: .3; }
 .pos-filter .pos[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--text); }
+.pill-price { font-weight: 500; font-size: .85em; opacity: .85; font-variant-numeric: tabular-nums; }
+#undo-row { margin: 14px 0; }
+.tb-avg .label { font-weight: 600; }
