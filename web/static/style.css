@@ -909,13 +909,6 @@ a.tile:focus-visible { outline: 3px solid var(--accent); outline-offset: 4px; }
 .pos-list { display: inline-flex; gap: 3px; vertical-align: middle; }
 label.check .pos { margin-right: 2px; }
 #pc-name .rings { margin-left: 0; }
-.tb-dots { flex-wrap: wrap; }
-.tb-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center;
-          gap: 5px 10px; padding: 7px 14px; border-bottom: 1px solid var(--border); }
-.tb-row:last-child { border-bottom: 0; }
-.tb-avg { font-weight: 700; font-variant-numeric: tabular-nums; }
-.tb-dots { grid-column: 1 / -1; }
-.tb-dots:empty { display: none; }
 /* The pool's position filter: the circles as buttons; picking one fades the
    rest. */
 .pos-filter { display: inline-flex; gap: 4px; margin-left: auto; margin-right: 8px; align-self: center; }
@@ -926,4 +919,11 @@ label.check .pos { margin-right: 2px; }
 .pos-filter .pos[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--text); }
 .pill-price { font-weight: 500; font-size: .85em; opacity: .85; font-variant-numeric: tabular-nums; }
 #undo-row { margin: 14px 0; }
-.tb-avg .label { font-weight: 600; }
+/* A team card's position circles: smaller and packed tight, after the
+   captain's pill. */
+.team-who { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; min-width: 0; }
+.pos-list.mini { gap: 1px; flex-wrap: wrap; }
+.pos-list.mini .pos { width: 1.25em; height: 1.25em; font-size: .68rem; }
+.team-money { white-space: nowrap; }
+.team-money b { color: var(--text); }
+#pool { padding: 10px 14px; margin: 0; }
