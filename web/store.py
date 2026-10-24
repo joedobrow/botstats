@@ -999,6 +999,8 @@ def draft_profiles(season: dict) -> dict[int, dict]:
         r = p["signup"]
         out[p["account_id"]] = {
             "name": p["name"], "avatar_url": r.get("avatar_url"), "rating": p["rating"],
+            "windrun": round(p["breakdown"]["windrun"]) if p["breakdown"].get("windrun") is not None else None,
+            "windrun_games": p["breakdown"].get("windrun_games"),
             "badge": p["badge"], "level": r["level_label"], "positions": r["positions"],
             "comment": r["statement"], "games": p["games"], "wins": p["wins"],
             "fantasy": round(p["fantasy"], 1) if p["fantasy"] is not None else None,

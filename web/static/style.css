@@ -788,13 +788,8 @@ a.tile:focus-visible { outline: 3px solid var(--accent); outline-offset: 4px; }
 .pill-name { flex: 0 0 auto; }
 .pill.big { font-size: 1.15rem; min-height: 36px; padding: 4px 14px; }
 .pill.big .avatar { width: 28px; height: 28px; }
-/* Rating as signal bars, in the pill's own ink. */
-.bars { display: inline-flex; align-items: flex-end; gap: 1px; height: 11px; margin-left: 1px; }
-.bars i { display: block; width: 3px; background: currentColor; opacity: .22; border-radius: 1px; }
-.bars i:nth-child(1) { height: 3px; } .bars i:nth-child(2) { height: 5px; }
-.bars i:nth-child(3) { height: 7px; } .bars i:nth-child(4) { height: 9px; }
-.bars i:nth-child(5) { height: 11px; }
-.bars i.on { opacity: 1; }
+/* The rating, quieter than the name it follows. */
+.pill-rating { font-weight: 500; font-size: .8em; opacity: .7; font-variant-numeric: tabular-nums; }
 .chips { gap: 6px; }
 .bought { display: inline-flex; align-items: center; gap: 4px; }
 #player-card .box-head h2 { display: flex; align-items: center; gap: 8px; text-transform: none;

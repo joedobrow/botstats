@@ -20,29 +20,18 @@
   const PROFILES = D.profiles || {};
   let CAPTAINS = new Set(((D.view || {}).captains || []).map(c => String(c.account_id)));
 
-  // Rating as signal bars: one to five, by where a player stands among this
-  // season's signups — a top fifth player shows all five. Relative, because
-  // what matters in a draft is who's better than whom in this room.
-  const rated = Object.values(PROFILES).map(p => p.rating).filter(r => r != null).sort((a, b) => a - b);
-  const tier = id => {
+  // The rating, as a number on the pill. Blank for someone never rated.
+  const ratingTag = id => {
     const r = PROFILES[id] && PROFILES[id].rating;
-    if (r == null || !rated.length) return 0;
-    const below = rated.filter(x => x < r).length;
-    return Math.min(5, 1 + Math.floor(5 * below / rated.length));
-  };
-  const bars = id => {
-    const t = tier(id);
-    return `<span class="bars" aria-hidden="true">${[1, 2, 3, 4, 5].map(n => `<i class="${n <= t ? "on" : ""}"></i>`).join("")}</span>`;
+    return r != null ? `<span class="pill-rating">${r}</span>` : "";
   };
   // Every name is a pill: captains in the league's red, players plain. A
   // pill opens that player's card under the pool rather than leaving the
   // room; everything on the card came with the page, so it opens at once.
-  const pill = (id, text, extra = "") => {
-    const r = PROFILES[id] && PROFILES[id].rating;
-    return `<button type="button" class="pill ${CAPTAINS.has(String(id)) ? "captain" : "player"} ${extra}"
-      data-player="${id}" title="${r != null ? "Rating " + r : "Not rated"}">${face(id)}<span class="pill-name">${
-      esc(text == null ? who(id) : text)}</span>${bars(id)}</button>`;
-  };
+  const pill = (id, text, extra = "") =>
+    `<button type="button" class="pill ${CAPTAINS.has(String(id)) ? "captain" : "player"} ${extra}"
+      data-player="${id}">${face(id)}<span class="pill-name">${
+      esc(text == null ? who(id) : text)}</span>${ratingTag(id)}</button>`;
   const POSITIONS = {1: "Safe lane", 2: "Mid", 3: "Off lane", 4: "Soft support", 5: "Hard support"};
 
   let view = D.view || {};
@@ -219,6 +208,7 @@
         </tbody></table>` : "";
       $("pc-body").innerHTML =
         row("Rating", p.rating != null ? `<b>${p.rating}</b>` : "") +
+        row("Windrun", p.windrun != null ? `${p.windrun}${p.windrun_games ? ` <span class="muted small">· ${p.windrun_games} games</span>` : ""}` : "") +
         row("Rank", p.badge ? esc(p.badge) : "") +
         row("Positions", p.positions.map(n => `${n} · ${POSITIONS[n] || ""}`).join(", ")) +
         row("Signed up as", esc(p.level)) +
