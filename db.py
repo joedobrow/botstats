@@ -1709,8 +1709,12 @@ def get_current_season_week(season_id: int, division_id: int) -> int:
 
     With explicit weeks defined: the week whose range contains right now, or
     the closest one (last if we're past every defined week, first if we're
-    before all of them). Falls back to the legacy get_latest_season_week
-    calendar logic when the season has no explicit weeks."""
+    before all of them) — and if that week has no games yet, the latest week
+    before it that does. Games are on Wednesdays and a week starts on the
+    Thursday, so going by the calendar alone left every default pointing at
+    an empty week for six days out of seven. Falls back to the legacy
+    get_latest_season_week calendar logic when the season has no explicit
+    weeks."""
     if not _season_weeks_defined(season_id, division_id):
         return get_latest_season_week(season_id, division_id) or 1
 
@@ -1727,6 +1731,11 @@ def get_current_season_week(season_id: int, division_id: int) -> int:
             current = r["week_number"]
         else:
             break
+    for r in reversed([r for r in rows if r["week_number"] <= current]):
+        where, params = season_week_scope(season_id, division_id, r["week_number"]).where("m")
+        with _conn() as conn:
+            if conn.execute(f"SELECT 1 FROM matches m WHERE {where} LIMIT 1", params).fetchone():
+                return r["week_number"]
     return current
 
 
