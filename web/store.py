@@ -1399,13 +1399,23 @@ def season_teams(season: dict, matches: list[dict] | None = None) -> list[dict]:
     costs = db.get_player_costs(sid, did)
     identity = db.get_season_teams(sid, did)
     cap_aids = db.get_captain_account_ids(sid, did)
+    # get_player_costs mirrors a drafted player's row onto their other
+    # accounts, so a game played on either counts for the team. For the
+    # roster itself that's one pick, not two — see db.one_per_person.
+    links = db.alt_links()
     teams: dict[str, dict] = {}
+    seen: dict[str, set[int]] = {}
     for aid, c in costs.items():
         cap = c.get("captain")
         if not cap:
             continue
+        person = links.get(aid, aid)
+        if person in seen.setdefault(cap, set()):
+            continue
+        seen[cap].add(person)
         t = teams.setdefault(cap, {"captain": cap, "roster": [], "wins": 0, "losses": 0})
-        t["roster"].append({"account_id": aid, "cost": c.get("cost")})
+        t["roster"].append({"account_id": person if person in costs else aid,
+                            "cost": c.get("cost")})
     for cap, t in teams.items():
         # Priciest first; a player who joined without a draft price goes last.
         t["roster"].sort(key=lambda p: (p["cost"] is None, -(p["cost"] or 0)))
