@@ -95,6 +95,25 @@ def _resolve_season(interaction: discord.Interaction, season: str | None) -> tup
     return None, f"\u26a0\ufe0f Unknown season `{season}`. Known seasons: {opts}"
 
 
+def _all_time_scope(season_id: int | None, season: str | None,
+                    draft_relative: bool = False) -> tuple[bool, str]:
+    """What `week:-1` covers, and what to call it.
+
+    Naming a season and getting every season ever recorded isn't what anyone
+    means by all-time: `season:` narrows it to all of that season's weeks.
+    Left blank, all-time is the division's whole history. Draft-relative
+    stats — a deserved cost, an attendance rate — only mean anything
+    measured against one draft, so they never widen.
+    """
+    if draft_relative:
+        return False, "All-Time (this season)"
+    if not season:
+        return True, "All-Time (all seasons)"
+    from db import get_season, season_label
+    row = get_season(season_id) if season_id else None
+    return False, f"All-Time ({season_label(row) if row else 'this season'})"
+
+
 SEASON_PARAM_DESCRIPTION = "Which season — defaults to the division's current one"
 
 _REGION_NAMES = {"us_west": "US West", "us_east": "US East", "europe": "Europe", "any": "Any Region"}
@@ -303,13 +322,11 @@ async def leaderboard(interaction: discord.Interaction, stat: app_commands.Choic
 
     try:
         if week == -1:
-            # All-time spans every season the guild has recorded. The two
-            # draft-relative stats stay season-scoped: a "deserved cost" or an
-            # attendance rate only means anything measured against one draft.
-            draft_relative = stat.value in ("value", "attendance")
+            # Every season the guild has recorded, unless `season:` named one.
+            cross_season, week_label = _all_time_scope(
+                season_id, season, draft_relative=stat.value in ("value", "attendance"))
             stats = ranked(get_all_time_stats(division["id"], season_id,
-                                              cross_season=not draft_relative))
-            week_label = "All-Time (this season)" if draft_relative else "All-Time (all seasons)"
+                                              cross_season=cross_season))
         else:
             # Blank week defaults to the current season week (not all-time —
             # pass week:-1 explicitly for that).
@@ -387,9 +404,10 @@ async def player(interaction: discord.Interaction, name: str, week: int = None, 
     try:
         if week == -1:
             # Matches /leaderboard: a player's all-time line spans every
-            # season. Cost/value in the Draft block stay season-scoped.
-            stats = get_all_time_stats(division["id"], season_id, cross_season=True)
-            week_label = "All-Time (all seasons)"
+            # season, unless `season:` named one. Cost/value in the Draft
+            # block stay season-scoped either way.
+            cross_season, week_label = _all_time_scope(season_id, season)
+            stats = get_all_time_stats(division["id"], season_id, cross_season=cross_season)
         else:
             # Blank week defaults to the current season week (not all-time —
             # pass week:-1 explicitly for that).
