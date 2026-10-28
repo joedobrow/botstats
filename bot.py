@@ -765,7 +765,10 @@ async def team_card(interaction: discord.Interaction, name: str, season: str = N
     cap_aids = get_captain_account_ids(season_id, division["id"])
     captain_aid = cap_aids.get(captain)
     drafted_aids = [aid for aid, c in costs.items() if c.get("captain") == captain]
-    roster_aids = drafted_aids + ([captain_aid] if captain_aid else [])
+    # One line per person: a player drafted under two accounts was still one
+    # pick, and six names don't fit on a card built for five.
+    from db import one_per_person
+    roster_aids = one_per_person(drafted_aids + ([captain_aid] if captain_aid else []))
 
     # Per-player role_position comes from the stats query.
     stats_by_aid = {

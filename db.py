@@ -2320,6 +2320,41 @@ def alt_links() -> dict[int, int]:
             "WHERE alt_account_for IS NOT NULL")}
 
 
+def one_per_person(account_ids, links: dict[int, int] | None = None) -> list[int]:
+    """The given accounts with second accounts folded into their owner, in
+    the order they came, each person once.
+
+    A roster of five people who between them hold six accounts is still a
+    roster of five — counting the accounts gives a team that doesn't fit on
+    its own card and a draft slot that looks spent twice.
+    """
+    links = alt_links() if links is None else links
+    out, seen = [], set()
+    for aid in account_ids:
+        person = links.get(aid, aid)
+        if person in seen:
+            continue
+        seen.add(person)
+        out.append(person if person in account_ids else aid)
+    return out
+
+
+def accounts_of_people(account_ids, links: dict[int, int] | None = None) -> set[int]:
+    """Every account belonging to the people who hold these accounts.
+
+    The other half of the same problem: a game somebody played on their
+    second account is still their game, so anything matching players to a
+    team has to look for all of them, not just the one that was drafted.
+    """
+    links = alt_links() if links is None else links
+    people = {links.get(a, a) for a in account_ids}
+    out = set(people)
+    for alt, main in links.items():
+        if main in people:
+            out.add(alt)
+    return out
+
+
 def account_groups(links: dict[int, int] | None = None) -> dict[int, list[int]]:
     """{account: every account the same person plays on, itself included}.
 
@@ -3110,10 +3145,16 @@ def get_team_match_aggregates(season_id: int, division_id: int) -> dict[str, dic
     if not rosters:
         return {}
 
+    # Somebody's second account is still them: match on every account they
+    # hold, so a game played on one counts for the team, and list them once.
+    links = alt_links()
+    people = {cap: one_per_person(sorted(aids), links) for cap, aids in rosters.items()}
+    rosters = {cap: accounts_of_people(aids, links) for cap, aids in rosters.items()}
+
     # Display-name list per team (for the roster line in the embed).
     all_stats = {s["account_id"]: s for s in get_all_time_stats(division_id, season_id)}
     member_names: dict[str, list[str]] = {}
-    for cap, aids in rosters.items():
+    for cap, aids in people.items():
         names = []
         for aid in aids:
             s = all_stats.get(aid)
