@@ -331,7 +331,7 @@ async def leaderboard(interaction: discord.Interaction, stat: app_commands.Choic
             # Blank week defaults to the current season week (not all-time —
             # pass week:-1 explicitly for that).
             resolved_week = week if week is not None else get_current_season_week(season_id, division["id"])
-            stats = get_stats_for_season_week(season_id, division["id"], resolved_week)
+            stats = ranked(get_stats_for_season_week(season_id, division["id"], resolved_week))
             week_label = f"Week {resolved_week}"
 
         # value/attendance lean on draft data: filter to drafted-only players
@@ -1641,6 +1641,16 @@ async def set_player(
                 ephemeral=True,
             )
             return
+        # Stats and ratings both resolve one account to its owner in a single
+        # hop, so a chain of second accounts would leave games filed under an
+        # account that is itself filed elsewhere. One group, one main.
+        chained = (get_skill_override(parsed_alt_id) or {}).get("alt_account_for")
+        if chained:
+            await interaction.followup.send(
+                f"⚠️ `{parsed_alt_id}` is itself listed as a second account of `{chained}` — "
+                f"point at `{chained}` instead, so all their accounts sit in one group.",
+                ephemeral=True)
+            return
 
     # add_account is alt_account_for from the other side: "this player also
     # plays on X" rather than "this account belongs to X".
@@ -1974,7 +1984,7 @@ async def summary(interaction: discord.Interaction, season: str = None, public: 
         # Same current-week resolver /leaderboard, /player, and /matches use
         # for a blank week — one source of truth instead of a bespoke one.
         current_week = get_current_season_week(season_id, division["id"])
-        week_stats_full = get_stats_for_season_week(season_id, division["id"], current_week)
+        week_stats_full = ranked(get_stats_for_season_week(season_id, division["id"], current_week))
         week_label_base = f"Week {current_week}"
         alltime_stats_full = ranked(get_all_time_stats(division["id"], season_id))
 

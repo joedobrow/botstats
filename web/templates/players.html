@@ -19,7 +19,7 @@
   </tr></thead>
   <tbody>
   {% for p in players %}
-    <tr data-search="{{ p.name|lower }} {{ p.account_id }}">
+    <tr data-search="{{ p.names|join(' ')|lower }} {{ p.accounts|join(' ') }}">
       <td class="with-avatar" data-sort="{{ p.name|lower }}">{% if p.avatar_url %}<img class="avatar" src="{{ p.avatar_url }}" alt="">{% endif %}{{ player_link(p.account_id, p.name) }}</td>
       <td class="num" data-sort="{{ p.rating if p.rating is not none else '' }}">{{ p.rating if p.rating is not none else "" }}</td>
       <td class="num" data-sort="{{ p.games }}">{{ p.games }}</td>

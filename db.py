@@ -1842,6 +1842,28 @@ def upsert_season_teams(season_id: int, division_id: int, teams: list[dict]) -> 
 
 
 
+def _mirror_person_rows(results: list[dict]) -> list[dict]:
+    """A copy of each person's stat row under the other accounts they play on.
+
+    The stats are grouped by person, so an account somebody has moved on
+    from has no row of its own and looking them up by it would find
+    nothing. The copies carry alt_of, which ranked() drops — so they turn
+    up in a lookup by any of a player's accounts, and never twice in a
+    ranking.
+    """
+    groups = account_groups()
+    if not groups:
+        return results
+    by_aid = {r["account_id"]: r for r in results}
+    for aid, group in groups.items():
+        if aid in by_aid:
+            continue
+        person = next((by_aid[g] for g in group if g in by_aid), None)
+        if person is not None:
+            results.append({**person, "account_id": aid, "alt_of": person["account_id"]})
+    return results
+
+
 def _apply_override_nicknames(results: list[dict]) -> list[dict]:
     """Give each stat row the player's display name — the one /player shows
     (see get_display_names) — instead of whichever in-game name the
@@ -1891,10 +1913,11 @@ def _player_stats(scope: MatchScope) -> list[dict]:
     value, attendance) and display names are added by the callers."""
     from fantasy import calculate_fantasy_points
     where, params = scope.where("m")
+    person, person_join = person_sql("p")
     with _conn() as conn:
         rows = conn.execute("""
             SELECT
-                p.account_id,
+                {person}                        AS account_id,
                 p.name,
                 p.role_position,
                 COUNT(*)                        AS games_played,
@@ -1941,15 +1964,20 @@ def _player_stats(scope: MatchScope) -> list[dict]:
                 SUM(p.won)                      AS wins
             FROM players p
             JOIN matches m ON p.match_id = m.match_id
+            {person_join}
             JOIN (
                 SELECT match_id, SUM(hero_damage) AS total_damage
                 FROM players GROUP BY match_id
             ) AS match_dmg ON p.match_id = match_dmg.match_id
             WHERE {where}
               AND p.account_id > 0   -- 0 is every private-profile player at once
-            GROUP BY p.account_id
+            -- One line per person, not per account; p.name is whichever of
+            -- their names the group happened to pick, and the callers all
+            -- go on to _apply_override_nicknames for the one to show.
+            GROUP BY {person}
             ORDER BY gpm DESC
-        """.format(where=where), params).fetchall()
+        """.format(where=where, person=person, person_join=person_join),
+                            params).fetchall()
 
     diffs = _compute_player_diffs(scope)
     diffs_vs_lobby = _compute_player_diffs_vs_lobby(scope)
@@ -1971,13 +1999,15 @@ def _usual_roles(scope: MatchScope) -> dict[int, int]:
     The aggregate query can't pick this itself: a non-aggregated column in a
     GROUP BY comes from an arbitrary row."""
     where, params = scope.where("m")
+    person, person_join = person_sql("p")
     with _conn() as conn:
         rows = conn.execute(f"""
-            SELECT p.account_id, p.role_position, COUNT(*) AS n
+            SELECT {person} AS account_id, p.role_position, COUNT(*) AS n
             FROM players p JOIN matches m ON p.match_id = m.match_id
+            {person_join}
             WHERE {where} AND p.role_position IS NOT NULL
-            GROUP BY p.account_id, p.role_position
-            ORDER BY p.account_id, n DESC, p.role_position
+            GROUP BY {person}, p.role_position
+            ORDER BY account_id, n DESC, p.role_position
         """, params).fetchall()
     roles: dict[int, int] = {}
     for r in rows:
@@ -1989,7 +2019,8 @@ def get_latest_week_stats(division_id: int, week_offset: int = 0) -> list[dict]:
     """Aggregated per-player stats for a calendar week (0 = this week,
     1 = last week, ...), across every league the division plays in."""
     start, end = _week_start(week_offset)
-    return _apply_override_nicknames(_player_stats(MatchScope(division_id, start=start, end=end)))
+    return _apply_override_nicknames(_mirror_person_rows(
+        _player_stats(MatchScope(division_id, start=start, end=end))))
 
 
 def get_stats_for_season_week(season_id: int, division_id: int, week_number: int) -> list[dict]:
@@ -2009,7 +2040,7 @@ def get_stats_for_season_week(season_id: int, division_id: int, week_number: int
                                          get_captain_account_ids(season_id, division_id))
     for s in results:
         s["attendance"] = attendance_map.get(s["account_id"])
-    return _apply_override_nicknames(results)
+    return _apply_override_nicknames(_mirror_person_rows(results))
 
 
 def get_all_time_stats(division_id: int, season_id: int | None = None,
@@ -2046,24 +2077,7 @@ def _all_time_stats(division_id: int, season_id: int | None = None,
         for s in results:
             s["attendance"] = None
 
-    # Mirror alt accounts: an alt typically has no match rows of its own
-    # (their games were played under the main's Steam account), so add a
-    # copy of the main's full stat row under the alt's account_id too — see
-    # _mirror_alts_into for the general version of this used elsewhere.
-    by_aid = {s["account_id"]: s for s in results}
-    with _conn() as conn:
-        alt_rows = conn.execute(
-            "SELECT account_id, alt_account_for FROM skill_overrides WHERE alt_account_for IS NOT NULL"
-        ).fetchall()
-    for ar in alt_rows:
-        alt_id, main_id = ar["account_id"], ar["alt_account_for"]
-        if alt_id not in by_aid and main_id in by_aid:
-            mirrored = dict(by_aid[main_id])
-            mirrored["account_id"] = alt_id
-            mirrored["alt_of"] = main_id   # a copy for lookups; ranked() leaves it out
-            results.append(mirrored)
-
-    return _apply_override_nicknames(results)
+    return _apply_override_nicknames(_mirror_person_rows(results))
 
 
 def qualified(stats: list[dict], min_games: int | None = None) -> tuple[list[dict], int, int]:
@@ -2143,7 +2157,9 @@ def _compute_player_diffs(scope: MatchScope) -> dict[int, float]:
     """For every player with matches in scope, return the average
     per-match fantasy-points diff vs. the 4 same-side teammates.
 
-    Returns {account_id: avg_diff}. Players with no qualifying matches are absent.
+    Returns {account_id: avg_diff}, by person — a game played on somebody's
+    second account is one of their games. Players with no qualifying matches
+    are absent.
     """
     where, params = scope.where("m")
     sql = f"""
@@ -2162,6 +2178,7 @@ def _compute_player_diffs(scope: MatchScope) -> dict[int, float]:
     for r in rows:
         by_match.setdefault(r["match_id"], []).append(dict(r))
 
+    links = alt_links()
     diffs_by_account: dict[int, list[float]] = {}
     for match_rows in by_match.values():
         fps = {r["account_id"]: _per_match_fp(r) for r in match_rows}
@@ -2174,7 +2191,9 @@ def _compute_player_diffs(scope: MatchScope) -> dict[int, float]:
             if not teammates:
                 continue
             mate_avg = sum(fps[a] for a in teammates) / len(teammates)
-            diffs_by_account.setdefault(aid, []).append(fps[aid] - mate_avg)
+            # Credited to the person, so the nights they played on another
+            # account are in the same average as the rest.
+            diffs_by_account.setdefault(links.get(aid, aid), []).append(fps[aid] - mate_avg)
 
     return {aid: sum(ds) / len(ds) for aid, ds in diffs_by_account.items() if ds}
 
@@ -2188,6 +2207,7 @@ def _compute_player_diffs_vs_lobby(scope: MatchScope) -> dict[int, float]:
 
     Used only by /leaderboard Value (via _compute_value). The teammates-only
     diff powers the fantasy adjustment path — this doesn't replace it.
+    Keyed by person, like the other one.
     """
     where, params = scope.where("m")
     sql = f"""
@@ -2206,6 +2226,7 @@ def _compute_player_diffs_vs_lobby(scope: MatchScope) -> dict[int, float]:
     for r in rows:
         by_match.setdefault(r["match_id"], []).append(dict(r))
 
+    links = alt_links()
     diffs_by_account: dict[int, list[float]] = {}
     for match_rows in by_match.values():
         fps = {r["account_id"]: _per_match_fp(r) for r in match_rows}
@@ -2215,7 +2236,7 @@ def _compute_player_diffs_vs_lobby(scope: MatchScope) -> dict[int, float]:
         for aid in aids:
             others = [fps[a] for a in aids if a != aid]
             other_avg = sum(others) / len(others)
-            diffs_by_account.setdefault(aid, []).append(fps[aid] - other_avg)
+            diffs_by_account.setdefault(links.get(aid, aid), []).append(fps[aid] - other_avg)
 
     return {aid: sum(ds) / len(ds) for aid, ds in diffs_by_account.items() if ds}
 
@@ -2318,6 +2339,33 @@ def alt_links() -> dict[int, int]:
         return {r["account_id"]: r["alt_account_for"] for r in conn.execute(
             "SELECT account_id, alt_account_for FROM skill_overrides "
             "WHERE alt_account_for IS NOT NULL")}
+
+
+def person_sql(alias: str = "p") -> tuple[str, str]:
+    """(who played a row, the join that works it out), in SQL.
+
+    Every per-player aggregate groups by this rather than by the raw
+    account, because somebody's second account is still them: a season
+    played half on one Steam account and half on another is one record
+    with all of the games in it, not two half-records.
+
+    One hop is enough — /set_player won't link an account to one that is
+    itself a second account — and skill_overrides.account_id is the primary
+    key, so the join can never multiply a row and inflate a count.
+    """
+    return (f"COALESCE(person.alt_account_for, {alias}.account_id)",
+            f"LEFT JOIN skill_overrides person ON person.account_id = {alias}.account_id")
+
+
+def person_of(account_id: int, links: dict[int, int] | None = None) -> int:
+    """The account a player's record is filed under: their main account if
+    this is a second one, otherwise itself.
+
+    Anything looking a player up by account resolves through this, because
+    the stats are grouped by person — see person_sql.
+    """
+    links = alt_links() if links is None else links
+    return links.get(account_id, account_id)
 
 
 def one_per_person(account_ids, links: dict[int, int] | None = None) -> list[int]:
@@ -3364,20 +3412,20 @@ def get_team_aggregates(season_id: int, division_id: int) -> dict[str, dict]:
 
 
 def _mirror_alts_into(result: dict[int, dict]) -> None:
-    """For every skill_overrides row with alt_account_for set, if the alt's
-    account_id has no entry but its main's does, mirror the main's entry
-    under the alt's account_id too. Lets a dict keyed by account_id resolve
-    correctly regardless of which of the two accounts a caller looks up —
-    e.g. someone who signed up for a season under their alt but whose real
-    match history lives under their main."""
-    with _conn() as conn:
-        alt_rows = conn.execute(
-            "SELECT account_id, alt_account_for FROM skill_overrides WHERE alt_account_for IS NOT NULL"
-        ).fetchall()
-    for ar in alt_rows:
-        alt_id, main_id = ar["account_id"], ar["alt_account_for"]
-        if alt_id not in result and main_id in result:
-            result[alt_id] = result[main_id]
+    """Give every account a player holds the entry any one of them has.
+
+    Lets a dict keyed by account_id answer whichever of someone's accounts
+    a caller looks up — they might have signed up under one, been drafted
+    under another and played on a third. It works in every direction for
+    that reason: being drafted under a second account is as ordinary as
+    being drafted under a first, and the cost belongs to the player.
+    """
+    for aid, group in account_groups().items():
+        if aid in result:
+            continue
+        found = next((result[g] for g in group if g in result), None)
+        if found is not None:
+            result[aid] = found
 
 
 def get_player_costs(season_id: int, division_id: int) -> dict[int, dict]:
@@ -3477,7 +3525,7 @@ def add_roster_player(season_id: int, division_id: int, account_id: int,
 
 def _compute_attendance(scope: MatchScope, costs: dict[int, dict],
                         captain_aids: dict[str, int] | None = None) -> dict[int, float]:
-    """Return {account_id: attendance_ratio} for a team's players.
+    """Return {account_id: attendance_ratio} for a team's players, by person.
 
     Denominator (per captain): matches where >= 2 of that team shared a
         team_side — matches the team actually played as a team, rather than a
@@ -3528,17 +3576,27 @@ def _compute_attendance(scope: MatchScope, costs: dict[int, dict],
             if len(aids & team) >= 2:
                 captain_team_games[captain] = captain_team_games.get(captain, 0) + 1
 
+    links = alt_links()
     player_team_games: dict[int, int] = {}
+    # Which team each person turned out for, kept as we count: the person is
+    # named by whichever account they were drafted under, which needn't be
+    # the one the count is filed against.
+    team_of_person: dict[int, str] = {}
     for r in rows:
-        cap = team_of.get(r["account_id"])
+        aid = r["account_id"]
+        cap = team_of.get(aid)
         if not cap:
             continue
-        if match_side_aids[(r["match_id"], r["team_side"])] & (members[cap] - {r["account_id"]}):
-            player_team_games[r["account_id"]] = player_team_games.get(r["account_id"], 0) + 1
+        if match_side_aids[(r["match_id"], r["team_side"])] & (members[cap] - {aid}):
+            # A night they turned out on their other account is a night they
+            # turned out, and the team only played the one season.
+            person = links.get(aid, aid)
+            player_team_games[person] = player_team_games.get(person, 0) + 1
+            team_of_person[person] = cap
 
     attendance: dict[int, float] = {}
     for aid, num in player_team_games.items():
-        denom = captain_team_games.get(team_of[aid], 0)
+        denom = captain_team_games.get(team_of_person[aid], 0)
         if denom > 0:
             attendance[aid] = num / denom
     return attendance
