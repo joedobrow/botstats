@@ -1035,10 +1035,15 @@ async def fantasy_page(request: web.Request):
     # one — the working is its own page.
     selected = None
     if q.get("player"):
-        account_id = account_id_from(q["player"])
+        account_id = db.person_of(account_id_from(q["player"]) or 0)
         selected = next((r for r in table["everyone"]
                          if r["account_id"] == account_id
                          or q["player"].lower() in (r["name"] or "").lower()), None)
+        if not selected:
+            # They may have played under a name they don't use any more; the
+            # table has one row per person, filed under their main account.
+            people = {db.person_of(h["account_id"]) for h in store.search_players(q["player"])}
+            selected = next((r for r in table["everyone"] if r["account_id"] in people), None)
         if selected:
             keep = {k: v for k, v in q.items() if k in ("season", "week", "position", "stat")}
             raise web.HTTPFound(f"/fantasy/{selected['account_id']}"
@@ -1090,14 +1095,17 @@ async def fantasy_player_page(request: web.Request):
     position = re.sub(r"\D", "", q.get("position", ""))
     table = store.fantasy_table(season, week=int(week) if week and season else None,
                                 position=int(position) if position else None, min_games=0)
-    player = next((r for r in table["everyone"] if r["account_id"] == account_id), None)
+    # One row per person, filed under their main account: a second account
+    # asks the same question and gets the same answer.
+    person = db.person_of(account_id)
+    player = next((r for r in table["everyone"] if r["account_id"] == person), None)
     if not player:
         return not_found(request, "Player")
     back = "/fantasy" + ("?" + urlencode({k: v for k, v in q.items()
                                           if k in ("season", "week", "position", "stat")}) if q else "")
     return render(request, "fantasy_player.html", title=player["name"], player=player,
                   season=season, back=back, field=table["field"],
-                  rating=store.player_ratings().get(account_id),
+                  rating=store.player_ratings().get(person),
                   duration_mean=fantasy.DURATION_MEAN_MIN)
 
 
@@ -1153,6 +1161,11 @@ async def player_page(request: web.Request):
                 logger.exception("couldn't rate unknown player %s", account_id)
                 unavailable = ("the rating sources",)
             ident = store.player_identities([account_id])[account_id]
+    # The record on this page is the person's, so say which accounts that is.
+    theirs = db.accounts_of_people([account_id])
+    others = [a for a in sorted(theirs) if a != account_id]
+    other_idents = store.player_identities(others)
+    also = [{"account_id": a, "name": other_idents[a]["name"] or str(a)} for a in others]
     seasons = store.all_seasons()
     by_season: dict[tuple, list[dict]] = {}
     for m in matches:
@@ -1175,7 +1188,7 @@ async def player_page(request: web.Request):
                                 # A captain isn't drafted, so they have no cost —
                                 # an empty cell reads as missing data rather than
                                 # as the reason there's nothing to show.
-                                "is_captain": team.get("captain_account_id") == account_id})
+                                "is_captain": team.get("captain_account_id") in theirs})
     # Admins get the working: the same inputs and the same breakdown string
     # the bot's /lookup prints, rebuilt from the cache so the page costs
     # nothing. Every number here is one the rating was computed from.
@@ -1183,7 +1196,8 @@ async def player_page(request: web.Request):
     if request.get("is_admin"):
         breakdown = store.rating_breakdown(account_id)
     return render(request, "player.html", title=ident["name"] or str(account_id),
-                  account_id=account_id, ident=ident, overall=store.aggregate(matches),
+                  account_id=account_id, ident=ident, also=also,
+                  overall=store.aggregate(matches),
                   season_rows=season_rows, matches=matches[:10], match_total=len(matches),
                   rating=store.player_ratings().get(account_id),
                   breakdown=breakdown, unavailable=unavailable,

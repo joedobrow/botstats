@@ -615,10 +615,10 @@ def free_agents(season: dict) -> list[dict]:
     sid, did = season["id"], season["division_id"]
     drafted = set(db.get_player_costs(sid, did))
     drafted |= {a for a in db.get_captain_account_ids(sid, did).values() if a}
-    everyone = search_players()
-    person = {p["account_id"]: (p.get("alt_account_for") or p["account_id"]) for p in everyone}
-    drafted_people = {person.get(a, a) for a in drafted}
-    out = [p for p in everyone if person[p["account_id"]] not in drafted_people]
+    links = db.alt_links()
+    drafted_people = {links.get(a, a) for a in drafted}
+    out = [p for p in search_players()
+           if links.get(p["account_id"], p["account_id"]) not in drafted_people]
     out.sort(key=lambda p: (-(p.get("rating") or -1), p["name"].lower()))
     return out
 
@@ -831,9 +831,9 @@ def resolve_champion_names(text: str) -> list[dict]:
     known: dict[str, set] = {}
     squashed: dict[str, set] = {}
     for p in search_players():
-        name = p["name"].strip()
-        known.setdefault(name.lower(), set()).add(p["account_id"])
-        squashed.setdefault(_squash(name), set()).add(p["account_id"])
+        for name in {n.strip() for n in p["names"]}:
+            known.setdefault(name.lower(), set()).add(p["account_id"])
+            squashed.setdefault(_squash(name), set()).add(p["account_id"])
 
     def match(token: str) -> int | None:
         # Two people can be called the same thing — there are two Space
@@ -1180,17 +1180,32 @@ def player_identities(account_ids: list[int]) -> dict[int, dict]:
 def search_players(q: str = "", limit: int | None = None) -> list[dict]:
     """Everyone who has played a league match or logged in, filtered by name.
 
+    One row per person, found by any of their names or account ids: someone
+    who has moved Steam account is still searchable under the old one, and
+    answers with the one record.
+
     The gathering is cached on the database's own version (see db._derived);
     the filtering is per call, since it is a string compare over a list that
     is already in memory.
     """
     rows = db._derived(("site_player_index",), _player_index)
     ql = q.strip().lower()
-    out = [r for r in rows if not ql or ql in r["name"].lower() or ql == str(r["account_id"])]
+    if not ql:
+        return rows[:limit] if limit else rows
+    out = [r for r in rows
+           if any(ql in n.lower() for n in r["names"]) or any(ql == str(a) for a in r["accounts"])]
     return out[:limit] if limit else out
 
 
 def _player_index() -> list[dict]:
+    """One row per person, with every account they play on folded in.
+
+    `accounts` and `names` are everything that person can be found by, so
+    the search and the page's own filter both still answer to the account
+    they have moved on from.
+    """
+    links = db.alt_links()
+    groups = db.account_groups(links)
     with _conn() as conn:
         rows = conn.execute("""
             SELECT account_id, COUNT(*) AS games, SUM(won) AS wins, MAX(match_id) AS last_match
@@ -1198,30 +1213,48 @@ def _player_index() -> list[dict]:
             GROUP BY account_id
         """).fetchall()
         users = [r["account_id"] for r in conn.execute("SELECT account_id FROM site_users")]
-    stats = {r["account_id"]: dict(r) for r in rows}
+    per_account = {r["account_id"]: dict(r) for r in rows}
     for aid in users:
-        stats.setdefault(aid, {"account_id": aid, "games": 0, "wins": 0, "last_match": 0})
-    idents = player_identities(list(stats))
+        per_account.setdefault(aid, {"account_id": aid, "games": 0, "wins": 0, "last_match": 0})
+
+    people: dict[int, dict] = {}
+    for aid, s in per_account.items():
+        person = links.get(aid, aid)
+        p = people.setdefault(person, {"account_id": person, "games": 0, "wins": 0,
+                                       "last_match": 0, "accounts": groups.get(person) or [person]})
+        p["games"] += s["games"] or 0
+        p["wins"] += s["wins"] or 0
+        p["last_match"] = max(p["last_match"], s["last_match"] or 0)
+
+    # Names for every account, not just the one they're filed under: that is
+    # what makes an old account still findable.
+    idents = player_identities(sorted({a for p in people.values() for a in p["accounts"]}))
     ratings = player_ratings()
     out = []
-    for aid, s in stats.items():
-        s.update(idents.get(aid, {}))
-        s["name"] = s["name"] or str(aid)
-        s["rating"] = ratings.get(aid)
-        out.append(s)
+    for person, p in people.items():
+        p.update(idents.get(person, {}))
+        p["name"] = p["name"] or str(person)
+        p["rating"] = ratings.get(person)
+        p["names"] = [n for n in (idents.get(a, {}).get("name") for a in p["accounts"]) if n] \
+            or [p["name"]]
+        out.append(p)
     out.sort(key=lambda s: (-s["games"], s["name"].lower()))
     return out
 
 
 def player_matches(account_id: int) -> list[dict]:
+    """Every league match this person played, on whichever of their accounts
+    — a night on their second account is still a night they played."""
+    aids = sorted(db.accounts_of_people([account_id]))
+    marks = ",".join("?" * len(aids))
     with _conn() as conn:
-        rows = conn.execute("""
+        rows = conn.execute(f"""
             SELECT p.*, m.start_time, m.division_id, m.league_id, m.duration AS match_duration,
                    m.radiant_score, m.dire_score
             FROM players p JOIN matches m ON m.match_id = p.match_id
-            WHERE p.account_id = ? AND m.excluded = 0
+            WHERE p.account_id IN ({marks}) AND m.excluded = 0
             ORDER BY m.start_time DESC
-        """, (account_id,)).fetchall()
+        """, aids).fetchall()
     return [dict(r) for r in rows]
 
 
@@ -1291,7 +1324,7 @@ def fantasy_table(season: dict | None, stat: str = "fantasy_points", week: int |
     import fantasy
 
     if season and week is not None:
-        rows = db.get_stats_for_season_week(season["id"], season["division_id"], week)
+        rows = db.ranked(db.get_stats_for_season_week(season["id"], season["division_id"], week))
     elif season:
         # That season's matches, not every season's. cross_season exists for
         # the bot's "week -1 means all-time" case; here, choosing a season is
@@ -1476,12 +1509,16 @@ def search_matches(*, player: str = "", season: int | None = None, division: int
                         "unknown_player": player}
             account_id = names[0] if len(names) == 1 else None
             if account_id is None:
+                aids = sorted(db.accounts_of_people(names))
                 where.append(f"m.match_id IN (SELECT match_id FROM players WHERE account_id IN "
-                             f"({','.join('?' * len(names))}))")
-                params += names
+                             f"({','.join('?' * len(aids))}))")
+                params += aids
         if account_id is not None:
-            where.append("m.match_id IN (SELECT match_id FROM players WHERE account_id = ?)")
-            params.append(account_id)
+            # Their games, not their account's: a name narrows to the person.
+            aids = sorted(db.accounts_of_people([account_id]))
+            where.append(f"m.match_id IN (SELECT match_id FROM players WHERE account_id IN "
+                         f"({','.join('?' * len(aids))}))")
+            params += aids
     if season:
         where.append("m.league_id = ?"); params.append(season)
     if division:
@@ -1824,9 +1861,15 @@ def season_matchups(season: dict) -> list[dict]:
 
 
 def team_of(season: dict, account_id: int) -> dict | None:
-    """The team a player was on in a season: drafted onto it, or its captain."""
+    """The team a player was on in a season: drafted onto it, or its captain.
+
+    Any of their accounts answers — season_teams lists a roster one line per
+    person, under whichever account they were drafted on, which needn't be
+    the one being asked about.
+    """
+    theirs = db.accounts_of_people([account_id])
     for t in season_teams(season, matches=[]):
-        if t.get("captain_account_id") == account_id or any(p["account_id"] == account_id for p in t["roster"]):
+        if t.get("captain_account_id") in theirs or any(p["account_id"] in theirs for p in t["roster"]):
             return t
     return None
 

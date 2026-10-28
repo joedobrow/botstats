@@ -18,6 +18,10 @@
       {% if overall.games_played %} · <a href="/fantasy/{{ account_id }}">Fantasy</a>{% endif %}
       {% if discord %} · <span class="discord" title="Discord">{{ discord }}</span>{% endif %}
     </div>
+    {% if also %}
+    <div class="muted small" title="Everything on this page counts the games they played on these too">Also plays as
+      {% for a in also %}<a href="/player/{{ a.account_id }}">{{ a.name }}</a>{% if not loop.last %} · {% endif %}{% endfor %}</div>
+    {% endif %}
   </div>
 </div>
 
