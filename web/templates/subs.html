@@ -65,7 +65,7 @@
       <td class="nowrap" data-sort="{{ p.last_played }}">{{ p.last_played|date("%b %-d, %Y") }}</td>
       <td data-sort="{{ p.positions|join(',') }}">{{ positions(p.positions) }}</td>
       <td>{% if user %}{% if p.discord %}<span class="discord">{{ p.discord }}</span>{% endif %}
-        {% else %}<a class="muted small" href="/login?next={{ path|urlencode }}">Log in to see</a>{% endif %}</td>
+        {% else %}<a class="muted small" href="{{ login_url }}">Log in to see</a>{% endif %}</td>
     </tr>
   {% else %}
     <tr><td colspan="8" class="muted">Nobody free in that range.</td></tr>

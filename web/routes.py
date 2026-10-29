@@ -111,10 +111,14 @@ def _theme(request: web.Request) -> tuple[str | None, str | None]:
 
 def render(request: web.Request, template: str, status: int = 200, **ctx) -> web.Response:
     theme, store_theme = _theme(request)
+    ctx.setdefault("notice", request.query.get("notice"))
     ctx.update(user=request.get("user"), is_admin=request.get("is_admin", False),
                theme=theme,
                is_uberadmin=request.get("is_uberadmin", False),
                csrf=request.get("csrf", ""), path=request.path,
+               # Where a Log in link brings you back to: this page as it is,
+               # filters and all.
+               login_url="/login?" + urlencode({"next": request.path_qs}),
                # Changes whenever any static file does. Keying it to the
                # stylesheet alone meant a new favicon or logo kept the old
                # query, so browsers went on serving the copy they had.
@@ -184,6 +188,16 @@ def _base_url(request: web.Request) -> str:
 
 def _safe_next(target: str | None) -> str:
     return target if target and target.startswith("/") and not target.startswith("//") else "/"
+
+
+def _go(url: str, notice: str | None = None, **query) -> web.HTTPFound:
+    """Back to a page after a form, with a notice for it to show. The one way
+    a handler says how something went: the page puts ?notice= in its banner,
+    and a URL that already has a query keeps it."""
+    params = {k: v for k, v in {**query, "notice": notice}.items() if v}
+    if not params:
+        return web.HTTPFound(url)
+    return web.HTTPFound(url + ("&" if "?" in url else "?") + urlencode(params))
 
 
 # ---------------------------------------------------------------------------
@@ -379,6 +393,26 @@ def _season_or_404(request: web.Request) -> dict:
     return season
 
 
+def _query_season(q, seasons: list[dict]) -> dict | None:
+    """The season a page's ?season=&division= names. Divisions share a
+    season's id (NA and EU both play ADCL Season 1), so the id alone can be
+    two seasons: the division picks between them, and without one the
+    first division playing it is meant."""
+    sid = str(q.get("season") or "")
+    division = re.sub(r"\D", "", q.get("division", ""))
+    found = [s for s in seasons if str(s["id"]) == sid]
+    return (next((s for s in found if str(s["division_id"]) == division), None)
+            or (found[0] if found else None))
+
+
+def _form_account(data, field: str = "account_id") -> int:
+    """The account id a form names, or a 400 rather than a crash."""
+    raw = str(data.get(field) or "")
+    if not raw.isdigit():
+        raise web.HTTPBadRequest(text="Which player?")
+    return int(raw)
+
+
 def _form_season(data) -> dict:
     """The season (in one division) an admin form names by its season_id and division_id fields."""
     season_id, division_id = str(data.get("season_id") or ""), str(data.get("division_id") or "")
@@ -412,15 +446,12 @@ async def season_page(request: web.Request):
         ctx["bracket"] = store.playoff_bracket(season)
         ctx["standings"] = store.season_teams(season)
         ctx["round_name"] = store.round_name
-        ctx["notice"] = request.query.get("notice")
     elif tab == "matchups":
         ctx["rounds"] = store.season_matchups(season)
         ctx["weeks"] = store.season_weeks(season)
-        ctx["notice"] = request.query.get("notice")
     elif tab == "signups":
         ctx["signup_levels"] = store.SIGNUP_LEVELS
         ctx["store_level_labels"] = store.SIGNUP_LEVEL_LABELS
-        ctx["notice"] = request.query.get("notice")
         signups = store.list_signups(season)
         by_level = {key: [r for r in signups if r["level_is"] == key] for key, _ in store.SIGNUP_LEVELS}
         level = request.query.get("list")
@@ -435,7 +466,6 @@ async def season_page(request: web.Request):
         ctx["awards"] = store.season_awards(season)
         ctx["award_choices"] = list(store.AWARD_LABELS.items())
         ctx["season_team_names"] = sorted(t["name"] for t in store.season_teams(season))
-        ctx["notice"] = request.query.get("notice")
     elif tab == "leaders":
         ctx["leaders"], ctx["min_games"], ctx["max_games"] = store.season_leaders(season)
     elif tab == "matches":
@@ -513,7 +543,7 @@ async def hall_of_fame(request: web.Request):
 
 
 def _weeks_redirect(season: dict, notice: str):
-    return web.HTTPFound(f"{season_url(season)}?tab=matchups&" + urlencode({"notice": notice}))
+    return _go(f"{season_url(season)}?tab=matchups", notice)
 
 
 @routes.post("/season/{season_id}/{division}/weeks/generate")
@@ -577,12 +607,11 @@ async def season_award_set(request: web.Request):
     data = await request.post()
     award = data.get("award", "")
     if award not in store.AWARD_LABELS:
-        raise web.HTTPFound(season_url(season) + "?" + urlencode(
-            {"tab": "champions", "notice": "Pick an award."}))
+        raise _go(season_url(season), "Pick an award.", tab="champions")
     n = store.set_season_award(season, award, data.get("winners", ""), data.get("citation", ""))
     label = store.AWARD_LABELS[award]
     notice = f"{label} cleared." if not n else f"{label}: {n} winner{'' if n == 1 else 's'} recorded."
-    raise web.HTTPFound(season_url(season) + "?" + urlencode({"tab": "champions", "notice": notice}))
+    raise _go(season_url(season), notice, tab="champions")
 
 
 @routes.post("/season/{season_id}/{division}/champions")
@@ -603,7 +632,7 @@ async def season_champions_set(request: web.Request):
         if unknown:
             notice += (" No account here matches " + ", ".join(unknown)
                        + " — shown as typed. Paste an account id instead to link them.")
-    raise web.HTTPFound(f"{season_url(season)}?tab=champions&" + urlencode({"notice": notice}))
+    raise _go(f"{season_url(season)}?tab=champions", notice)
 
 
 @routes.post("/season/{season_id}/{division}/playoffs/start")
@@ -622,10 +651,8 @@ async def playoffs_start(request: web.Request):
                           started_at=datetime.now(LEAGUE_TZ).isoformat(),
                           created_by=request["user"]["account_id"])
     except ValueError as e:
-        raise web.HTTPFound(f"{season_url(season)}?tab=playoffs&"
-                            + urlencode({"notice": str(e)}))
-    raise web.HTTPFound(f"{season_url(season)}?tab=playoffs&"
-                        + urlencode({"notice": "Bracket opened — place the first round."}))
+        raise _go(f"{season_url(season)}?tab=playoffs", str(e))
+    raise _go(f"{season_url(season)}?tab=playoffs", "Bracket opened — place the first round.")
 
 
 @routes.post("/season/{season_id}/{division}/playoffs/seed")
@@ -644,9 +671,8 @@ async def playoffs_seed(request: web.Request):
     try:
         db.set_playoff_seats(season["id"], season["division_id"], seats)
     except ValueError as e:
-        raise web.HTTPFound(f"{season_url(season)}?tab=playoffs&" + urlencode({"notice": str(e)}))
-    raise web.HTTPFound(f"{season_url(season)}?tab=playoffs&"
-                        + urlencode({"notice": "Bracket saved."}))
+        raise _go(f"{season_url(season)}?tab=playoffs", str(e))
+    raise _go(f"{season_url(season)}?tab=playoffs", "Bracket saved.")
 
 
 @routes.post("/season/{season_id}/{division}/playoffs/delete")
@@ -654,8 +680,7 @@ async def playoffs_delete(request: web.Request):
     season = _season_or_404(request)
     _require_admin(request)
     db.delete_playoff_bracket(season["id"], season["division_id"])
-    raise web.HTTPFound(f"{season_url(season)}?tab=playoffs&"
-                        + urlencode({"notice": "Bracket removed."}))
+    raise _go(f"{season_url(season)}?tab=playoffs", "Bracket removed.")
 
 
 @routes.get("/season/{season_id}/{division}/team/{captain}")
@@ -678,7 +703,7 @@ async def team_page(request: web.Request):
                   stats=stats, ratings=db.displayed_ratings(season["division_id"]),
                   team_names={c: t["name"] for c, t in teams.items()},
                   opponents=[(c, t["name"]) for c, t in sorted(teams.items(), key=lambda kv: kv[1]["name"].lower())],
-                  can_edit=_can_edit_team(request, team), notice=request.query.get("notice"),
+                  can_edit=_can_edit_team(request, team),
                   free_agents=store.free_agents(season) if request.get("is_admin") else [])
 
 
@@ -708,7 +733,7 @@ def _editable_team(request: web.Request) -> tuple[dict, dict]:
 
 
 def _roster_redirect(season: dict, captain: str, notice: str):
-    return web.HTTPFound(f"{team_url(season, captain)}?" + urlencode({"notice": notice}))
+    return _go(team_url(season, captain), notice)
 
 
 def _roster_target(request: web.Request, data) -> int:
@@ -789,11 +814,11 @@ async def team_logo(request: web.Request):
     season, team = _editable_team(request)
     upload = (await request.post()).get("logo")
     if not isinstance(upload, web.FileField):
-        raise web.HTTPFound(team_url(season, team["captain"]) + "?notice=Choose+an+image+file.")
+        raise _go(team_url(season, team["captain"]), "Choose an image file.")
     try:
         url = uploads.save_team_logo(upload.file.read(), season["id"], season["division_id"], team["captain"])
     except uploads.BadImage as e:
-        raise web.HTTPFound(team_url(season, team["captain"]) + "?" + urlencode({"notice": str(e)}))
+        raise _go(team_url(season, team["captain"]), str(e))
     old = team.get("logo_url")
     store.set_team_identity(season, team, logo_url=url)
     if old != url:
@@ -801,7 +826,7 @@ async def team_logo(request: web.Request):
     raise web.HTTPFound(team_url(season, team["captain"]))
 
 
-@routes.post("/season/{season_id}/{division}/team/{captain}/match/{match_id}/opponent")
+@routes.post(r"/season/{season_id}/{division}/team/{captain}/match/{match_id:-?\d+}/opponent")
 async def match_opponent(request: web.Request):
     """Say which team played the other side of a match. Three of a team's five
     have to play a side for it to be attributed automatically, so a night of
@@ -827,7 +852,7 @@ async def match_opponent(request: web.Request):
             raise web.HTTPBadRequest(text=f"{choice!r} isn't a team this season")
         db.set_match_team_override(match_id, side, choice, set_by=request["user"]["account_id"])
         notice = f"Match {match_id}: opponent set to {choice}."
-    raise web.HTTPFound(team_url(season, captain) + "?" + urlencode({"notice": notice}))
+    raise _go(team_url(season, captain), notice)
 
 
 @routes.post("/season/{season_id}/{division}/team/{captain}/match/record")
@@ -847,29 +872,28 @@ async def match_record(request: web.Request):
     teams = {t["captain"]: t for t in store.season_teams(season, matches=[])}
     opponent = (data.get("opponent") or "").strip()
     if opponent not in teams or opponent == captain:
-        raise web.HTTPFound(back + "?" + urlencode({"notice": "Pick which team they played."}))
+        raise _go(back, "Pick which team they played.")
     result = data.get("result")
     if result not in ("won", "lost"):
-        raise web.HTTPFound(back + "?" + urlencode({"notice": "Say who won the game."}))
+        raise _go(back, "Say who won the game.")
     try:
         # Midday in the league's own timezone, so the result lands in the week
         # it was played whatever the UTC offset does to the boundaries.
         day = datetime.strptime((data.get("played") or "").strip(), "%Y-%m-%d")
         played_at = int(day.replace(hour=12, tzinfo=LEAGUE_TZ).timestamp())
     except ValueError:
-        raise web.HTTPFound(back + "?" + urlencode({"notice": "Give the date it was played."}))
+        raise _go(back, "Give the date it was played.")
 
     winner, loser = (captain, opponent) if result == "won" else (opponent, captain)
     db.add_manual_match(division_id=season["division_id"], league_id=season["id"],
                         start_time=played_at, winner=winner, loser=loser,
                         set_by=request["user"]["account_id"])
     verb = "Win" if result == "won" else "Loss"
-    raise web.HTTPFound(back + "?" + urlencode({
-        "notice": f"{verb} against {teams[opponent]['name']} recorded. "
-                  f"Add another if more than one game is missing."}))
+    raise _go(back, f"{verb} against {teams[opponent]['name']} recorded. "
+                  f"Add another if more than one game is missing.")
 
 
-@routes.post("/season/{season_id}/{division}/team/{captain}/match/{match_id}/delete")
+@routes.post(r"/season/{season_id}/{division}/team/{captain}/match/{match_id:-?\d+}/delete")
 async def match_delete(request: web.Request):
     """Take a game out of the league's reckoning.
 
@@ -891,10 +915,10 @@ async def match_delete(request: web.Request):
         notice = (f"Game {match_id} no longer counts — records, stats and matchups all skip it, "
                   f"and re-fetching the league won't bring it back. Find it again under "
                   f"Matches → Kind → Taken out." if done else f"No game {match_id}.")
-    raise web.HTTPFound(team_url(season, captain) + "?" + urlencode({"notice": notice}))
+    raise _go(team_url(season, captain), notice)
 
 
-@routes.post("/matches/{match_id}/exclude")
+@routes.post(r"/matches/{match_id:-?\d+}/exclude")
 async def match_exclude(request: web.Request):
     """Take a game out from its own page.
 
@@ -911,10 +935,10 @@ async def match_exclude(request: web.Request):
     notice = (f"Game {match_id} no longer counts — records, stats and matchups all skip it, "
               f"and re-fetching the league won't bring it back."
               if done else f"No game {match_id}.")
-    raise web.HTTPFound(_safe_next(form.get("next")) + "?" + urlencode({"notice": notice}))
+    raise _go(_safe_next(form.get("next")), notice)
 
 
-@routes.post("/matches/{match_id}/restore")
+@routes.post(r"/matches/{match_id:-?\d+}/restore")
 async def match_restore(request: web.Request):
     """Put an excluded game back."""
     _require_admin(request)
@@ -923,8 +947,8 @@ async def match_restore(request: web.Request):
     db.set_match_excluded(match_id, False)
     notice = f"Game {match_id} counts again."
     if back:
-        raise web.HTTPFound(_safe_next(back) + "?" + urlencode({"notice": notice}))
-    raise web.HTTPFound("/matches?" + urlencode({"kind": "excluded", "notice": notice}))
+        raise _go(_safe_next(back), notice)
+    raise _go("/matches", notice, kind="excluded")
 
 
 @routes.post("/season/{season_id}/{division}/team/{captain}/match/add")
@@ -940,19 +964,18 @@ async def match_add(request: web.Request):
     digits = re.sub(r"\D", "", raw.rsplit("/", 1)[-1] if "/" in raw else raw)
     back = team_url(season, captain)
     if not digits:
-        raise web.HTTPFound(back + "?" + urlencode({"notice": "That isn't a match id."}))
+        raise _go(back, "That isn't a match id.")
     try:
         added = await fetch_and_store_match(int(digits), season["division_id"], league_id=season["id"])
     except ValueError as e:
-        raise web.HTTPFound(back + "?" + urlencode({"notice": str(e)}))
+        raise _go(back, str(e))
     except Exception:
         logger.exception("manual match add failed for %s", digits)
-        raise web.HTTPFound(back + "?" + urlencode({
-            "notice": "Couldn't reach OpenDota for that match. Try again in a minute."}))
+        raise _go(back, "Couldn't reach OpenDota for that match. Try again in a minute.")
     notice = (f"Match {added['match_id']} " + ("re-fetched" if added["already"] else "added")
               + f" with {added['players']} players. If its sides aren't attributed, "
                 f"set the teams on the rows below.")
-    raise web.HTTPFound(back + "?" + urlencode({"notice": notice}))
+    raise _go(back, notice)
 
 
 # Looking up an account nobody has rated costs a windrun call, serialised at
@@ -1035,6 +1058,10 @@ async def sub_finder(request: web.Request):
     return render(request, "subs.html", title="Sub finder", **ctx)
 
 
+# What a fantasy view carries from the table to a player's page and back.
+_FANTASY_KEEP = ("season", "division", "week", "position", "stat")
+
+
 @routes.get("/fantasy")
 async def fantasy_page(request: web.Request):
     """What the fantasy score is made of, and who earns it where."""
@@ -1050,11 +1077,7 @@ async def fantasy_page(request: web.Request):
     # in it. Listing them together made a season read as "Season 39 · NA".
     season_options = list({s["id"]: s for s in seasons}.values())
     division_id = int(re.sub(r"\D", "", q.get("division", "")) or 0) or None
-    season = None
-    if q.get("season"):
-        matches = [s for s in seasons if str(s["id"]) == q["season"]]
-        season = (next((s for s in matches if s["division_id"] == division_id), None)
-                  or (matches[0] if matches else None))
+    season = _query_season(q, seasons)
     stat = q.get("stat") if q.get("stat") in STAT_LABELS else "fantasy_points"
     # Value and attendance are measured against a draft — what a player cost
     # and how much of their team's season they turned up for — so pooled
@@ -1091,7 +1114,7 @@ async def fantasy_page(request: web.Request):
             people = {db.person_of(h["account_id"]) for h in store.search_players(q["player"])}
             selected = next((r for r in table["everyone"] if r["account_id"] in people), None)
         if selected:
-            keep = {k: v for k, v in q.items() if k in ("season", "week", "position", "stat")}
+            keep = {k: v for k, v in q.items() if k in _FANTASY_KEEP}
             raise web.HTTPFound(f"/fantasy/{selected['account_id']}"
                                 + ("?" + urlencode(keep) if keep else ""))
     # The bot's labels carry an emoji each, which belongs in a Discord embed
@@ -1103,6 +1126,7 @@ async def fantasy_page(request: web.Request):
                   season=season, draft_relative=draft_relative, q=q, stats=stats, stat=stat,
                   stat_label=dict(stats).get(stat, stat), weeks=weeks,
                   not_found=bool(q.get("player")),
+                  player_query=urlencode({k: v for k, v in q.items() if k in _FANTASY_KEEP and v}),
                   labels=fantasy.LABELS, duration_mean=fantasy.DURATION_MEAN_MIN)
 
 
@@ -1135,8 +1159,7 @@ async def fantasy_player_page(request: web.Request):
     except ValueError:
         return not_found(request, "Player")
     q = request.query
-    seasons = store.all_seasons()
-    season = next((s for s in seasons if str(s["id"]) == q.get("season", "")), None)
+    season = _query_season(q, store.all_seasons())
     week = re.sub(r"\D", "", q.get("week", ""))
     position = re.sub(r"\D", "", q.get("position", ""))
     table = store.fantasy_table(season, week=int(week) if week and season else None,
@@ -1147,8 +1170,8 @@ async def fantasy_player_page(request: web.Request):
     player = next((r for r in table["everyone"] if r["account_id"] == person), None)
     if not player:
         return not_found(request, "Player")
-    back = "/fantasy" + ("?" + urlencode({k: v for k, v in q.items()
-                                          if k in ("season", "week", "position", "stat")}) if q else "")
+    keep = {k: v for k, v in q.items() if k in _FANTASY_KEEP and v}
+    back = "/fantasy" + ("?" + urlencode(keep) if keep else "")
     return render(request, "fantasy_player.html", title=player["name"], player=player,
                   season=season, back=back, field=table["field"],
                   rating=store.player_ratings().get(person),
@@ -1247,11 +1270,10 @@ async def player_page(request: web.Request):
                   season_rows=season_rows, matches=matches[:10], match_total=len(matches),
                   rating=store.player_ratings().get(account_id),
                   breakdown=breakdown, unavailable=unavailable,
-                  discord=store.player_discord(account_id),
-                  notice=request.query.get("notice"))
+                  discord=store.player_discord(account_id))
 
 
-@routes.post("/player/{account_id}/recheck")
+@routes.post(r"/player/{account_id:\d+}/recheck")
 async def player_recheck(request: web.Request):
     """Re-fetch and re-rate one player now, instead of waiting for the weekly
     job or the seven-day staleness limit."""
@@ -1268,7 +1290,7 @@ async def player_recheck(request: web.Request):
     notice = (f"Couldn't reach {', '.join(unavailable)}, so nothing was changed — "
               f"a rating from a partial fetch would be a guess. Try again shortly."
               if unavailable else "Rechecked.")
-    raise web.HTTPFound(f"/player/{account_id}?" + urlencode({"notice": notice}))
+    raise _go(f"/player/{account_id}", notice)
 
 
 @routes.get("/match/{match_id}")
@@ -1338,8 +1360,9 @@ async def signup_submit(request: web.Request):
                       signup_levels=store.SIGNUP_LEVELS)
     store.save_signup(season, aid, mmr=mmr, positions=positions, captain=captain,
                       discord=discord, statement=statement or None, level=level)
-    if not user.get("discord"):
-        store.set_user_discord(aid, discord)
+    # The handle they just typed is the newest word on how to reach them, so
+    # Settings shows it too, rather than one they've since moved on from.
+    store.set_user_discord(aid, discord)
     raise web.HTTPFound(season_url(season) + "?tab=signups")
 
 
@@ -1349,11 +1372,7 @@ async def admin_signup_add(request: web.Request):
     or they're a stand-in an admin is putting on record."""
     _require_admin(request)
     data = await request.post()
-    season = next((s for s in store.all_seasons()
-                    if s["id"] == int(data["season_id"])
-                    and s["division_id"] == int(data["division_id"])), None)
-    if not season:
-        raise web.HTTPFound("/seasons")
+    season = _form_season(data)
     back = season_url(season) + "?tab=signups"
     who = (data.get("player") or "").strip()
     matched = store.resolve_champion_names("@" + who) if who else []
@@ -1361,10 +1380,9 @@ async def admin_signup_add(request: web.Request):
     if account_id is None:
         notice = (f"No player here matches “{who}”. An account id always works."
                   if who else "Say who to sign up.")
-        raise web.HTTPFound(back + "&" + urlencode({"notice": notice}))
+        raise _go(back, notice)
     if store.get_signup(season, account_id):
-        raise web.HTTPFound(back + "&" + urlencode(
-            {"notice": f"{matched[0]['name']} is already signed up."}))
+        raise _go(back, f"{matched[0]['name']} is already signed up.")
     level = data.get("level") if data.get("level") in store.SIGNUP_LEVEL_LABELS else store.DEFAULT_SIGNUP_LEVEL
     positions = sorted({int(p) for p in data.getall("positions", [])
                         if p.isdigit() and int(p) in store.POSITIONS})
@@ -1373,8 +1391,7 @@ async def admin_signup_add(request: web.Request):
                       discord=(data.get("discord") or "").strip()[:64] or None,
                       statement=(data.get("statement") or "").strip()[:1000] or None,
                       level=level)
-    raise web.HTTPFound(back + "&" + urlencode(
-        {"notice": f"Signed up {matched[0]['name']} as {store.SIGNUP_LEVEL_LABELS[level]}."}))
+    raise _go(back, f"Signed up {matched[0]['name']} as {store.SIGNUP_LEVEL_LABELS[level]}.")
 
 
 @routes.post("/admin/signup/level")
@@ -1383,13 +1400,11 @@ async def admin_signup_level(request: web.Request):
     for. Clearing it puts them back to their own answer."""
     _require_admin(request)
     data = await request.post()
-    season = next((s for s in store.all_seasons()
-                    if s["id"] == int(data["season_id"])
-                    and s["division_id"] == int(data["division_id"])), None)
-    if not season:
-        raise web.HTTPFound("/seasons")
+    season = _form_season(data)
     level = data.get("level") or None
-    store.set_signup_level(season, int(data["account_id"]), level)
+    if level is not None and level not in store.SIGNUP_LEVEL_LABELS:
+        raise web.HTTPBadRequest(text="Unknown signup level.")
+    store.set_signup_level(season, _form_account(data), level)
     raise web.HTTPFound(_signups_back(season, data))
 
 
@@ -1408,8 +1423,7 @@ async def draft_page(request: web.Request):
     return render(request, "draft.html", title=f"{season['label']} draft", season=season,
                   view=draft.view(season, st, draft.room(season).present()),
                   names=draft.names(season), me=me, profiles=store.draft_profiles(season),
-                  my_teams=[c for c in st.order if draft.may_act_for(st, c, me)],
-                  notice=request.query.get("notice"))
+                  my_teams=[c for c in st.order if draft.may_act_for(st, c, me)])
 
 
 @routes.get("/season/{season_id}/{division}/draft/ws")
@@ -1444,17 +1458,16 @@ async def draft_surrogate(request: web.Request):
     _require_admin(request)
     data = await request.post()
     back = season_url(season) + "/draft"
-    captain_id = int(data.get("captain") or 0)
+    captain_id = int(re.sub(r"\D", "", data.get("captain") or "") or 0)
     if not any(c["account_id"] == captain_id for c in draft.captains(season)):
-        raise web.HTTPFound(back + "?" + urlencode({"notice": "That isn't a captain this season."}))
+        raise _go(back, "That isn't a captain this season.")
     who = (data.get("surrogate") or "").strip()
     surrogate_id = None
     if who:
         matched = store.resolve_champion_names("@" + who)
         surrogate_id = matched[0]["account_id"] if matched else None
         if surrogate_id is None:
-            raise web.HTTPFound(back + "?" + urlencode(
-                {"notice": f"No player here matches “{who}”. An account id always works."}))
+            raise _go(back, f"No player here matches “{who}”. An account id always works.")
     db.append_draft_event(season["id"], season["division_id"], "surrogate",
                           request["user"]["account_id"],
                           {"captain": captain_id, "surrogate": surrogate_id})
@@ -1471,17 +1484,15 @@ async def draft_start(request: web.Request):
     st = draft.state(season)
     back = season_url(season) + "/draft"
     if st.phase != draft.LOBBY:
-        raise web.HTTPFound(back + "?" + urlencode({"notice": "The draft has already started."}))
+        raise _go(back, "The draft has already started.")
     view = draft.lobby(season, st, draft.room(season).present())
     force = bool((await request.post()).get("force"))
     if not view["captains"]:
-        raise web.HTTPFound(back + "?" + urlencode({"notice": "Nobody is captaining this season."}))
+        raise _go(back, "Nobody is captaining this season.")
     if view["unbudgeted"]:
-        raise web.HTTPFound(back + "?" + urlencode(
-            {"notice": "Set a budget for " + ", ".join(view["unbudgeted"]) + " first."}))
+        raise _go(back, "Set a budget for " + ", ".join(view["unbudgeted"]) + " first.")
     if view["missing"] and not force:
-        raise web.HTTPFound(back + "?" + urlencode(
-            {"notice": "Still waiting on " + ", ".join(view["missing"]) + "."}))
+        raise _go(back, "Still waiting on " + ", ".join(view["missing"]) + ".")
     order = [c["account_id"] for c in draft.captains(season)]
     random.shuffle(order)                    # recorded, so the replay keeps it
     db.append_draft_event(season["id"], season["division_id"], "start",
@@ -1501,13 +1512,12 @@ async def draft_rules(request: web.Request):
     data = await request.post()
     back = season_url(season) + "/draft"
     if draft.state(season).phase != draft.LOBBY:
-        raise web.HTTPFound(back + "?" + urlencode({"notice": "The draft has already started."}))
+        raise _go(back, "The draft has already started.")
     rules = {}
     for key, low, high in (("bid_seconds", 3, 300), ("nominate_seconds", 5, 600)):
         raw = re.sub(r"\D", "", data.get(key, ""))
         if not raw or not low <= int(raw) <= high:
-            raise web.HTTPFound(back + "?" + urlencode(
-                {"notice": f"{key.replace('_', ' ')} has to be a number between {low} and {high}."}))
+            raise _go(back, f"{key.replace('_', ' ')} has to be a number between {low} and {high}.")
         rules[key] = int(raw)
     db.append_draft_event(season["id"], season["division_id"], "rules",
                           request["user"]["account_id"], {"rules": rules})
@@ -1526,15 +1536,14 @@ async def draft_budgets(request: web.Request):
     back = season_url(season) + "/draft"
     st = draft.state(season)
     if st.phase != draft.LOBBY:
-        raise web.HTTPFound(back + "?" + urlencode({"notice": "The draft has already started."}))
+        raise _go(back, "The draft has already started.")
     budgets, known = {}, {c["account_id"] for c in draft.captains(season)}
     # "Everyone" fills every captain at once; a figure typed for one captain
     # still wins over it.
     everyone = re.sub(r"\D", "", data.get("everyone", ""))
     if everyone:
         if not 1 <= int(everyone) <= 1_000_000:
-            raise web.HTTPFound(back + "?" + urlencode(
-                {"notice": "Every budget has to be a number of at least 1."}))
+            raise _go(back, "Every budget has to be a number of at least 1.")
         budgets = {c: int(everyone) for c in known}
     for key in data.keys():
         if not key.startswith("budget-"):
@@ -1546,8 +1555,7 @@ async def draft_budgets(request: web.Request):
         if not raw:
             continue                         # left blank: not set yet
         if not 1 <= int(raw) <= 1_000_000:
-            raise web.HTTPFound(back + "?" + urlencode(
-                {"notice": "Every budget has to be a number of at least 1."}))
+            raise _go(back, "Every budget has to be a number of at least 1.")
         if not everyone or int(raw) != (st.budgets.get(captain) or 0):
             budgets[captain] = int(raw)
     if budgets:
@@ -1619,7 +1627,7 @@ async def draft_nominate(request: web.Request):
     def run(season, st, user, data):
         draft.nominate(season, st, actor=user["account_id"],
                        is_admin=bool(request.get("is_admin")),
-                       player=int(data.get("player") or 0),
+                       player=int(re.sub(r"\D", "", data.get("player") or "") or 0),
                        amount=int(re.sub(r"\D", "", data.get("amount", "")) or 0))
     return await _draft_action(request, run)
 
@@ -1629,7 +1637,7 @@ async def draft_bid(request: web.Request):
     def run(season, st, user, data):
         draft.bid(season, st, actor=user["account_id"],
                   is_admin=bool(request.get("is_admin")),
-                  captain=int(data.get("captain") or 0),
+                  captain=int(re.sub(r"\D", "", data.get("captain") or "") or 0),
                   amount=int(re.sub(r"\D", "", data.get("amount", "")) or 0))
     return await _draft_action(request, run)
 
@@ -1855,7 +1863,7 @@ async def admin_delete_signup(request: web.Request):
     _require_admin(request)
     data = await request.post()
     season = _form_season(data)
-    store.delete_signup(season, int(data["account_id"]))
+    store.delete_signup(season, _form_account(data))
     raise web.HTTPFound(_signups_back(season, data))
 
 
@@ -1962,12 +1970,32 @@ async def view_middleware(request: web.Request, handler):
     return response
 
 
+_ERROR_TITLES = {400: "Couldn't do that", 403: "Not allowed", 405: "Not allowed"}
+
+
 @web.middleware
 async def error_middleware(request: web.Request, handler):
+    """Every error a person can land on is a page of the site, in its look,
+    with the nav to get back. A script asking (the draft room's fetches, the
+    API) still gets the bare status and text it checks for."""
+    wants_page = "text/html" in request.headers.get("Accept", "")
     try:
         return await handler(request)
     except web.HTTPNotFound:
         return not_found(request)
+    except web.HTTPException as e:
+        if e.status < 400 or not wants_page or e.status not in _ERROR_TITLES:
+            raise
+        return render(request, "message.html", status=e.status, title=_ERROR_TITLES[e.status],
+                      message=e.text if e.text and not e.text.startswith(str(e.status)) else
+                      "That didn't work. Go back and try again.")
+    except Exception:
+        logger.exception("unhandled error on %s %s", request.method, request.path_qs)
+        if not wants_page:
+            raise
+        return render(request, "message.html", status=500, title="Something broke",
+                      message="Something went wrong on our end. It's been logged — try again "
+                              "in a minute, and tell an admin if it keeps happening.")
 
 
 def setup(app: web.Application) -> None:

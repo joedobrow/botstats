@@ -2,7 +2,6 @@
 {% from "macros.html" import player_link %}
 {% block content %}
 <h1>Players</h1>
-{% if notice %}<div class="errors"><p>{{ notice }}</p></div>{% endif %}
 <form method="get" class="search" data-live-filter="#players-table">
   <input type="search" name="q" value="{{ q }}" placeholder="Search by name or account ID" aria-label="Search players" autocomplete="off">
   <input type="hidden" name="lookup" value="1">

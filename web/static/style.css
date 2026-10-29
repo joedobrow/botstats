@@ -319,6 +319,8 @@ legend { font-weight: 500; padding: 0 4px; }
    the browser's own rule for [hidden], which is how a hidden row of buttons
    kept showing. */
 [hidden] { display: none !important; }
+.notice { background: var(--tag-bg); border-left: 4px solid var(--accent); padding: 10px 14px; border-radius: 4px; margin: 16px 0; }
+.notice.error { border-left-color: var(--loss); }
 .errors { background: var(--tag-bg); border-left: 4px solid var(--loss); padding: 6px 14px; border-radius: 4px; margin-bottom: 16px; }
 .errors p { margin: 4px 0; }
 .search { display: flex; gap: 8px; max-width: 480px; margin-bottom: 16px; }

@@ -2,7 +2,6 @@
 {% from "macros.html" import player_link, team_cell, result_word %}
 {% block content %}
 <p class="small"><a href="{{ season_url(season) }}">← {{ season.label }}</a></p>
-{% if notice %}<div class="errors"><p>{{ notice }}</p></div>{% endif %}
 <div class="team-head big">
   {% if can_edit %}
     <button type="button" class="logo-button" data-open-dialog="logo-dialog" title="Change the team logo">

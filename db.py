@@ -1242,18 +1242,64 @@ def _migrate_ranked_mmr_overrides_to_rank():
 # Division management
 # ---------------------------------------------------------------------------
 
+def _division(row) -> dict:
+    """A divisions row as every caller sees it: current_season_id is the
+    season the division is playing (playing_season_id), not whatever it was
+    last pointed at. The bot's defaults, the weekly fetch and the site's
+    front page all read it, so they can't disagree about which season is on."""
+    d = dict(row)
+    d["season_pointer"] = d["current_season_id"]
+    d["current_season_id"] = playing_season_id(d["id"], d["current_season_id"])
+    return d
+
+
+def playing_season_id(division_id: int, pointer: int | None = None) -> int | None:
+    """The season a division is playing now — the one rule for it.
+
+    A season an admin marked Active on the site wins. Failing that, the
+    newest of the division's seasons that has started. Failing that (nothing
+    has started yet), whatever /config or Season setup last pointed it at.
+
+    Going by start date is what lets a season be set up weeks ahead — its
+    signups open, its draft run — without every command switching to an
+    empty season the moment Season setup is run. It takes over on its start
+    date by itself.
+    """
+    from config import LEAGUE_TZ   # here, not at the top: db is imported by scripts without a bot token
+    today = datetime.now(LEAGUE_TZ).date().isoformat()
+    with _conn() as conn:
+        has_status = conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' "
+                                  "AND name = 'site_season_settings'").fetchone()
+        rows = conn.execute(f"""
+            SELECT s.id, s.season_start,
+                   {"st.status" if has_status else "NULL"} AS status
+            FROM season_divisions sd JOIN seasons s ON s.id = sd.season_id
+            {"LEFT JOIN site_season_settings st ON st.season_id = sd.season_id "
+             "AND st.division_id = sd.division_id" if has_status else ""}
+            WHERE sd.division_id = ?
+            ORDER BY s.season_start DESC, s.id DESC
+        """, (division_id,)).fetchall()
+    for r in rows:
+        if r["status"] == "active":
+            return r["id"]
+    for r in rows:
+        if r["season_start"] <= today:
+            return r["id"]
+    return pointer
+
+
 def get_division(division_id: int) -> dict | None:
     """One division, or None."""
     with _conn() as conn:
         row = conn.execute("SELECT * FROM divisions WHERE id = ?", (division_id,)).fetchone()
-    return dict(row) if row else None
+    return _division(row) if row else None
 
 
 def get_guild_divisions(guild_id: int) -> list[dict]:
     """The divisions whose commands run in this Discord server, oldest first."""
     with _conn() as conn:
         rows = conn.execute("SELECT * FROM divisions WHERE guild_id = ? ORDER BY id", (guild_id,)).fetchall()
-    return [dict(r) for r in rows]
+    return [_division(r) for r in rows]
 
 
 def get_guild_division(guild_id: int, name: str | None = None) -> dict | None:
@@ -1273,7 +1319,7 @@ def get_guild_division(guild_id: int, name: str | None = None) -> dict | None:
 def get_division_by_slug(slug: str) -> dict | None:
     with _conn() as conn:
         row = conn.execute("SELECT * FROM divisions WHERE slug = ?", (slug,)).fetchone()
-    return dict(row) if row else None
+    return _division(row) if row else None
 
 
 def create_division(name: str, slug: str, region: str, game_mode: str,
@@ -1302,7 +1348,7 @@ def get_all_divisions() -> list[dict]:
     """Get all configured divisions."""
     with _conn() as conn:
         rows = conn.execute("SELECT * FROM divisions").fetchall()
-    return [dict(r) for r in rows]
+    return [_division(r) for r in rows]
 
 
 def get_guild_settings(guild_id: int) -> dict:
@@ -1646,28 +1692,20 @@ def season_label(season: dict) -> str:
 
 def get_current_season(division_id: int) -> dict | None:
     """The division's current season — what commands use when no season is given."""
-    with _conn() as conn:
-        row = conn.execute("""
-            SELECT s.* FROM divisions d JOIN seasons s ON s.id = d.current_season_id
-            WHERE d.id = ?
-        """, (division_id,)).fetchone()
-    return dict(row) if row else None
+    division = get_division(division_id)
+    return get_season(division["current_season_id"]) if division and division["current_season_id"] else None
 
 
 def get_active_draft_season() -> dict | None:
     """The newest current season, of any division, that has draft data, as
     the season's row plus the division's id under "division_id" — what the
     stream-card pages show, since they take no season parameter."""
-    with _conn() as conn:
-        row = conn.execute("""
-            SELECT s.*, d.id AS division_id
-            FROM divisions d JOIN seasons s ON s.id = d.current_season_id
-            WHERE EXISTS (SELECT 1 FROM player_costs pc
-                          WHERE pc.season_id = s.id AND pc.division_id = d.id)
-            ORDER BY s.season_start DESC
-            LIMIT 1
-        """).fetchone()
-    return dict(row) if row else None
+    found = []
+    for d in get_all_divisions():
+        season = get_season(d["current_season_id"]) if d["current_season_id"] else None
+        if season and get_player_costs(season["id"], d["id"]):
+            found.append(dict(season, division_id=d["id"]))
+    return max(found, key=lambda s: s["season_start"], default=None)
 
 
 def set_current_season(division_id: int, season_id: int) -> None:
@@ -2080,13 +2118,28 @@ def _all_time_stats(division_id: int, season_id: int | None = None,
     return _apply_override_nicknames(_mirror_person_rows(results))
 
 
+# A leaderboard's games cut, at most: ten games is a regular, whatever the
+# most active player has managed. Without the cap the bar rose all season
+# (half of a 20-game player is 10, of a 30-game one 15) until it hid half the
+# league; without the half, a week's table or week two of a season would
+# show nobody.
+DEFAULT_MIN_GAMES = 10
+
+
+def min_games_for(max_games: int) -> int:
+    """The default games cut for a table whose most active player has
+    max_games: half of that, rounded down, and never more than
+    DEFAULT_MIN_GAMES. /leaderboard, the season's Leaders tab and the site's
+    Fantasy page all rank by it, so they agree on who is top."""
+    return min(DEFAULT_MIN_GAMES, max_games // 2)
+
+
 def qualified(stats: list[dict], min_games: int | None = None) -> tuple[list[dict], int, int]:
     """Players with enough games to rank, so stand-ins don't top a
-    leaderboard. The default bar is half as many games as the most active
-    player (rounded down); min_games sets it outright instead, and 0 ranks
-    everyone. Returns (rows, threshold, max_games)."""
+    leaderboard: min_games_for by default; min_games sets it outright
+    instead, and 0 ranks everyone. Returns (rows, threshold, max_games)."""
     max_games = max((s.get("games_played") or 0 for s in stats), default=0)
-    threshold = max_games // 2 if min_games is None else max(0, min_games)
+    threshold = min_games_for(max_games) if min_games is None else max(0, min_games)
     return [s for s in stats if (s.get("games_played") or 0) >= threshold], threshold, max_games
 
 
@@ -2663,15 +2716,36 @@ def displayed_ratings(division_id: int) -> dict[int, int]:
             "WHERE internal_rating_override IS NOT NULL")}
     out: dict[int, int] = {}
     for r in get_division_cached_ratings(division_id, include_all=True):
-        aid = r["account_id"]
-        if aid in overrides:
-            out[aid] = int(overrides[aid])
-        elif r.get("internal_rating") is not None:
-            adj = adjustments.get(r.get("alt_account_for") or aid)
-            out[aid] = int(adj["adjusted_rating"] if adj else r["internal_rating"])
+        rating = _displayed(r, overrides.get(r["account_id"]), adjustments)
+        if rating is not None:
+            out[r["account_id"]] = rating
     for aid, rating in overrides.items():
         out.setdefault(aid, int(rating))
     return out
+
+
+def _displayed(row: dict | None, override: int | None, adjustments: dict) -> int | None:
+    """One player's displayed rating from their cache row (as
+    get_rating_cache_row or get_division_cached_ratings return it): the
+    override if there is one, else the cached rating nudged by the fantasy
+    adjustment, routed through the main account for an alt."""
+    if override is not None:
+        return int(override)
+    if not row or row.get("internal_rating") is None:
+        return None
+    adj = adjustments.get(row.get("alt_account_for") or row["account_id"])
+    return int(adj["adjusted_rating"] if adj else row["internal_rating"])
+
+
+def displayed_rating(account_id: int, division: dict | None) -> int | None:
+    """displayed_ratings for one player, without rating everyone: what
+    /player, /hi_vs_low and the player API show. division=None (no server to
+    take a season from) gives the rating without a fantasy adjustment."""
+    override = (get_skill_override(account_id) or {}).get("internal_rating_override")
+    season_id = (division or {}).get("current_season_id")
+    adjustments = (compute_fantasy_adjusted_ratings(season_id, division["id"])
+                   if season_id and override is None else {})
+    return _displayed(get_rating_cache_row(account_id), override, adjustments)
 
 
 def exclude_from_division(division_id: int, account_id: int) -> None:

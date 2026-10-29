@@ -5,7 +5,7 @@
   <h1>Fantasy</h1>
   <div class="actions"><a class="button" href="/teams">Team stats</a></div>
 </div>
-{% set active = q.keys()|reject("in", ["stat", "page"])|select|list|length %}
+{% set active = q.keys()|reject("in", ["stat", "page", "theme"])|select|list|length %}
 <button type="button" class="filter-toggle" data-toggle-filters aria-expanded="false">
   Filters{% if active %} ({{ active }}){% endif %}</button>
 <form method="get" class="form grid filters collapsible{% if active %} open{% endif %}">
@@ -53,8 +53,8 @@
   <label>Player <input type="search" name="player" value="{{ q.get('player', '') }}" autocomplete="off"></label>
   <label>Minimum games
     <input type="number" name="min_games" min="0" max="200"
-           value="{{ q.get('min_games') if q.get('min_games') else table.default_min_games }}"
-           title="How many games it takes to appear here. 0 shows everyone.">
+           value="{{ q.get('min_games') if q.get('min_games') else table.asked_min_games }}"
+           title="How many games it takes to appear here: by default {{ table.default_min_games }}, or half the most anyone has played if that's fewer. 0 shows everyone.">
   </label>
   <div class="actions"><button class="primary">Show</button>
     {% if q %}<a class="button" href="/fantasy">Clear</a>{% endif %}</div>
@@ -89,7 +89,7 @@
       <td class="muted">{{ loop.index }}</td>
       <td class="with-avatar" data-sort="{{ r.name|lower }}">
         {% if r.avatar_url %}<img class="avatar" src="{{ r.avatar_url }}" alt="">{% endif %}
-        <a href="/fantasy/{{ r.account_id }}{% if q.get('season') %}?season={{ q.get('season') }}{% endif %}">{{ r.name }}</a>{{ rings(r.account_id) }}
+        <a href="/fantasy/{{ r.account_id }}{% if player_query %}?{{ player_query }}{% endif %}">{{ r.name }}</a>{{ rings(r.account_id) }}
       </td>
       <td class="num" data-sort="{{ r.get(stat) or 0 }}"><strong>{{ r.stat_text }}</strong></td>
       <td class="num" data-sort="{{ r.games_played }}">{{ r.games_played }}</td>

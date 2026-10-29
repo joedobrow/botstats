@@ -4,9 +4,10 @@ The site's own tables (site_*) hold what only the website needs: logins,
 signups, and display settings. Everything about matches, teams and seasons
 is read from the bot's tables, so the site and the bot never disagree.
 
-Nothing here selects a rating column (internal_rating, raw_windrun,
-mmr_estimate, explanation, group_rating) — public pages show stats and the
-ranked badge only.
+Ratings are shown as one number (db.displayed_ratings, the bot's own).
+How a rating was worked out (rating_breakdown) is for admins and for the
+signups CSV; the only input a public page shows is the draft room's
+Windrun figure.
 """
 
 from __future__ import annotations
@@ -74,6 +75,11 @@ def server_name(cluster: int) -> str:
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def _today() -> str:
+    """Today on the league's calendar, which is the one season start dates are on."""
+    return datetime.now(LEAGUE_TZ).date().isoformat()
 
 
 def init_site_tables() -> None:
@@ -193,19 +199,30 @@ def get_user(account_id: int) -> dict | None:
     return dict(row) if row else None
 
 
-def player_discord(account_id: int) -> str | None:
-    """How to reach someone on Discord: what they told the site when they
-    signed in, or failing that the most recent signup that carries one —
-    an admin can sign someone up who has never logged in here."""
+def discord_handles() -> dict[int, str]:
+    """{account_id: Discord handle} for everyone we have one for — the one
+    place the site decides it. An admin's /set_player discord_handle wins;
+    then what someone told the site in Settings; then their most recent
+    signup, since an admin can sign up someone who has never logged in."""
+    out: dict[int, str] = {}
     with _conn() as conn:
-        row = conn.execute("SELECT discord FROM site_users WHERE account_id = ?",
-                           (account_id,)).fetchone()
-        if row and (row["discord"] or "").strip():
-            return row["discord"].strip()
-        row = conn.execute(
-            "SELECT discord FROM site_signups WHERE account_id = ? AND discord IS NOT NULL "
-            "AND TRIM(discord) <> '' ORDER BY updated_at DESC LIMIT 1", (account_id,)).fetchone()
-    return row["discord"].strip() if row else None
+        for r in conn.execute("SELECT account_id, discord FROM site_signups "
+                              "WHERE TRIM(COALESCE(discord, '')) <> '' ORDER BY updated_at"):
+            out[r["account_id"]] = r["discord"].strip()          # newest last, so newest wins
+        for r in conn.execute("SELECT account_id, discord FROM site_users "
+                              "WHERE TRIM(COALESCE(discord, '')) <> ''"):
+            out[r["account_id"]] = r["discord"].strip()
+        for r in conn.execute("SELECT account_id, discord_override FROM skill_overrides "
+                              "WHERE TRIM(COALESCE(discord_override, '')) <> ''"):
+            out[r["account_id"]] = r["discord_override"].strip()
+    return out
+
+
+def player_discord(account_id: int) -> str | None:
+    """How to reach this person on Discord, on any of their accounts."""
+    handles = discord_handles()
+    return next((handles[a] for a in [account_id] + sorted(db.accounts_of_people([account_id]))
+                 if a in handles), None)
 
 
 def set_user_discord(account_id: int, discord: str | None) -> None:
@@ -313,7 +330,7 @@ def all_seasons() -> list[dict]:
         })
     out.sort(key=lambda s: (s["season_start"], -s["division_id"]), reverse=True)
     _fill_default_statuses(out)
-    today = datetime.now(timezone.utc).date().isoformat()
+    today = _today()
     for s in out:
         s["status_label"] = SEASON_STATUSES[s["status"]]
         s["signups_open"] = s["status"] == "signups"
@@ -325,7 +342,7 @@ def _fill_default_statuses(seasons: list[dict]) -> None:
     """Seasons no admin has set a status for, per division: the newest
     season that has started is active, earlier ones completed, future ones
     upcoming."""
-    today = datetime.now(timezone.utc).date().isoformat()
+    today = _today()
     newest: dict[int, dict] = {}
     for s in seasons:  # newest first
         if s["season_start"] <= today:
@@ -580,17 +597,13 @@ def set_season_week(season_id: int, division_id: int, week_number: int,
 
 
 def current_seasons() -> list[dict]:
-    """The season each division is playing now: its active one, or failing
-    that the newest that has started. One per division, newest first."""
-    out: dict[int, dict] = {}
-    seasons = all_seasons()
-    for s in seasons:
-        if s["status"] == "active":
-            out.setdefault(s["division_id"], s)
-    for s in seasons:
-        if s["started"]:
-            out.setdefault(s["division_id"], s)
-    return sorted(out.values(), key=lambda s: (s["season_start"], s["id"]), reverse=True)
+    """The season each division is playing now, newest first — by the same
+    rule the bot's commands default to (db.playing_season_id). A division
+    whose only season hasn't begun is playing nothing yet, so it's left out."""
+    seasons = {(s["id"], s["division_id"]): s for s in all_seasons()}
+    out = [s for s in (seasons.get((d["current_season_id"], d["id"])) for d in db.get_all_divisions())
+           if s and (s["started"] or s["status"] == "active")]
+    return sorted(out, key=lambda s: (s["season_start"], s["id"]), reverse=True)
 
 
 def team_stats(season: dict) -> dict[str, dict]:
@@ -647,18 +660,11 @@ def sub_candidates(target: int, *, skip: int | None = None,
             FROM players p JOIN matches m ON m.match_id = p.match_id
             WHERE m.league_id > 0 AND m.match_id > 0 AND m.excluded = 0 AND p.account_id > 0
             GROUP BY p.account_id""")}
-        discord = {r["account_id"]: r["discord"] for r in conn.execute(
-            "SELECT account_id, discord FROM site_users WHERE discord IS NOT NULL AND discord != ''")}
-        for r in conn.execute("""SELECT account_id, discord FROM site_signups
-                                 WHERE discord IS NOT NULL AND discord != '' ORDER BY updated_at"""):
-            discord.setdefault(r["account_id"], r["discord"])
-        for r in conn.execute("""SELECT account_id, discord_override FROM skill_overrides
-                                 WHERE discord_override IS NOT NULL AND discord_override != ''"""):
-            discord[r["account_id"]] = r["discord_override"]       # an admin's correction wins
         positions = {}
         for r in conn.execute("SELECT account_id, positions FROM site_signups ORDER BY updated_at"):
             positions[r["account_id"]] = [int(x) for x in r["positions"].split(",") if x]
 
+    discord = discord_handles()
     people: dict[int, dict] = {}
     for aid, g in league.items():
         person = links.get(aid, aid)
@@ -1369,10 +1375,7 @@ def season_leaders(season: dict) -> tuple[list[dict], int, int]:
 # from the draft, not from the games.
 DRAFT_RELATIVE = {"value", "attendance"}
 
-# How many games it takes to appear on the leaderboard. A flat number rather
-# than a share of the most active player's: that moved every time anyone
-# played, and late in a season it climbed high enough to hide half the league.
-DEFAULT_MIN_GAMES = 10
+DEFAULT_MIN_GAMES = db.DEFAULT_MIN_GAMES
 
 
 def fantasy_table(season: dict | None, stat: str = "fantasy_points", week: int | None = None,
@@ -1384,7 +1387,7 @@ def fantasy_table(season: dict | None, stat: str = "fantasy_points", week: int |
 
     season=None pools every season; week picks one of that season's weeks.
     min_games keeps a stand-in's one good night off the top of the table, and
-    defaults to DEFAULT_MIN_GAMES; 0 shows everyone. A draft-relative stat
+    defaults to the bot's own cut (db.min_games_for); 0 shows everyone. A draft-relative stat
     ignores it, since being drafted is the qualification there.
     """
     import fantasy
@@ -1409,7 +1412,7 @@ def fantasy_table(season: dict | None, stat: str = "fantasy_points", week: int |
     if stat in DRAFT_RELATIVE:
         threshold = 0
     else:
-        threshold = DEFAULT_MIN_GAMES if min_games is None else min_games
+        threshold = db.min_games_for(max_games) if min_games is None else min_games
     qualified = [r for r in rows if (r.get("games_played") or 0) >= threshold]
     # Early in a season nobody has ten games yet, and a leaderboard showing
     # nothing is worse than one showing everyone with a line saying why the

@@ -92,12 +92,14 @@ document.querySelectorAll("[data-theme-toggle]").forEach(function (b) {
         {% if user.avatar_url %}<img class="avatar" src="{{ user.avatar_url }}" alt="">{% endif %}
         <span>{{ user.steam_name or user.account_id }}</span></a>
       {% else %}
-      <a class="button small-button" href="/login?next={{ path|urlencode }}">Log in</a>
+      <a class="button small-button" href="{{ login_url }}">Log in</a>
       {% endif %}
     </div>
   </div>
 </header>
 <main class="wrap">
+{# The answer to the form just sent: every handler redirects with ?notice= (routes._go). #}
+{% if notice %}<p class="notice" role="status">{{ notice }}</p>{% endif %}
 {% block content %}{% endblock %}
 </main>
 <script>

@@ -7,12 +7,13 @@
 <span class="pos-list">{% for n in ns %}{{ pos(n) }}{% endfor %}</span>
 {%- endmacro %}
 
+{# Every name that stands for a player: a link to their page, and a ring per
+   title. Account 0 is every private profile at once, so it's no one to link. #}
 {% macro player_link(account_id, name) -%}
-<a href="/player/{{ account_id }}">{{ name or account_id }}</a>{{ rings(account_id) }}
+{% if account_id %}<a href="/player/{{ account_id }}">{{ name or account_id }}</a>{{ rings(account_id) }}
+{%- else %}<span class="muted">{{ name or "Private profile" }}</span>{% endif %}
 {%- endmacro %}
 
-{# `alone` when no name is printed beside the icon: the alt then carries it,
-   so a picture that doesn't load leaves the hero's name rather than a gap. #}
 {# Win or Loss, linked to the match — unless the game was entered by hand
    (a negative id), which has no match page. #}
 {% macro result_word(match_id, won, by_hand=False) -%}
@@ -20,6 +21,8 @@
 {%- else %}{{ "Win" if won else "Loss" }}{% endif %}
 {%- endmacro %}
 
+{# `alone` when no name is printed beside the icon: the alt then carries it,
+   so a picture that doesn't load leaves the hero's name rather than a gap. #}
 {% macro hero_icon(h, alone=False) -%}
 {% if h.slug %}<img class="hero" src="https://cdn.cloudflare.steamstatic.com/apps/dota2/images/dota_react/heroes/icons/{{ h.slug }}.png" alt="{{ h.name if alone else '' }}" title="{{ h.name }}">
 {%- elif alone %}{{ h.name }}{% endif %}

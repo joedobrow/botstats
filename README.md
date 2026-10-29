@@ -97,13 +97,18 @@ the same number OpenDota and Dotabuff use. `seasons.id` is that league id, and
 everything filed under a season (draft costs, weeks, team names, the
 division's current season, website signups and status) refers to it. The
 start date is an ordinary field, so it can change without moving anything.
-A division's current season is also the league the fetcher pulls, and a
-season's matches are exactly the matches played in its league — every match
+A division's **current season** — what every command defaults to, what the
+site's front page shows, and the league the weekly fetch pulls — is decided in
+one place, `db.playing_season_id`: a season an admin marked Active on the
+site, else the division's newest season that has started, else whatever
+`/config` or Season setup last pointed it at. So a season set up ahead of time
+takes over on its start date by itself. A season's matches are exactly the matches played in its league — every match
 records its league id — rather than a date range. Weeks are date ranges
 within that.
 
-`/config league:<id>` makes that league the current season (`season_start`
-is required the first time a league is seen). Rolling a division over to a new
+`/config league:<id>` points the division at that league (`season_start`
+is required the first time a league is seen); it becomes current once it has
+started. Rolling a division over to a new
 league — its weeks, drafted rosters, and team names and logos — is **Admin →
 Season setup** on the site, which previews everything before it writes
 (`season_setup.roll_over`). It was the `/start_new_season` command until that
@@ -153,9 +158,10 @@ The bot's web server (port 8080) also serves a small league site modeled on rd2l
 - `/match/<match_id>`: scoreboard with fantasy points
 - `/`: tiles for Sign-Up (active only while a season has signups open), Seasons, Players and Info (`/info` → Rules, About)
 - `/settings`: Steam log in and out, Discord name, and your signups. Logged-in players can sign up for seasons with open signups
-- `/admin`: create seasons, set each season's status (Upcoming, Signups open, Active, Completed; unset seasons default to Active for the newest started one and Completed before it), rename divisions, edit the About and Rules text, download signups as CSV
+- `/subs`: the sub finder — players with league games who aren't on a current team, rated at or under the player being replaced
+- `/admin`: create seasons, set each season's status (Upcoming, Signups open, Drafting, Active, Completed; unset seasons default to Active for the newest started one and Completed before it), rename divisions, edit the About and Rules text, download signups as CSV
 
-It reads the bot's own tables (a team is the captain's drafted roster in `player_costs`, and a match side belongs to a team when three or more of its roster played) and keeps its own data in `site_*` tables. Player names follow the bot's rule (`db.get_display_names`: `/set_player` nickname, then the rating-cache name, then the latest match name), so the site and `/player` agree. Public pages show stats and ranked badges only, never internal or windrun ratings.
+It reads the bot's own tables (a team is the captain's drafted roster in `player_costs`, and a match side belongs to a team when three or more of its roster played) and keeps its own data in `site_*` tables. Player names follow the bot's rule (`db.get_display_names`: `/set_player` nickname, then the rating-cache name, then the latest match name), so the site and `/player` agree. Ratings are shown as the one number the bot shows (`db.displayed_ratings`); how a rating was worked out is for admins only.
 
 | Variable | Description |
 |---|---|

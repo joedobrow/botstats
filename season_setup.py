@@ -17,6 +17,8 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 
+from config import LEAGUE_TZ
+
 logger = logging.getLogger(__name__)
 
 MAX_WEEKS = 30
@@ -129,6 +131,12 @@ async def roll_over(
         f"Teams {len(identities)} names and logos"
         + ("" if teams_url else " — no source given, existing kept"),
     ]
+
+    if not problems and season_start > datetime.now(LEAGUE_TZ).date().isoformat():
+        # db.playing_season_id: a season set up ahead of time takes over on its
+        # start date, so the one being played stays the default until then.
+        summary.append(f"Current season stays {season_label(previous) if previous else '—'} "
+                       f"until {season_start}; Discord commands and the front page switch then.")
 
     if problems or dry_run:
         return {"applied": False, "same_season": same_season, "label": label,

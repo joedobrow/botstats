@@ -31,7 +31,6 @@
 </nav>
 
 {% if tab == "playoffs" %}
-  {% if notice %}<div class="errors"><p>{{ notice }}</p></div>{% endif %}
   {% if not bracket %}
     <p class="muted">Playoffs haven't started yet.</p>
     {% if is_admin %}
@@ -199,7 +198,6 @@
   {% endif %}
 
 {% elif tab == "champions" %}
-  {% if notice %}<div class="errors"><p>{{ notice }}</p></div>{% endif %}
   {% if champions %}
   <section class="panel champions">
     <h2 class="flush">🏆 {% if champions.team %}{{ champions.team }}{% else %}Champions{% endif %}</h2>
@@ -367,7 +365,6 @@
   </div>
 
 {% elif tab == "signups" %}
-  {% if notice %}<p class="notice">{{ notice }}</p>{% endif %}
   <div class="subtabs-row">
     <nav class="subtabs" aria-label="Signups">
       {% for key, label in signup_levels %}

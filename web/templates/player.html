@@ -1,7 +1,6 @@
 {% extends "base.html" %}
 {% from "macros.html" import hero_icon, team_cell, result_word %}
 {% block content %}
-{% if notice %}<div class="errors"><p>{{ notice }}</p></div>{% endif %}
 {% if unavailable %}
 <div class="errors"><p>Couldn't reach {{ unavailable|join(", ") }} just now, so this player
   couldn't be rated — a rating from a partial fetch would be a guess. Try again in a minute.</p></div>

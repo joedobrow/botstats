@@ -37,7 +37,7 @@ def account_id_from(raw: str) -> int | None:
 
 def build(account_id: int, guild_id: int | None, unavailable: tuple[str, ...] = ()) -> dict | None:
     """The payload for one player, or None if the bot knows nothing about them."""
-    from db import (compute_fantasy_adjusted_ratings, get_guild_division, get_rating_cache_row,
+    from db import (displayed_rating, get_guild_division, get_rating_cache_row,
                     get_skill_override, latest_match_fetch)
     from formatters import format_badge
 
@@ -48,15 +48,9 @@ def build(account_id: int, guild_id: int | None, unavailable: tuple[str, ...] = 
 
     manual = override.get("internal_rating_override")
     base = manual if manual is not None else cache.get("internal_rating")
-    rating = base
-    # The adjustment is the one /player shows in that server's division.
+    # The number /player shows in that server's division, and the site shows.
     division = get_guild_division(guild_id) if guild_id else None
-    if manual is None and base is not None and division:
-        # Alts are judged on their main's history, as /player does.
-        effective = cache.get("alt_account_for") or account_id
-        adj = compute_fantasy_adjusted_ratings(division["current_season_id"], division["id"]).get(effective)
-        if adj:
-            rating = adj["adjusted_rating"]
+    rating = displayed_rating(account_id, division)
 
     windrun = override.get("windrun_rating")
     if windrun is None:

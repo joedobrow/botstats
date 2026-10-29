@@ -264,7 +264,7 @@ def _slug(name: str) -> str:
     stat="Which stat to sort by",
     pos="Filter by position (1-5, optional)",
     all="Show every player (no top-10 cap, no min-games threshold)",
-    min_games="Games needed to rank. Defaults to half the most active player's; 0 ranks everyone.",
+    min_games="Games needed to rank. Defaults to 10, or half the most active player's if fewer; 0 ranks everyone.",
     debug="[Owner only] expose value components (cost, diff)",
     public=PUBLIC_BY_DEFAULT_PARAM_DESCRIPTION,
 )
@@ -346,7 +346,7 @@ async def leaderboard(interaction: discord.Interaction, stat: app_commands.Choic
             threshold = None
             max_games = None
         else:
-            # The bar is half the most active player's games unless min_games
+            # The bar is db.min_games_for (the site's too) unless min_games
             # names one; all=True with a min_games still means "no top ten",
             # not "no bar".
             stats, threshold, max_games = qualified(stats, min_games)
@@ -421,7 +421,7 @@ async def player(interaction: discord.Interaction, name: str, week: int = None, 
         # same fantasy adjustment that /players and /lookup use. For alt
         # accounts, use the main's account_id for the adjustment lookup so
         # the displayed rating matches the main's exactly.
-        from db import get_rating_cache_row, compute_fantasy_adjusted_ratings
+        from db import displayed_rating, get_rating_cache_row
         # A rating nobody refreshes is a rating that quietly rots: the weekly
         # job only covers people who play in a division, and most of the cache
         # is people looked up once. Reading one is what keeps it current.
@@ -437,15 +437,9 @@ async def player(interaction: discord.Interaction, name: str, week: int = None, 
         # number below is the last one worked out rather than a checked one.
         stale_note = (f"⚠️ Couldn't reach {', '.join(unavailable)}, so this rating wasn't "
                       f"rechecked just now — try again in a minute." if unavailable else None)
-        rating: int | None = None
+        # The number the site shows for them too (db.displayed_ratings).
         cache_row = get_rating_cache_row(account_id)
-        if cache_row and cache_row.get("internal_rating") is not None:
-            rating = cache_row["internal_rating"]
-            adjustments = compute_fantasy_adjusted_ratings(division["current_season_id"], division["id"])
-            effective_id = cache_row.get("alt_account_for") or account_id
-            adj = adjustments.get(effective_id)
-            if adj:
-                rating = adj["adjusted_rating"]
+        rating = displayed_rating(account_id, division)
 
         if match_row is None:
             # No matches in this guild — still surface the rating, links, and
@@ -1872,6 +1866,11 @@ async def players(interaction: discord.Interaction, show_all: bool = False, stan
         from db import compute_fantasy_adjusted_ratings
         adjustments = compute_fantasy_adjusted_ratings(division["current_season_id"], division["id"])
         for r in rows:
+            if r.get("rating_override") is not None:
+                # Set by hand, so shown as set — db.displayed_ratings, the
+                # number the site shows, does the same.
+                r["internal_rating"] = int(r["rating_override"])
+                continue
             # Alt accounts route the fantasy adjustment through the main so
             # /players displays them at the same rating.
             effective_id = r.get("alt_account_for") or r["account_id"]
@@ -2125,11 +2124,7 @@ async def hi_vs_low(interaction: discord.Interaction, players: str, public: bool
         return
 
     division = _require_division(interaction)
-    from db import get_rating_cache_row, compute_fantasy_adjusted_ratings
-    adjustments = (
-        compute_fantasy_adjusted_ratings(division["current_season_id"], division["id"])
-        if division else {}
-    )
+    from db import displayed_rating, get_rating_cache_row
 
     resolved: list[dict] = []
     errors: list[str] = []
@@ -2139,12 +2134,10 @@ async def hi_vs_low(interaction: discord.Interaction, players: str, public: bool
             errors.append(f"`{token}`: {err or 'not found'}")
             continue
         cr = get_rating_cache_row(aid) or {}
-        base = cr.get("internal_rating")
-        if base is None:
+        rating = displayed_rating(aid, division)
+        if rating is None:
             errors.append(f"`{token}`: no cached rating (try `/lookup {token}` first)")
             continue
-        adj = adjustments.get(aid)
-        rating = adj["adjusted_rating"] if adj else base
         display = cr.get("override_nickname") or cr.get("name") or name or f"Player_{aid}"
         resolved.append({"account_id": aid, "name": display, "rating": rating})
 
@@ -2607,7 +2600,10 @@ async def weekly_fetch():
     # (one league) are all filled in by the same fetch.
     divisions = get_all_divisions()
     total_count = 0
-    for season_id in sorted({d["current_season_id"] for d in divisions if d.get("current_season_id")}):
+    # The season being played, and any set up ahead of it: a scrim week can
+    # be played before the start date that makes the new season current.
+    seasons = sorted({sid for d in divisions for sid in (d["current_season_id"], d["season_pointer"]) if sid})
+    for season_id in seasons:
         try:
             count = await fetch_and_store_season(season_id)
             total_count += count
@@ -2624,7 +2620,7 @@ async def weekly_fetch():
     # the fetch loop with it.
     try:
         from fetcher import backfill_drafts
-        for season_id in sorted({d["current_season_id"] for d in divisions if d.get("current_season_id")}):
+        for season_id in seasons:
             await backfill_drafts(season_id)
     except Exception:
         logger.exception("Draft backfill failed")
