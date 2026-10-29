@@ -623,6 +623,73 @@ def free_agents(season: dict) -> list[dict]:
     return out
 
 
+SUB_OVER_ALLOWED = 30     # how far over a sub may be, with the other captain's say-so
+SUB_DEFAULT_BELOW = 300   # how far under the target the list reaches by default
+
+
+def sub_candidates(season: dict, target: int, *, skip: int | None = None,
+                   below: int = SUB_DEFAULT_BELOW) -> list[dict]:
+    """Who could stand in for a game: people with a league game to their
+    name, not on any team this season (under any of their accounts), rated
+    from `below` under the target up to SUB_OVER_ALLOWED over it — the ones
+    over are flagged, since a sub is meant to be at or under the player they
+    replace. Closest first. `skip` leaves out the player being replaced."""
+    did = season["division_id"]
+    links = alt_links()
+    taken = season_people(season)
+    ratings = db.displayed_ratings(did)
+    fallback = player_ratings()
+    with _conn() as conn:
+        league = {r["account_id"]: dict(r) for r in conn.execute("""
+            SELECT p.account_id, COUNT(*) AS games, SUM(p.won) AS wins, MAX(m.start_time) AS last_played
+            FROM players p JOIN matches m ON m.match_id = p.match_id
+            WHERE m.league_id > 0 AND m.match_id > 0 AND m.excluded = 0 AND p.account_id > 0
+            GROUP BY p.account_id""")}
+        discord = {r["account_id"]: r["discord"] for r in conn.execute(
+            "SELECT account_id, discord FROM site_users WHERE discord IS NOT NULL AND discord != ''")}
+        for r in conn.execute("""SELECT account_id, discord FROM site_signups
+                                 WHERE discord IS NOT NULL AND discord != '' ORDER BY updated_at"""):
+            discord.setdefault(r["account_id"], r["discord"])
+        for r in conn.execute("""SELECT account_id, discord_override FROM skill_overrides
+                                 WHERE discord_override IS NOT NULL AND discord_override != ''"""):
+            discord[r["account_id"]] = r["discord_override"]       # an admin's correction wins
+        positions = {}
+        for r in conn.execute("SELECT account_id, positions FROM site_signups ORDER BY updated_at"):
+            positions[r["account_id"]] = [int(x) for x in r["positions"].split(",") if x]
+
+    people: dict[int, dict] = {}
+    for aid, g in league.items():
+        person = links.get(aid, aid)
+        p = people.setdefault(person, {"account_id": person, "games": 0, "wins": 0, "last_played": 0,
+                                       "accounts": set()})
+        p["games"] += g["games"]; p["wins"] += g["wins"] or 0
+        p["last_played"] = max(p["last_played"], g["last_played"] or 0)
+        p["accounts"].add(aid)
+    skip_person = links.get(skip, skip) if skip else None
+    out = []
+    for person, p in people.items():
+        if person in taken or person == skip_person:
+            continue
+        rating = ratings.get(person)
+        if rating is None:
+            rating = fallback.get(person)
+        if rating is None or not (target - below <= rating <= target + SUB_OVER_ALLOWED):
+            continue
+        accounts = sorted(p["accounts"] | {person})
+        p["rating"], p["diff"] = rating, rating - target
+        p["over"] = rating > target
+        p["discord"] = next((discord[a] for a in [person] + accounts if discord.get(a)), None)
+        p["positions"] = next((positions[a] for a in [person] + accounts if positions.get(a)), [])
+        out.append(p)
+    idents = player_identities([p["account_id"] for p in out])
+    for p in out:
+        ident = idents.get(p["account_id"], {})
+        p["name"], p["avatar_url"], p["badge"] = (ident.get("name") or str(p["account_id"]),
+                                                   ident.get("avatar_url"), ident.get("badge"))
+    out.sort(key=lambda p: (abs(p["diff"]), -p["games"]))
+    return out
+
+
 def alt_links() -> dict[int, int]:
     """{alt account: the account it belongs to}, cached against the database
     version. The query is trivial but the connection it needs isn't, and
@@ -1886,6 +1953,7 @@ def set_team_identity(season: dict, team: dict, *, name: str | None = None,
 
 
 def match_detail(match_id: int) -> dict | None:
+    import fantasy
     with _conn() as conn:
         m = conn.execute("SELECT * FROM matches WHERE match_id = ?", (match_id,)).fetchone()
         if not m:
@@ -1902,6 +1970,7 @@ def match_detail(match_id: int) -> dict | None:
         p["draft"] = [draft_pick(i) for i in draft.get(p["account_id"], [])]
         p["match_duration"] = m["duration"]
         p["fantasy_points"] = db._per_match_fp(p)
+        p["fantasy_breakdown"] = fantasy.breakdown(db.per_match_stats(p))
     m["radiant"] = [p for p in players if p["team_side"] == "radiant"]
     m["dire"] = [p for p in players if p["team_side"] == "dire"]
     season = season_of_match(all_seasons(), m)

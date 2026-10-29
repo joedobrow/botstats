@@ -50,4 +50,33 @@
   </table>
   </div>
 {% endfor %}
+
+{# Where each player's fantasy score came from: a row per part of the
+   formula, a column per player, Radiant then Dire. #}
+{% set everyone = m.radiant + m.dire %}
+{% if everyone and everyone[0].fantasy_breakdown %}
+<h2>Fantasy breakdown</h2>
+<div class="scroll">
+<table class="fantasy-split">
+  <thead><tr><th></th>
+    {% for p in everyone %}<th class="num {{ p.team_side }}"><a href="/player/{{ p.account_id }}">{{ p.display_name }}</a></th>{% endfor %}
+  </tr></thead>
+  <tbody>
+  {% for row in everyone[0].fantasy_breakdown %}
+    {% set i = loop.index0 %}
+    <tr><th scope="row">{{ row.label }}</th>
+      {% for p in everyone %}{% set c = p.fantasy_breakdown[i] %}
+      {% set shown = c.points|round(1) %}
+      <td class="num{% if shown > 0 %} win{% elif shown < 0 %} loss{% endif %}"
+          title="{{ '%g'|format(c.value|round(2)) }}">{{ "%+.1f"|format(shown) if shown else "·" }}</td>
+      {% endfor %}
+    </tr>
+  {% endfor %}
+  </tbody>
+  <tfoot><tr class="total"><th scope="row">Total</th>
+    {% for p in everyone %}<td class="num">{{ "%.1f"|format(p.fantasy_points) }}</td>{% endfor %}
+  </tr></tfoot>
+</table>
+</div>
+{% endif %}
 {% endblock %}

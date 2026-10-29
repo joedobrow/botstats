@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% from "macros.html" import player_link, positions %}
+{% block content %}
+<h1>Sub finder</h1>
+
+{% if not season %}
+<p class="muted">No season is being played right now.</p>
+{% else %}
+<form method="get" class="form grid filters sub-form">
+  {% if current|length > 1 %}
+  <label>Division
+    <select name="division">
+      {% for s in current %}
+      <option value="{{ s.division_slug }}"{% if s.division_slug == season.division_slug %} selected{% endif %}>{{ s.division }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  {% endif %}
+  <label>Player who needs a sub
+    <input type="search" name="player" value="{{ q.get('player', '') }}" autocomplete="off"
+           placeholder="Name or account id">
+  </label>
+  <label>Or a rating
+    <input type="number" name="rating" min="0" max="10000" value="{{ q.get('rating', '') if not q.get('player') else '' }}"
+           placeholder="3200">
+  </label>
+  <label>Down to
+    <select name="below" title="How far under the target to look">
+      {% for n in (100, 200, 300, 500, 1000) %}
+      <option value="{{ n }}"{% if n == below %} selected{% endif %}>{{ n }} under</option>
+      {% endfor %}
+    </select>
+  </label>
+  <div class="actions"><button class="primary">Find subs</button></div>
+</form>
+
+{% if error %}<div class="errors"><p>{{ error }}</p></div>{% endif %}
+
+{% if choices %}
+<p>Which one?</p>
+<ul class="chips">
+  {% for c in choices %}
+  <li><a class="button small-button" href="?{{ {'player': c.account_id, 'below': below, 'division': season.division_slug}|urlencode }}">{{ c.name }}{% if c.rating %} · {{ c.rating }}{% endif %}</a></li>
+  {% endfor %}
+</ul>
+{% endif %}
+
+{% if subs is not none %}
+<h2>
+  {% if replacing %}Subs for {{ player_link(replacing.account_id, replacing.name) }} · {{ target }}
+  {% else %}Subs around {{ target }}{% endif %}
+  <span class="muted small">· {{ subs|length }} found · {{ season.label }}{% if season.show_division %} {{ season.division }}{% endif %}</span>
+</h2>
+<div class="scroll">
+<table class="sortable">
+  <thead><tr>
+    <th data-sort-type="text">Player</th>
+    <th class="num" data-sort-type="num" data-sort-first="desc">Rating</th>
+    <th class="num" data-sort-type="num" title="Their rating less the target">±</th>
+    <th class="num" data-sort-type="num" data-sort-first="desc" title="League games, all seasons">Games</th>
+    <th class="num" data-sort-type="num" data-sort-first="desc">Win</th>
+    <th data-sort-type="num" data-sort-first="desc">Last played</th>
+    <th>Positions</th>
+    <th data-sort-type="text">Discord</th>
+  </tr></thead>
+  <tbody>
+  {% for p in subs %}
+    <tr{% if p.over %} class="sub-over"{% endif %}>
+      <td class="with-avatar" data-sort="{{ p.name|lower }}">
+        {% if p.avatar_url %}<img class="avatar" src="{{ p.avatar_url }}" alt="">{% endif %}
+        {{ player_link(p.account_id, p.name) }}
+        {% if p.over %}<span class="tag over" title="Over the player being replaced — the other captain has to OK it">Over · ask</span>{% endif %}
+      </td>
+      <td class="num">{{ p.rating }}</td>
+      <td class="num" data-sort="{{ p.diff }}">{{ "%+d"|format(p.diff) }}</td>
+      <td class="num">{{ p.games }}</td>
+      <td class="num" data-sort="{{ p.wins / p.games }}">{{ (100 * p.wins / p.games)|round|int }}%</td>
+      <td class="nowrap" data-sort="{{ p.last_played }}">{{ p.last_played|date("%b %-d, %Y") }}</td>
+      <td data-sort="{{ p.positions|join(',') }}">{{ positions(p.positions) }}</td>
+      <td>{% if user %}{% if p.discord %}<span class="discord">{{ p.discord }}</span>{% endif %}
+        {% else %}<a class="muted small" href="/login?next={{ path|urlencode }}">Log in to see</a>{% endif %}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="8" class="muted">Nobody free in that range.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}
+{% endif %}
+{% endblock %}

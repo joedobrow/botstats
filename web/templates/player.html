@@ -64,7 +64,7 @@
     <tr>
       <td class="nowrap"><a href="/match/{{ m.match_id }}">{{ m.start_time|date("%b %-d, %Y") }}</a></td>
       <td class="with-avatar">{{ hero_icon(m.hero) }}{{ m.hero.name }}</td>
-      <td class="{{ 'win' if m.won else 'loss' }}">{{ "Win" if m.won else "Loss" }}</td>
+      <td class="{{ 'win' if m.won else 'loss' }}"><a class="result-link" href="/match/{{ m.match_id }}">{{ "Win" if m.won else "Loss" }}</a></td>
       <td class="num">{{ m.kills }}/{{ m.deaths }}/{{ m.assists }}</td>
       <td class="num">{{ m.gpm|round|int }}</td>
       <td class="num">{{ m.match_duration|duration }}</td>

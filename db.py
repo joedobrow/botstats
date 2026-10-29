@@ -2125,7 +2125,14 @@ def _per_match_fp(row: dict) -> float:
     `row` must include the player stat columns plus `match_duration` (seconds).
     """
     from fantasy import calculate_fantasy_points
-    return calculate_fantasy_points({
+    return calculate_fantasy_points(per_match_stats(row))
+
+
+def per_match_stats(row: dict) -> dict:
+    """One player-match row in the shape the fantasy formula reads (a
+    one-game aggregate), so a single game's score and its breakdown come from
+    the same arithmetic as a season's."""
+    return {
         "games_played":            1,
         "total_kills":             row["kills"],
         "total_deaths":            row["deaths"],
@@ -2150,7 +2157,7 @@ def _per_match_fp(row: dict) -> float:
         "defensive_item_uses":     row["defensive_item_uses"],
         "building_damage":         (row["building_damage"] if "building_damage" in row.keys() else 0) or 0,
         "avg_duration":            row["match_duration"],
-    })
+    }
 
 
 def _compute_player_diffs(scope: MatchScope) -> dict[int, float]:

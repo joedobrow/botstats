@@ -683,10 +683,16 @@ async def team_page(request: web.Request):
 
 
 def _can_edit_team(request: web.Request, team: dict) -> bool:
-    """Admins, and the team's own captain, may rename it and change its logo."""
+    """Admins, and the team's own captain, may rename it and change its logo.
+    The captain is a person, so they're recognised on any of their accounts."""
     user = request.get("user")
-    return bool(request.get("is_admin")
-                or (user and team.get("captain_account_id") == user["account_id"]))
+    if request.get("is_admin"):
+        return True
+    captain = team.get("captain_account_id")
+    if not (user and captain):
+        return False
+    links = store.alt_links()
+    return links.get(user["account_id"], user["account_id"]) == links.get(captain, captain)
 
 
 def _editable_team(request: web.Request) -> tuple[dict, dict]:
@@ -987,6 +993,53 @@ async def players_page(request: web.Request):
                               if not players else
                               "That matches more than one player — pick one below."))
     return render(request, "players.html", title="Players", q=q, players=players, notice=None)
+
+
+@routes.get("/subs")
+async def sub_finder(request: web.Request):
+    """Find a stand-in: by the player who can't make it, or by a rating.
+    Everyone on a team this season is left out; anyone over the target is
+    flagged, since a sub has to be OK'd by the other captain to be over."""
+    q = request.query
+    current = store.current_seasons()
+    season = next((s for s in current if s["division_slug"] == q.get("division")), None) \
+        or (current[0] if current else None)
+    ctx: dict = {"q": q, "season": season, "current": current, "subs": None, "target": None,
+                 "replacing": None, "choices": [], "error": None,
+                 "over_allowed": store.SUB_OVER_ALLOWED,
+                 "below": int(q["below"]) if q.get("below", "").isdigit() else store.SUB_DEFAULT_BELOW}
+    if season is None:
+        return render(request, "subs.html", title="Sub finder", **ctx)
+    who = (q.get("player") or "").strip()
+    target, skip = None, None
+    if who:
+        aid = account_id_from(who)
+        if aid is None:
+            found = store.search_players(who)
+            exact = [p for p in found if who.lower() in (n.lower() for n in p["names"])]
+            found = exact or found
+            if len(found) == 1:
+                aid = found[0]["account_id"]
+            elif found:
+                ctx["choices"] = found[:12]
+            else:
+                ctx["error"] = f"No player matches “{who}”."
+        if aid is not None:
+            person = store.alt_links().get(aid, aid)
+            target = db.displayed_ratings(season["division_id"]).get(person) \
+                or store.player_ratings().get(person)
+            ident = store.player_identities([person])[person]
+            ctx["replacing"] = {"account_id": person, "name": ident.get("name") or str(person),
+                                "rating": target}
+            skip = person
+            if target is None:
+                ctx["error"] = f"{ctx['replacing']['name']} has no rating to search from — try a rating instead."
+    elif q.get("rating", "").strip().isdigit():
+        target = int(q["rating"])
+    if target is not None:
+        ctx["target"] = target
+        ctx["subs"] = store.sub_candidates(season, target, skip=skip, below=ctx["below"])
+    return render(request, "subs.html", title="Sub finder", **ctx)
 
 
 @routes.get("/fantasy")
