@@ -998,17 +998,12 @@ async def players_page(request: web.Request):
 @routes.get("/subs")
 async def sub_finder(request: web.Request):
     """Find a stand-in: by the player who can't make it, or by a rating.
-    Everyone on a team this season is left out; anyone over the target is
-    flagged, since a sub has to be OK'd by the other captain to be over."""
+    Anyone on a team in a season being played is left out, and so is anyone
+    rated over the target."""
     q = request.query
-    current = store.current_seasons()
-    season = next((s for s in current if s["division_slug"] == q.get("division")), None) \
-        or (current[0] if current else None)
-    ctx: dict = {"q": q, "season": season, "current": current, "subs": None, "target": None,
-                 "replacing": None, "choices": [], "error": None,
+    ctx: dict = {"q": q, "subs": None, "target": None, "replacing": None, "choices": [],
+                 "error": None,
                  "below": int(q["below"]) if q.get("below", "").isdigit() else store.SUB_DEFAULT_BELOW}
-    if season is None:
-        return render(request, "subs.html", title="Sub finder", **ctx)
     who = (q.get("player") or "").strip()
     target, skip = None, None
     if who:
@@ -1025,8 +1020,7 @@ async def sub_finder(request: web.Request):
                 ctx["error"] = f"No player matches “{who}”."
         if aid is not None:
             person = store.alt_links().get(aid, aid)
-            target = db.displayed_ratings(season["division_id"]).get(person) \
-                or store.player_ratings().get(person)
+            target = store.player_ratings().get(person)
             ident = store.player_identities([person])[person]
             ctx["replacing"] = {"account_id": person, "name": ident.get("name") or str(person),
                                 "rating": target}
@@ -1037,7 +1031,7 @@ async def sub_finder(request: web.Request):
         target = int(q["rating"])
     if target is not None:
         ctx["target"] = target
-        ctx["subs"] = store.sub_candidates(season, target, skip=skip, below=ctx["below"])
+        ctx["subs"] = store.sub_candidates(target, skip=skip, below=ctx["below"])
     return render(request, "subs.html", title="Sub finder", **ctx)
 
 

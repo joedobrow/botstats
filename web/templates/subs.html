@@ -3,19 +3,7 @@
 {% block content %}
 <h1>Sub finder</h1>
 
-{% if not season %}
-<p class="muted">No season is being played right now.</p>
-{% else %}
 <form method="get" class="form grid filters sub-form">
-  {% if current|length > 1 %}
-  <label>Division
-    <select name="division">
-      {% for s in current %}
-      <option value="{{ s.division_slug }}"{% if s.division_slug == season.division_slug %} selected{% endif %}>{{ s.division }}</option>
-      {% endfor %}
-    </select>
-  </label>
-  {% endif %}
   <label>Player who needs a sub
     <input type="search" name="player" value="{{ q.get('player', '') }}" autocomplete="off"
            placeholder="Name or account id">
@@ -40,7 +28,7 @@
 <p>Which one?</p>
 <ul class="chips">
   {% for c in choices %}
-  <li><a class="button small-button" href="?{{ {'player': c.account_id, 'below': below, 'division': season.division_slug}|urlencode }}">{{ c.name }}{% if c.rating %} · {{ c.rating }}{% endif %}</a></li>
+  <li><a class="button small-button" href="?{{ {'player': c.account_id, 'below': below}|urlencode }}">{{ c.name }}{% if c.rating %} · {{ c.rating }}{% endif %}</a></li>
   {% endfor %}
 </ul>
 {% endif %}
@@ -49,7 +37,7 @@
 <h2>
   {% if replacing %}Subs for {{ player_link(replacing.account_id, replacing.name) }} · {{ target }}
   {% else %}Subs around {{ target }}{% endif %}
-  <span class="muted small">· {{ subs|length }} found · {{ season.label }}{% if season.show_division %} {{ season.division }}{% endif %}</span>
+  <span class="muted small">· {{ subs|length }} found</span>
 </h2>
 <div class="scroll">
 <table class="sortable">
@@ -85,6 +73,5 @@
   </tbody>
 </table>
 </div>
-{% endif %}
 {% endif %}
 {% endblock %}

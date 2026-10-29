@@ -626,18 +626,21 @@ def free_agents(season: dict) -> list[dict]:
 SUB_DEFAULT_BELOW = 300   # how far under the target the list reaches by default
 
 
-def sub_candidates(season: dict, target: int, *, skip: int | None = None,
+def sub_candidates(target: int, *, skip: int | None = None,
                    below: int = SUB_DEFAULT_BELOW) -> list[dict]:
     """Who could stand in for a game: people with a league game to their
-    name, not on any team this season (under any of their accounts), rated
-    from `below` under the target up to the target itself — a sub may not be
-    rated over the player they replace. Closest first. `skip` leaves out the
-    player being replaced."""
-    did = season["division_id"]
+    name, in any season, who aren't on a team in any season being played now
+    (under any of their accounts), rated from `below` under the target up to
+    the target itself — a sub may not be rated over the player they replace.
+    Closest first. `skip` leaves out the player being replaced.
+
+    No season narrows anything else: the games counted are every league game,
+    and the rating is the one the Players page shows."""
     links = alt_links()
-    taken = season_people(season)
-    ratings = db.displayed_ratings(did)
-    fallback = player_ratings()
+    taken: set[int] = set()
+    for s in current_seasons():
+        taken |= season_people(s)
+    ratings = player_ratings()
     with _conn() as conn:
         league = {r["account_id"]: dict(r) for r in conn.execute("""
             SELECT p.account_id, COUNT(*) AS games, SUM(p.won) AS wins, MAX(m.start_time) AS last_played
@@ -670,8 +673,6 @@ def sub_candidates(season: dict, target: int, *, skip: int | None = None,
         if person in taken or person == skip_person:
             continue
         rating = ratings.get(person)
-        if rating is None:
-            rating = fallback.get(person)
         if rating is None or not (target - below <= rating <= target):
             continue
         accounts = sorted(p["accounts"] | {person})
