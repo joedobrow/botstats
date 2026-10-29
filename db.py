@@ -1568,22 +1568,6 @@ def season_week_scope(season_id: int, division_id: int, week_number: int) -> Mat
     return MatchScope(division_id, league_id=season_id, start=start, end=end)
 
 
-def _week_start(week_offset: int = 0) -> tuple[int, int]:
-    """Return (start_unix, end_unix) for a given week.
-
-    week_offset=0 means the current week (Mon 00:00 UTC → Sun 23:59 UTC).
-    week_offset=1 means the previous week, etc.
-    """
-    now = datetime.now(timezone.utc)
-    # Monday of the current week
-    monday = now - timedelta(days=now.weekday())
-    monday = monday.replace(hour=0, minute=0, second=0, microsecond=0)
-    # Shift back by week_offset weeks
-    monday -= timedelta(weeks=week_offset)
-    sunday_end = monday + timedelta(days=7) - timedelta(seconds=1)
-    return int(monday.timestamp()), int(sunday_end.timestamp())
-
-
 def _season_week_start(week_number: int, season_start_date: str) -> tuple[int, int]:
     """Return (start_unix, end_unix) for a specific season week, by calendar.
 
@@ -2051,14 +2035,6 @@ def _usual_roles(scope: MatchScope) -> dict[int, int]:
     for r in rows:
         roles.setdefault(r["account_id"], r["role_position"])
     return roles
-
-
-def get_latest_week_stats(division_id: int, week_offset: int = 0) -> list[dict]:
-    """Aggregated per-player stats for a calendar week (0 = this week,
-    1 = last week, ...), across every league the division plays in."""
-    start, end = _week_start(week_offset)
-    return _apply_override_nicknames(_mirror_person_rows(
-        _player_stats(MatchScope(division_id, start=start, end=end))))
 
 
 def get_stats_for_season_week(season_id: int, division_id: int, week_number: int) -> list[dict]:
@@ -2534,16 +2510,6 @@ def get_all_rating_cache_rows() -> list[dict]:
             FROM player_ratings_cache prc
             LEFT JOIN skill_overrides so ON so.account_id = prc.account_id
         """).fetchall()]
-
-
-def is_avatar_hidden(account_id: int) -> bool:
-    """True when the account has hide_avatar set in skill_overrides."""
-    with _conn() as conn:
-        row = conn.execute(
-            "SELECT hide_avatar FROM skill_overrides WHERE account_id = ?",
-            (account_id,),
-        ).fetchone()
-    return bool(row and row["hide_avatar"])
 
 
 def compute_fantasy_adjusted_ratings(season_id: int, division_id: int) -> dict[int, dict]:
@@ -3417,81 +3383,6 @@ def get_team_match_aggregates(season_id: int, division_id: int) -> dict[str, dic
     return teams
 
 
-def get_team_aggregates(season_id: int, division_id: int) -> dict[str, dict]:
-    """Aggregate season stats by team (keyed by captain name).
-
-    Per-game stats (gpm, kda, hero_damage, etc.) are weighted-averaged by
-    games_played so high-volume players matter more. Wins and games_played
-    are summed.
-
-    Returns: {captain_name: {games_played, wins, gpm, xpm, ...}}
-    Stats that don't aggregate meaningfully (diff, value, attendance) are
-    omitted.
-    """
-    costs = get_player_costs(season_id, division_id)
-    if not costs:
-        return {}
-    all_stats = {s["account_id"]: s for s in get_all_time_stats(division_id, season_id)}
-
-    by_captain: dict[str, list[dict]] = {}
-    for aid, c in costs.items():
-        cap = c.get("captain")
-        if not cap:
-            continue
-        s = all_stats.get(aid)
-        if s and (s.get("games_played") or 0) > 0:
-            by_captain.setdefault(cap, []).append(s)
-
-    # Fold the captain's own stats into their team (when we can resolve the
-    # captain name to an account_id).
-    captain_aids = get_captain_account_ids(season_id, division_id)
-    for cap, cap_aid in captain_aids.items():
-        if not cap_aid or cap not in by_captain:
-            continue
-        if any(m.get("account_id") == cap_aid for m in by_captain[cap]):
-            continue  # captain already counted (shouldn't happen, but safe)
-        s = all_stats.get(cap_aid)
-        if s and (s.get("games_played") or 0) > 0:
-            by_captain[cap].append(s)
-
-    # Per-game stats — weight by games_played.
-    AVG_KEYS = (
-        "gpm", "xpm", "last_hits", "denies", "hero_damage", "hero_healing",
-        "avg_pct_damage", "teamfight_participation", "stuns_per_min", "obs_uptime",
-        "tower_kills", "observer_kills", "roshans_killed", "camps_stacked",
-        "rune_pickups", "defensive_item_uses", "tormentor_kills",
-        "watcher_captures", "building_damage", "firstblood_claimed",
-        "fantasy_points", "avg_duration",
-    )
-
-    teams: dict[str, dict] = {}
-    for cap, members in by_captain.items():
-        total_games = sum((m.get("games_played") or 0) for m in members)
-        if total_games == 0:
-            continue
-        agg: dict = {
-            "captain":      cap,
-            "team_size":    len(members),
-            "games_played": total_games,
-            "wins":         sum((m.get("wins") or 0) for m in members),
-            "members":      [m.get("name") or f"Player_{m.get('account_id')}" for m in members],
-        }
-        for k in AVG_KEYS:
-            num = sum((m.get(k) or 0) * (m.get("games_played") or 0) for m in members)
-            agg[k] = num / total_games
-        # KDA aggregated from raw totals (not weighted of per-player KDA, which
-        # would mangle the ratio).
-        tk = sum((m.get("total_kills") or 0) for m in members)
-        td = sum((m.get("total_deaths") or 0) for m in members)
-        ta = sum((m.get("total_assists") or 0) for m in members)
-        agg["kda"] = (tk + ta) / max(1, td)
-        agg["total_kills"]   = tk
-        agg["total_deaths"]  = td
-        agg["total_assists"] = ta
-        teams[cap] = agg
-    return teams
-
-
 def _mirror_alts_into(result: dict[int, dict]) -> None:
     """Give every account a player holds the entry any one of them has.
 
@@ -3702,54 +3593,6 @@ def _attach_costs(stats: list[dict], costs: dict[int, dict]) -> list[dict]:
     return stats
 
 
-def _det3(A: list[list[float]]) -> float:
-    return (A[0][0] * (A[1][1] * A[2][2] - A[1][2] * A[2][1])
-          - A[0][1] * (A[1][0] * A[2][2] - A[1][2] * A[2][0])
-          + A[0][2] * (A[1][0] * A[2][1] - A[1][1] * A[2][0]))
-
-
-def _solve3(M: list[list[float]], y: list[float]) -> tuple[float, float, float] | None:
-    """Solve a 3x3 linear system via Cramer's rule. Returns (x0, x1, x2) or None."""
-    D = _det3(M)
-    if abs(D) < 1e-12:
-        return None
-    out = []
-    for k in range(3):
-        Mk = [row[:] for row in M]
-        for r in range(3):
-            Mk[r][k] = y[r]
-        out.append(_det3(Mk) / D)
-    return tuple(out)
-
-
-def fit_cost_diff(stats: list[dict]) -> tuple[float, float] | None:
-    """Univariate OLS: predicted_diff = a + b * cost across drafted players.
-
-    Used by /leaderboard Value and /player's Draft section. The multivariate
-    version (cost + mmr) is used by /suggested_cost only.
-
-    Returns (a, b) or None if there isn't enough data to fit a slope.
-    """
-    data = [
-        (s["cost"], s["diff"])
-        for s in stats
-        if s.get("cost") is not None and s.get("diff") is not None
-    ]
-    if len(data) < 2:
-        return None
-    n = len(data)
-    sum_x  = sum(c for c, _ in data)
-    sum_y  = sum(d for _, d in data)
-    sum_xy = sum(c * d for c, d in data)
-    sum_xx = sum(c * c for c, _ in data)
-    denom = n * sum_xx - sum_x * sum_x
-    if denom == 0:
-        return None
-    b = (n * sum_xy - sum_x * sum_y) / denom
-    a = (sum_y - b * sum_x) / n
-    return (a, b)
-
-
 def _solve_linear(A: list[list[float]], b: list[float]) -> list[float] | None:
     """Solve A·x = b via Gauss–Jordan with partial pivoting.
 
@@ -3777,89 +3620,6 @@ def _solve_linear(A: list[list[float]], b: list[float]) -> list[float] | None:
             for j in range(i, n + 1):
                 M[k][j] -= factor * M[i][j]
     return [M[i][n] / M[i][i] for i in range(n)]
-
-
-def fit_cost_from_perf(
-    stats: list[dict],
-) -> tuple[float, float, float, float] | None:
-    """Multivariate OLS predicting cost from performance + skill:
-        cost = a + b_d·diff + b_f·fp + b_m·mmr
-    Returns (a, b_d, b_f, b_m) or None if rank-deficient or < 4 data points.
-
-    This is the "forward" model used by /suggested_cost. It's bounded by the
-    historical cost range (no inverse-extrapolation blow-ups) and accommodates
-    both performance dimensions (raw fp + relative diff).
-    """
-    data = [
-        (s["cost"], s["diff"], s["fantasy_points"], s["mmr"])
-        for s in stats
-        if s.get("cost") is not None
-           and s.get("diff") is not None
-           and s.get("fantasy_points") is not None
-           and s.get("mmr") is not None
-    ]
-    if len(data) < 4:
-        return None
-    n = len(data)
-
-    sd  = sum(d for _, d, _, _ in data)
-    sf  = sum(f for _, _, f, _ in data)
-    sm  = sum(m for _, _, _, m in data)
-    sc  = sum(c for c, _, _, _ in data)
-
-    sdd = sum(d * d for _, d, _, _ in data)
-    sff = sum(f * f for _, _, f, _ in data)
-    smm = sum(m * m for _, _, _, m in data)
-    sdf = sum(d * f for _, d, f, _ in data)
-    sdm = sum(d * m for _, d, _, m in data)
-    sfm = sum(f * m for _, _, f, m in data)
-
-    sdc = sum(d * c for c, d, _, _ in data)
-    sfc = sum(f * c for c, _, f, _ in data)
-    smc = sum(m * c for c, _, _, m in data)
-
-    A = [
-        [n,   sd,  sf,  sm ],
-        [sd,  sdd, sdf, sdm],
-        [sf,  sdf, sff, sfm],
-        [sm,  sdm, sfm, smm],
-    ]
-    y = [sc, sdc, sfc, smc]
-    sol = _solve_linear(A, y)
-    if sol is None:
-        return None
-    return tuple(sol)
-
-
-def fit_cost_mmr_diff(stats: list[dict]) -> tuple[float, float, float] | None:
-    """Multivariate OLS: predicted_diff = a + b1 * cost + b2 * mmr.
-
-    Returns (a, b1, b2) or None if there isn't enough data or the system is
-    singular. Only considers rows with `cost`, `mmr`, and `diff` all set.
-    """
-    data = [
-        (s["cost"], s["mmr"], s["diff"])
-        for s in stats
-        if s.get("cost") is not None and s.get("mmr") is not None and s.get("diff") is not None
-    ]
-    if len(data) < 3:
-        return None
-    n = len(data)
-    sum_c  = sum(c for c, _, _ in data)
-    sum_m  = sum(m for _, m, _ in data)
-    sum_d  = sum(d for _, _, d in data)
-    sum_cc = sum(c * c for c, _, _ in data)
-    sum_mm = sum(m * m for _, m, _ in data)
-    sum_cm = sum(c * m for c, m, _ in data)
-    sum_cd = sum(c * d for c, _, d in data)
-    sum_md = sum(m * d for _, m, d in data)
-    M = [
-        [n,      sum_c,  sum_m ],
-        [sum_c,  sum_cc, sum_cm],
-        [sum_m,  sum_cm, sum_mm],
-    ]
-    y = [sum_d, sum_cd, sum_md]
-    return _solve3(M, y)
 
 
 MIN_GAMES_FOR_VALUE = 5
@@ -3911,113 +3671,6 @@ def _compute_value(stats: list[dict]) -> list[dict]:
     return stats
 
 
-def get_player_team_diff(
-    account_id: int,
-    season_id: int,
-    division_id: int,
-    week_number: int | None = None,
-) -> dict | None:
-    """
-    Per-match comparison of one player's fantasy points to the average of their
-    4 same-side teammates. Aggregated across all matches in the requested range.
-
-    week_number=None or -1 → the whole season.
-    Otherwise scoped to that season week.
-
-    Returns None if the player has no matches in range.
-    """
-    scope = (season_scope(season_id, division_id) if week_number is None or week_number == -1
-             else season_week_scope(season_id, division_id, week_number))
-    where, params = scope.where("m")
-    with _conn() as conn:
-        target_matches = conn.execute(f"""
-            SELECT p.match_id
-            FROM players p
-            JOIN matches m ON p.match_id = m.match_id
-            WHERE {where} AND p.account_id = ?
-        """, params + [account_id]).fetchall()
-
-        if not target_matches:
-            return None
-
-        match_ids = [r["match_id"] for r in target_matches]
-        placeholders = ",".join("?" * len(match_ids))
-        rows = conn.execute(f"""
-            SELECT p.*, m.duration AS match_duration
-            FROM players p
-            JOIN matches m ON p.match_id = m.match_id
-            WHERE p.match_id IN ({placeholders})
-        """, match_ids).fetchall()
-
-    # Group rows by match
-    by_match: dict[int, list[dict]] = {}
-    for r in rows:
-        by_match.setdefault(r["match_id"], []).append(dict(r))
-
-    player_fps: list[float] = []
-    teammate_avg_fps: list[float] = []
-    top_count = 0
-    bottom_count = 0
-    player_name: str | None = None
-
-    for match_id, match_rows in by_match.items():
-        target = next((r for r in match_rows if r["account_id"] == account_id), None)
-        if not target:
-            continue
-        teammates = [
-            r for r in match_rows
-            if r["account_id"] != account_id and r["team_side"] == target["team_side"]
-        ]
-        if not teammates:
-            continue  # data integrity issue — skip
-        player_name = target["name"]
-
-        target_fp = _per_match_fp(target)
-        mate_fps = [_per_match_fp(m) for m in teammates]
-
-        team_fps = mate_fps + [target_fp]
-        if target_fp >= max(team_fps):
-            top_count += 1
-        if target_fp <= min(team_fps):
-            bottom_count += 1
-
-        player_fps.append(target_fp)
-        teammate_avg_fps.append(sum(mate_fps) / len(mate_fps))
-
-    if not player_fps:
-        return None
-
-    n = len(player_fps)
-    player_avg = sum(player_fps) / n
-    teammate_avg = sum(teammate_avg_fps) / n
-
-    return {
-        "name":                 player_name,
-        "account_id":           account_id,
-        "games_played":         n,
-        "player_avg_fp":        player_avg,
-        "teammate_avg_fp":      teammate_avg,
-        "diff":                 player_avg - teammate_avg,
-        "top_of_team_count":    top_count,
-        "bottom_of_team_count": bottom_count,
-    }
-
-
-def get_all_weeks(division_id: int) -> list[dict]:
-    """Return a list of distinct weeks that have data, with match counts."""
-    with _conn() as conn:
-        rows = conn.execute("""
-            SELECT
-                strftime('%Y-%m-%d', start_time, 'unixepoch') AS match_date,
-                COUNT(*) AS match_count
-            FROM matches
-            WHERE division_id = ?
-            GROUP BY date(start_time, 'unixepoch', 'weekday 1')
-            ORDER BY match_date DESC
-        """, (division_id,)).fetchall()
-    return [dict(r) for r in rows]
-
-
 def get_latest_season_week(season_id: int, division_id: int) -> int | None:
     """Return the latest season week number that has data, or None if no data."""
     season = get_season(season_id)
@@ -4053,12 +3706,6 @@ def _list_matches(scope: MatchScope) -> list[dict]:
             ORDER BY m.start_time DESC
         """, params).fetchall()
     return [dict(r) for r in rows]
-
-
-def get_matches_for_week(division_id: int, week_offset: int = 0) -> list[dict]:
-    """Return all matches for a given calendar week with basic info."""
-    start, end = _week_start(week_offset)
-    return _list_matches(MatchScope(division_id, start=start, end=end))
 
 
 def get_matches_for_season_week(season_id: int, division_id: int, week_number: int) -> list[dict]:
@@ -4165,13 +3812,6 @@ def nuke_data(division_id: int):
 
         conn.execute("DELETE FROM matches WHERE division_id = ?", (division_id,))
     logger.info("Data nuked for division %d", division_id)
-
-
-def match_exists(match_id: int) -> bool:
-    """Whether a game is stored. A game is stored once, in one division."""
-    with _conn() as conn:
-        row = conn.execute("SELECT 1 FROM matches WHERE match_id = ?", (match_id,)).fetchone()
-    return row is not None
 
 
 def assign_builds_to_heroes(match_id: int, builds: dict[int, list[tuple[int, int]]]) -> dict[int, list[tuple[int, int]]]:
@@ -4294,17 +3934,6 @@ def set_season_award(season_id: int, division_id: int, award: str,
              for i, w in enumerate(winners, start=1)])
 
 
-def awards_by_account() -> dict[int, list[dict]]:
-    """{account_id: [{season_id, division_id, award, position}]} for everyone
-    who has won something — for showing a player what they've won."""
-    out: dict[int, list[dict]] = {}
-    with _conn() as conn:
-        for r in conn.execute("SELECT season_id, division_id, award, position, account_id "
-                              "FROM season_awards WHERE account_id IS NOT NULL"):
-            out.setdefault(r["account_id"], []).append(dict(r))
-    return out
-
-
 def games_missing_drafts(season_id: int, max_age_days: int = 30) -> list[int]:
     """Ability Draft games of a season with no stored draft.
 
@@ -4330,10 +3959,5 @@ def match_is_complete(match_id: int) -> bool:
     with _conn() as conn:
         row = conn.execute("SELECT 1 FROM players WHERE match_id = ? LIMIT 1", (match_id,)).fetchone()
     return row is not None
-
-
-def set_match_division(match_id: int, division_id: int | None) -> None:
-    with _conn() as conn:
-        conn.execute("UPDATE matches SET division_id = ? WHERE match_id = ?", (division_id, match_id))
 
 

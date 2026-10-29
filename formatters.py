@@ -2,17 +2,11 @@
 Formatters — turn raw stat dicts into Discord Embed objects.
 """
 
-import math
-
 import discord
-from config import ROLE_LABELS, LEAGUE_TZ
+from config import LEAGUE_TZ
 
-# Colour palette
-EMBED_COLOUR_GOLD   = discord.Colour(0xFFD700)
-EMBED_COLOUR_BLUE   = discord.Colour(0x4A90D9)
-EMBED_COLOUR_GREEN  = discord.Colour(0x2ECC71)
-EMBED_COLOUR_PURPLE = discord.Colour(0x9B59B6)
-EMBED_COLOUR_RED    = discord.Colour(0xE74C3C)
+# The league's brick, the site's --accent: every embed and card wears it.
+EMBED_COLOUR = discord.Colour(0x8A3A28)
 
 # Human-readable labels for stat keys
 STAT_LABELS: dict[str, str] = {
@@ -55,14 +49,6 @@ def _display_name(p: dict) -> str:
         return name
     aid = p.get("account_id") or 0
     return f"Player_{aid}"
-
-
-def _week_label(week_offset: int) -> str:
-    if week_offset == 0:
-        return "This Week"
-    if week_offset == 1:
-        return "Last Week"
-    return f"{week_offset} Weeks Ago"
 
 
 def _format_seconds(seconds) -> str:
@@ -182,7 +168,7 @@ def format_leaderboard(
         lines.append(f"{medal} {player_link} — {val_str} — {games} game{'s' if games != 1 else ''}")
 
     if not lines:
-        empty = discord.Embed(title=title_base, description=desc, colour=EMBED_COLOUR_GOLD)
+        empty = discord.Embed(title=title_base, description=desc, colour=EMBED_COLOUR)
         empty.add_field(name="\u200b", value="No data.", inline=False)
         empty.set_footer(text="Use /leaderboard <stat> to sort by a different stat \u00b7 /player <name> for full details")
         return [empty]
@@ -203,7 +189,7 @@ def format_leaderboard(
         embed = discord.Embed(
             title=title,
             description=desc if page_num == 1 else None,
-            colour=EMBED_COLOUR_GOLD,
+            colour=EMBED_COLOUR,
         )
         chunk: list[str] = []
         chunk_len = 0
@@ -256,7 +242,7 @@ def format_player_stats(
     embed = discord.Embed(
         title=title,
         url=dotabuff_url,
-        colour=EMBED_COLOUR_BLUE,
+        colour=EMBED_COLOUR,
     )
 
     # Draft (only if we have cost data for this player this season)
@@ -350,7 +336,6 @@ def format_team_stats(
     wins = target_agg.get("wins", 0)
     losses = games - wins
     win_pct = (wins / games * 100) if games else 0.0
-    n_teams = len(all_team_aggs)
 
     roster = target_agg.get("members") or []
     roster_line = " · ".join(roster) if roster else ""
@@ -363,7 +348,7 @@ def format_team_stats(
     embed = discord.Embed(
         title=f"🛡️ Team {team_label}",
         description="\n".join(desc_parts),
-        colour=EMBED_COLOUR_GOLD,
+        colour=EMBED_COLOUR,
     )
 
     strengths, weaknesses = _compute_strengths_weaknesses(
@@ -493,7 +478,7 @@ def format_players_list(cached: list[dict], fantasy_adjusted: bool = False,
         embed = discord.Embed(
             title=base_title,
             description=f"0 players · last refreshed {refresh_str}{desc_extra}",
-            colour=EMBED_COLOUR_GOLD,
+            colour=EMBED_COLOUR,
         )
         embed.add_field(name="​", value="No rated players in cache yet.", inline=False)
         return [embed]
@@ -513,7 +498,7 @@ def format_players_list(cached: list[dict], fantasy_adjusted: bool = False,
         page_num = len(embeds) + 1
         title = base_title if page_num == 1 else f"{base_title} (cont.)"
         desc = f"{len(sorted_rows)} players · last refreshed {refresh_str}{desc_extra}" if page_num == 1 else None
-        embed = discord.Embed(title=title, description=desc, colour=EMBED_COLOUR_GOLD)
+        embed = discord.Embed(title=title, description=desc, colour=EMBED_COLOUR)
         # Split cur_lines into 1000-char fields
         chunk: list[str] = []
         chunk_len = 0
@@ -781,7 +766,7 @@ def format_lookup(
     title = f"🔍 {name}"
     if debug:
         title += " (debug)"
-    embed = discord.Embed(title=title, url=dotabuff_url, colour=EMBED_COLOUR_BLUE)
+    embed = discord.Embed(title=title, url=dotabuff_url, colour=EMBED_COLOUR)
 
     # Avatar (when available) — prefer the freshly-fetched OpenDota Steam
     # avatar (avatarfull), fall back to windrun, then to whatever was cached.
@@ -1010,28 +995,6 @@ def format_lookup(
 # /summary (compact leaderboard for embedding multiple in one message)
 # ---------------------------------------------------------------------------
 
-def format_compact_leaderboard(stats: list[dict], pos: int, sort_by: str = "fantasy_points") -> str:
-    """Return a compact text block for a single position's top 3 players."""
-    # Filter by position
-    filtered = [s for s in stats if s.get("role_position") == pos]
-    if not filtered:
-        return "*No data*"
-
-    sorted_players = sorted(filtered, key=lambda p: _sort_key(p, sort_by), reverse=True)
-
-    lines = []
-    for i, p in enumerate(sorted_players[:3]):  # top 3 only
-        medal = MEDAL[i]
-        val = p.get(sort_by, 0)
-        if sort_by == "fantasy_points":
-            val_str = f"{val:.1f}"
-        else:
-            val_str = f"{val:.1f}"
-        lines.append(f"{medal} {_display_name(p)} — {val_str}")
-
-    return "\n".join(lines)
-
-
 # ---------------------------------------------------------------------------
 # /matches
 # ---------------------------------------------------------------------------
@@ -1046,7 +1009,7 @@ def format_matches_list(matches: list[dict], week_label: str = "Latest Week") ->
     embed = discord.Embed(
         title=f"🎮 Matches — {week_label}",
         description=f"{len(matches)} match(es) found",
-        colour=EMBED_COLOUR_BLUE,
+        colour=EMBED_COLOUR,
     )
 
     lines = []

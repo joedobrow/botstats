@@ -16,7 +16,7 @@ first one somewhere both can reach (usually `db.py`) and call it from both place
 | Standings, tiebreaks | `store.season_teams` (the bot's `/standings` calls it) | re-sorting teams elsewhere |
 | A player's season stats | `db.get_all_time_stats(division, season)` | `store.aggregate` (only for totals the bot has no view of) |
 | Fantasy points | `fantasy.py` (`calculate_fantasy_points`, `breakdown`, `describe`) | arithmetic in templates |
-| Who is a person? | `db.person_of`, `db.accounts_of_people`, `store.alt_links()`: one row per person, filed under their main account | comparing raw account ids |
+| Who is a person? | `db.person_of`, `db.accounts_of_people`, `store.alt_links()`: one row per person, filed under their main account. Anything matching a person to a season (drafts, captains, teams, titles) checks all of their accounts | comparing raw account ids |
 | How do I reach them on Discord? | `store.discord_handles()` / `store.player_discord()` | reading `site_users.discord` or signups directly |
 | Display names, avatars, badges | `store.player_identities` (bot's `db.get_display_names` rule) | `players.name` |
 
@@ -71,6 +71,8 @@ ADCL Season 1 (20508). Anything that picks a season takes the division too:
   `<picture class="themed">`; the script in `base.html` swaps them.
 - `[hidden]` is `display: none !important`, so `hidden` always wins over a class
   that sets `display`.
+- Discord embeds and cards use `formatters.EMBED_COLOUR`, the day `--accent` brick.
+  No other embed colors.
 
 ## Database
 

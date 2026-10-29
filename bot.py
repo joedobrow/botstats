@@ -4,15 +4,14 @@ import discord
 from discord import app_commands
 from discord.ext import tasks
 import logging
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 
-from config import (DISCORD_TOKEN, ADMIN_USER_ID, REGION_CLUSTERS, GAME_MODE_FILTERS,
-                    LOOKUP_CHANNEL_IDS, SITE_URL)
+from config import DISCORD_TOKEN, ADMIN_USER_ID, LOOKUP_CHANNEL_IDS, SITE_URL
 from fetcher import fetch_and_store_matches_for_division, fetch_and_store_season
 from db import (init_db, get_division, get_guild_division, update_division,
                 get_all_divisions, get_scold_channel, set_guild_settings, get_guild_settings,
                 get_season, upsert_season, set_current_season, season_label, ranked, qualified)
-from formatters import format_leaderboard, format_player_stats, format_team_stats
+from formatters import EMBED_COLOUR, format_leaderboard, format_player_stats, format_team_stats
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -467,7 +466,6 @@ async def player(interaction: discord.Interaction, name: str, week: int = None, 
                     logger.exception("Live lookup failed in /player for %d", account_id)
 
             display = display_name or f"Account {account_id}"
-            from formatters import EMBED_COLOUR_BLUE
             title = f"🎮 {display}"
             if rating is not None:
                 title += f"  •  Rating {rating}"
@@ -476,7 +474,7 @@ async def player(interaction: discord.Interaction, name: str, week: int = None, 
             embed = discord.Embed(
                 title=title,
                 url=dotabuff_url,
-                colour=EMBED_COLOUR_BLUE,
+                colour=EMBED_COLOUR,
             )
             if avatar_url:
                 embed.set_thumbnail(url=avatar_url)
@@ -1313,7 +1311,7 @@ class _PlayerPicker(discord.ui.LayoutView):
             label = f"{name} · {aid}" if seen.count(name) > 1 else name
             button = _PickPlayerButton(aid, name, command, params, param, label)
             text, avatar = _player_card_text(aid, name)
-            card = discord.ui.Container(accent_colour=discord.Colour(0x9A2A1E))
+            card = discord.ui.Container(accent_colour=EMBED_COLOUR)
             if avatar:
                 card.add_item(discord.ui.Section(discord.ui.TextDisplay(text),
                                                  accessory=discord.ui.Thumbnail(avatar)))
@@ -2050,7 +2048,7 @@ async def standings(interaction: discord.Interaction, season: str = None, public
     embed = discord.Embed(
         title=f"{season_label(get_season(season_id))} standings",
         description="\n".join(lines),
-        color=0x9A2A1E,
+        colour=EMBED_COLOUR,
     )
     embed.set_footer(text="Sorted by record, then the combined wins of everyone a team has played (tb).")
     await interaction.followup.send(embed=embed, ephemeral=not public)
@@ -2068,7 +2066,7 @@ async def hall_of_fame(interaction: discord.Interaction, public: bool = True):
         await interaction.followup.send("\u26a0\ufe0f No season has been won yet.", ephemeral=True)
         return
 
-    embed = discord.Embed(title="\U0001F3C6 Hall of Fame", color=0x9A2A1E)
+    embed = discord.Embed(title="\U0001F3C6 Hall of Fame", colour=EMBED_COLOUR)
     for c in champions[:25]:          # an embed takes 25 fields
         who = ", ".join(m["name"] for m in c["members"])
         embed.add_field(name=f"{c['season']['label']} \u2014 {c['team'] or 'Champions'}",
@@ -2169,9 +2167,8 @@ async def hi_vs_low(interaction: discord.Interaction, players: str, public: bool
         randoms = 3
         rule = "Diff > 800 → HIGH team randoms their **first 3** abilities."
 
-    from formatters import EMBED_COLOUR_BLUE
     title = f"🎲 Hi vs Low  •  avg diff {diff:+.0f}"
-    embed = discord.Embed(title=title, description=rule, colour=EMBED_COLOUR_BLUE)
+    embed = discord.Embed(title=title, description=rule, colour=EMBED_COLOUR)
 
     def _team_field(team: list[dict], avg: float) -> str:
         return "\n".join(f"**{p['rating']}**  {p['name']}" for p in team) + f"\n\n_avg: {avg:.0f}_"

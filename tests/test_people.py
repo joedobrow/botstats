@@ -180,6 +180,33 @@ def main() -> int:
           db.one_per_person([OLD, NEW, MATE]) == [OLD, MATE],
           str(db.one_per_person([OLD, NEW, MATE])))
 
+    # Next season they sign up on the main account. The draft room's history
+    # should still show the season they were drafted on the other one.
+    db.upsert_season(SEASON + 1, "2099-01-01", "Next Season")
+    db.add_season_division(SEASON + 1, DIVISION)
+    later = {"id": SEASON + 1, "division_id": DIVISION, "season_start": "2099-01-01"}
+    store.save_signup(later, OLD, mmr=None, positions=[2], captain="no", discord=None, statement=None)
+    profile = next(p for p in store.signup_profiles(later) if p["account_id"] == OLD)
+    check("a signup's draft history includes drafts on their other account",
+          [(h["season"], h["cost"], h["team"]) for h in profile["history"]] == [("Test Season", 100, "Cap's Team")],
+          str(profile["history"]))
+
+    # The captain, matched to their account by name, signs up next season on
+    # their other one. The season they captained and won is still theirs.
+    CAP, CAP_ALT = 9100, 9101
+    db.upsert_skill_override(account_id=CAP, windrun_rating=None, rank_tier=None, leaderboard_rank=None,
+                             note=None, set_by_user_id=None, set_by_name="test", nickname="cap")
+    db.upsert_skill_override(account_id=CAP_ALT, windrun_rating=None, rank_tier=None,
+                             leaderboard_rank=None, note=None, alt_account_for=CAP,
+                             set_by_user_id=None, set_by_name="test")
+    store.set_season_champions(SEASON, DIVISION, [{"account_id": CAP, "name": "cap"}], "Cap's Team")
+    store.save_signup(later, CAP_ALT, mmr=None, positions=[1], captain="yes", discord=None, statement=None)
+    profile = next(p for p in store.signup_profiles(later) if p["account_id"] == CAP_ALT)
+    check("a captain signed up on their other account keeps the season they captained",
+          [(h["season"], h["captain"]) for h in profile["history"]] == [("Test Season", True)],
+          str(profile["history"]))
+    check("and the title they won on it", profile["titles"] == 1, str(profile["titles"]))
+
     print()
     if failures:
         print(f"{len(failures)} FAILED: " + ", ".join(failures))

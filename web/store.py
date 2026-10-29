@@ -1115,9 +1115,12 @@ def signup_profiles(season: dict) -> list[dict]:
     div_names = {d["id"]: d["name"] for d in divisions()}
     team_names: dict[tuple, dict[int, str]] = {}
 
-    def team_name(s: dict, aid: int) -> str | None:
-        """The team aid was on in season s. Each season's teams are worked
-        out once: doing it per player was most of this function's time."""
+    links = db.alt_links()
+
+    def team_name(s: dict, mine: set[int]) -> str | None:
+        """The team someone holding these accounts was on in season s. Each
+        season's teams are worked out once: doing it per player was most of
+        this function's time."""
         key = (s["id"], s["division_id"])
         if key not in team_names:
             team_names[key] = {}
@@ -1125,11 +1128,13 @@ def signup_profiles(season: dict) -> list[dict]:
                 for member in [t.get("captain_account_id")] + [p["account_id"] for p in t["roster"]]:
                     if member:
                         team_names[key].setdefault(member, t["name"])
-        return team_names[key].get(aid)
+        return next((team_names[key][a] for a in sorted(mine) if a in team_names[key]), None)
 
     out = []
     for r in signups:
         aid = r["account_id"]
+        # A season drafted on their other account is still their season.
+        mine = db.accounts_of_people([aid], links)
         br = rating_breakdown(aid) or {}
         matches = player_matches(aid)
         agg = aggregate(matches) if matches else {"games_played": 0}
@@ -1141,10 +1146,12 @@ def signup_profiles(season: dict) -> list[dict]:
         last = played[0] if played else None
         history = []        # earlier drafts, newest first: season, team, cost
         for s, costs, caps in sorted(drafts, key=lambda d: d[0]["season_start"], reverse=True):
-            if aid in caps or aid in costs:
-                history.append({"season": s["label"], "captain": aid in caps,
-                                "cost": (costs.get(aid) or {}).get("cost"),
-                                "team": team_name(s, aid)})
+            drafted = next((a for a in sorted(mine) if a in costs), None)
+            captain = bool(mine & caps)
+            if captain or drafted is not None:
+                history.append({"season": s["label"], "captain": captain,
+                                "cost": (costs.get(drafted) or {}).get("cost"),
+                                "team": team_name(s, mine)})
         paid = [h["cost"] for h in history if h["cost"] is not None]
         out.append({
             "signup": r, "account_id": aid, "name": r["name"], "steam_name": steam.get(aid),
@@ -1152,12 +1159,12 @@ def signup_profiles(season: dict) -> list[dict]:
             "games": agg.get("games_played") or 0, "wins": agg.get("wins") or 0,
             "fantasy": agg.get("fantasy_points"), "kda": agg.get("kda"), "gpm": agg.get("gpm"),
             "seasons_played": len(played), "last_season": last["label"] if last else None,
-            "last_team": team_name(last, aid) if last else None,
+            "last_team": team_name(last, mine) if last else None,
             "history": history, "last_cost": history[0]["cost"] if history else None,
             "seasons_drafted": len(paid), "average_cost": sum(paid) / len(paid) if paid else None,
             "seasons_captained": sum(1 for h in history if h["captain"]),
-            "titles": titles.get(aid, 0),
-            "other_divisions": [div_names.get(d, str(d)) for d in others.get(aid, [])],
+            "titles": sum(titles.get(a, 0) for a in mine),
+            "other_divisions": [div_names.get(d, str(d)) for d in sorted({d for a in mine for d in others.get(a, [])})],
         })
     return out
 

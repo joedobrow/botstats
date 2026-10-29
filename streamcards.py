@@ -8,7 +8,6 @@ have already fetched the player/team data and (optionally) the avatar bytes.
 
 import io
 import logging
-from typing import Iterable
 
 import aiohttp
 from PIL import Image, ImageDraw, ImageFont
@@ -68,10 +67,6 @@ def _circle_mask(size: int) -> Image.Image:
     mask = Image.new("L", (size, size), 0)
     ImageDraw.Draw(mask).ellipse((0, 0, size, size), fill=255)
     return mask
-
-
-def _draw_rounded_rect(draw: ImageDraw.ImageDraw, box, radius, fill):
-    draw.rounded_rectangle(box, radius=radius, fill=fill)
 
 
 def _truncate(text: str, font, max_width: int, draw) -> str:
@@ -228,7 +223,6 @@ def render_h2h_card(
     f_team    = _try_load_font(48, bold=True)
     f_record  = _try_load_font(30, bold=True)
     f_name    = _try_load_font(18, bold=True)
-    f_cap     = _try_load_font(13, bold=True)
     f_sec_h   = _try_load_font(32, bold=True)
     f_stat_l  = _try_load_font(28, bold=True)
     f_stat_v  = _try_load_font(30, bold=True)
@@ -360,7 +354,6 @@ def render_h2h_card(
     # ------------------------------------------------------------------
     inner_left  = div_x_a + 24
     inner_right = div_x_b - 24
-    inner_w     = inner_right - inner_left
     inner_mid_x = (inner_left + inner_right) // 2
 
     cur_y = middle_top + 20
