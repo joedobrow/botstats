@@ -65,14 +65,13 @@
   </tr></thead>
   <tbody>
   {% for p in subs %}
-    <tr{% if p.over %} class="sub-over"{% endif %}>
+    <tr>
       <td class="with-avatar" data-sort="{{ p.name|lower }}">
         {% if p.avatar_url %}<img class="avatar" src="{{ p.avatar_url }}" alt="">{% endif %}
         {{ player_link(p.account_id, p.name) }}
-        {% if p.over %}<span class="tag over" title="Over the player being replaced — the other captain has to OK it">Over · ask</span>{% endif %}
       </td>
       <td class="num">{{ p.rating }}</td>
-      <td class="num" data-sort="{{ p.diff }}">{{ "%+d"|format(p.diff) }}</td>
+      <td class="num" data-sort="{{ p.diff }}">{{ "%+d"|format(p.diff) if p.diff else "0" }}</td>
       <td class="num">{{ p.games }}</td>
       <td class="num" data-sort="{{ p.wins / p.games }}">{{ (100 * p.wins / p.games)|round|int }}%</td>
       <td class="nowrap" data-sort="{{ p.last_played }}">{{ p.last_played|date("%b %-d, %Y") }}</td>

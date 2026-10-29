@@ -896,7 +896,3 @@ label.check .pos { margin-right: 2px; }
 .fantasy-split td.win, .fantasy-split td.loss { font-weight: 500; }
 /* A result that links to its match keeps its win/loss colour. */
 a.result-link { color: inherit; }
-/* The sub finder: someone over the target is allowed only with the other
-   captain's say-so, so their row is marked. */
-.tag.over { background: var(--call-bg); color: var(--call-ink); }
-tr.sub-over td { background: color-mix(in srgb, var(--accent) 7%, transparent); }

@@ -1006,7 +1006,6 @@ async def sub_finder(request: web.Request):
         or (current[0] if current else None)
     ctx: dict = {"q": q, "season": season, "current": current, "subs": None, "target": None,
                  "replacing": None, "choices": [], "error": None,
-                 "over_allowed": store.SUB_OVER_ALLOWED,
                  "below": int(q["below"]) if q.get("below", "").isdigit() else store.SUB_DEFAULT_BELOW}
     if season is None:
         return render(request, "subs.html", title="Sub finder", **ctx)

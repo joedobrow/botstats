@@ -623,7 +623,6 @@ def free_agents(season: dict) -> list[dict]:
     return out
 
 
-SUB_OVER_ALLOWED = 30     # how far over a sub may be, with the other captain's say-so
 SUB_DEFAULT_BELOW = 300   # how far under the target the list reaches by default
 
 
@@ -631,9 +630,9 @@ def sub_candidates(season: dict, target: int, *, skip: int | None = None,
                    below: int = SUB_DEFAULT_BELOW) -> list[dict]:
     """Who could stand in for a game: people with a league game to their
     name, not on any team this season (under any of their accounts), rated
-    from `below` under the target up to SUB_OVER_ALLOWED over it — the ones
-    over are flagged, since a sub is meant to be at or under the player they
-    replace. Closest first. `skip` leaves out the player being replaced."""
+    from `below` under the target up to the target itself — a sub may not be
+    rated over the player they replace. Closest first. `skip` leaves out the
+    player being replaced."""
     did = season["division_id"]
     links = alt_links()
     taken = season_people(season)
@@ -673,11 +672,10 @@ def sub_candidates(season: dict, target: int, *, skip: int | None = None,
         rating = ratings.get(person)
         if rating is None:
             rating = fallback.get(person)
-        if rating is None or not (target - below <= rating <= target + SUB_OVER_ALLOWED):
+        if rating is None or not (target - below <= rating <= target):
             continue
         accounts = sorted(p["accounts"] | {person})
         p["rating"], p["diff"] = rating, rating - target
-        p["over"] = rating > target
         p["discord"] = next((discord[a] for a in [person] + accounts if discord.get(a)), None)
         p["positions"] = next((positions[a] for a in [person] + accounts if positions.get(a)), [])
         out.append(p)
