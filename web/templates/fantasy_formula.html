@@ -34,9 +34,9 @@
   part contributes, so the ones that decide a score sit at the top.</p>
 
 <h2>Two components that aren't a straight multiplication</h2>
-<p><strong>Staying alive.</strong> Every game starts at {{ "%+g"|format(death_base) }} and each death
-  takes {{ "%g"|format(-death_each) }} off it. {{ (death_base / -death_each)|round|int }} deaths
-  cancel it exactly; past that it goes negative. Dying is the only thing that can take points away.</p>
+<p><strong>Base and deaths.</strong> Every game starts at {{ "%+g"|format(death_base) }}, and each death
+  takes {{ "%g"|format(-death_each) }} off. {{ (death_base / -death_each)|round|int }} deaths cancel the
+  base exactly. Deaths are the only stat that takes points away.</p>
 <p><strong>Game length.</strong> Longer games hand out more of almost everything, so a raw score
   rewards slow games. Across every match on record a game's length predicts its score at
   {{ "%g"|format(duration_slope) }} points a minute, and that much is taken back out: a player whose

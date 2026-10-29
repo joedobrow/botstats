@@ -1971,6 +1971,8 @@ def match_detail(match_id: int) -> dict | None:
         p["match_duration"] = m["duration"]
         p["fantasy_points"] = db._per_match_fp(p)
         p["fantasy_breakdown"] = fantasy.breakdown(db.per_match_stats(p))
+        for c in p["fantasy_breakdown"]:
+            c["stat"] = fantasy.describe(c)
     m["radiant"] = [p for p in players if p["team_side"] == "radiant"]
     m["dire"] = [p for p in players if p["team_side"] == "dire"]
     season = season_of_match(all_seasons(), m)

@@ -55,7 +55,7 @@ DURATION_MEAN_MIN = 41.7     # average game length in minutes (the "neutral" poi
 
 WEIGHTS = {
     "kills_per_game":               0.3,
-    "death_base":                   3.0,   # flat bonus per game (eroded by deaths)
+    "death_base":                   3.0,   # flat base per game; deaths are their own line
     "deaths_per_game":             -0.2,
     "assists_per_game":             0.25,  # tweak: pyopendota has 0
     "last_hits_per_game":           0.003,
@@ -80,7 +80,7 @@ WEIGHTS = {
 # What each component is called, and how to read the number behind it, for
 # anywhere the score is explained rather than just totalled.
 LABELS = {
-    "death_base":                   ("Staying alive", "base, per game"),
+    "death_base":                   ("Base", "per game"),
     "kills_per_game":               ("Kills", "per game"),
     "deaths_per_game":              ("Deaths", "per game"),
     "assists_per_game":             ("Assists", "per game"),
@@ -152,6 +152,23 @@ def breakdown(player: dict) -> list[dict]:
                  "value": avg_duration_min, "weight": -DURATION_SLOPE,
                  "points": -DURATION_SLOPE * (avg_duration_min - DURATION_MEAN_MIN)})
     return rows
+
+
+def describe(component: dict) -> str | None:
+    """A component's stat as a reader would say it — "12", "74%", "41 min" —
+    for a tooltip. None for the base, which has no stat behind it."""
+    key, value = component["key"], component["value"]
+    if key == "death_base":
+        return None
+    if key == "teamfight_participation":
+        return f"{value * 100:.0f}%"
+    if key == "duration":
+        return f"{value:.0f} min"
+    if key == "stuns_per_game":
+        return f"{value:.1f} s"
+    if key in ("gpm", "xpm") or key.endswith("_per_100"):
+        return f"{value:,.0f}"
+    return f"{value:g}" if float(value).is_integer() else f"{value:.1f}"
 
 
 def calculate_fantasy_points(player: dict) -> float:

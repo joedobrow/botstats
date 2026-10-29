@@ -68,7 +68,7 @@
       {% for p in everyone %}{% set c = p.fantasy_breakdown[i] %}
       {% set shown = c.points|round(1) %}
       <td class="num{% if shown > 0 %} win{% elif shown < 0 %} loss{% endif %}"
-          title="{{ '%g'|format(c.value|round(2)) }}">{{ "%+.1f"|format(shown) if shown else "·" }}</td>
+          {% if c.stat %}title="{{ row.label }}: {{ c.stat }}"{% endif %}>{{ "%+.1f"|format(shown) if shown else "·" }}</td>
       {% endfor %}
     </tr>
   {% endfor %}
