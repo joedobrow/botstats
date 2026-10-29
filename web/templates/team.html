@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "macros.html" import player_link, team_cell %}
+{% from "macros.html" import player_link, team_cell, result_word %}
 {% block content %}
 <p class="small"><a href="{{ season_url(season) }}">← {{ season.label }}</a></p>
 {% if notice %}<div class="errors"><p>{{ notice }}</p></div>{% endif %}
@@ -193,7 +193,7 @@
         </span>
         {% else %}{{ team_cell(season, opp, team_names) }}{% endif %}
       </td>
-      <td class="{{ 'win' if won else 'loss' }}">{{ "Win" if won else "Loss" }}</td>
+      <td class="{{ 'win' if won else 'loss' }}">{{ result_word(m.match_id, won) }}</td>
       <td class="num">{% if m.match_id > 0 %}{{ m.duration|duration }}{% else %}<span class="muted">—</span>{% endif %}</td>
       <td class="row-actions">
         <span class="action-slot">{% if m.match_id > 0 %}<a href="/match/{{ m.match_id }}">Details</a>

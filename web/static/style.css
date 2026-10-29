@@ -60,7 +60,6 @@
   --bar-shadow: 0 3px 10px rgba(60, 45, 20, 0.18);
   --bar-text-shadow: 0 1px 0 rgba(255, 250, 238, 0.5);
   --brand-ink: #1f1b15;
-  --hero-sub-ink: var(--accent);
 
   /* Book-cover tiles */
   --tile-hi: #8f3c2a;
@@ -126,7 +125,6 @@
     --bar-shadow: 0 3px 12px rgba(0, 0, 0, 0.45);
     --bar-text-shadow: none;
     --brand-ink: #ece2cf;
-    --hero-sub-ink: var(--tile-ink);
     --tile-hi: #b0503a;
     --tile-lo: #a24a36;
     --tile-edge: #7f3626;
@@ -180,7 +178,6 @@
   --bar-shadow: 0 3px 12px rgba(0, 0, 0, 0.45);
   --bar-text-shadow: none;
   --brand-ink: #ece2cf;
-  --hero-sub-ink: var(--tile-ink);
   --tile-hi: #b0503a;
   --tile-lo: #a24a36;
   --tile-edge: #7f3626;
@@ -344,7 +341,7 @@ td.statement { max-width: 320px; font-size: 0.9rem; }
 .with-avatar img { vertical-align: middle; margin-right: 8px; }
 img.avatar { width: 24px; height: 24px; border-radius: 50%; }
 img.avatar.big { width: 72px; height: 72px; border-radius: 8px; margin: 0; }
-img.hero { width: 24px; height: 24px; }
+img.hero { width: 30px; height: 30px; vertical-align: middle; }
 
 /* Sortable table headers */
 th[data-sort-type] { cursor: pointer; user-select: none; }
@@ -549,48 +546,9 @@ h1 .edit-form input[type=text] { font-size: 1.2rem; font-weight: 700; width: aut
   .mascot { float: none; display: block; width: 60%; margin: 8px auto 0; }
 }
 
-/* The home page's name block: the wordmark, the mascot and the league's name
-   centred as one lockup.
-
-   The artwork carries its own drop shadow, which is 25.8% of the image's
-   height of empty space below the letters — so bottom-aligning the boxes left
-   the letters floating well above the mascot's feet. Both are sized from one
-   width, which makes that gap a number rather than a guess: the image is
-   376/952 as tall as it is wide, and 0.258 of that is the shadow, so the
-   mascot comes up by 0.258 x 0.395 = 0.102 of the wordmark's width. */
-.hero {
-  --w: clamp(190px, 44vw, 420px);
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  justify-content: center;
-  gap: 0 clamp(6px, 2.5vw, 30px);
-  margin: 24px 0 26px;
-  font-size: inherit;
-}
 /* A themed <picture> is a wrapper for the media query, not a box: its img
    keeps whatever layout role it had — flex item, float. */
 picture.themed { display: contents; }
-
-.wordmark { flex: 0 0 var(--w); margin: 0; line-height: 0; }
-/* <picture> and <img> are inline by default, and an inline replaced element
-   sits on a baseline with descender space beneath it — 18px of it here, which
-   is exactly how far the letters missed the mascot's feet by. As blocks they
-   have no baseline to sit on and the box is the picture. */
-.wordmark picture, .wordmark img { display: block; width: 100%; height: auto; }
-.hero-mascot { flex: 0 0 auto; width: calc(var(--w) * 0.44); height: auto;
-               margin-bottom: calc(var(--w) * 0.102); }
-.hero-sub {
-  flex: 0 0 100%;
-  text-align: center;
-  margin-top: clamp(4px, 1.2vw, 12px);
-  font-weight: 800;
-  font-size: clamp(0.85rem, 2.5vw, 1.5rem);
-  letter-spacing: 0.02em;
-  line-height: 1.15;
-  letter-spacing: 0.01em;
-  color: var(--hero-sub-ink);
-}
 
 /* Home: a banner, then a feed of what is happening. A box is the panel the
    rest of the site uses, with a ruled head so a column of them reads as a

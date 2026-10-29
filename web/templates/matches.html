@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "macros.html" import hero_icon %}
+{% from "macros.html" import hero_icon, result_word %}
 {# A side is only a link when it's a team; an unattributed one has no page. #}
 {% macro side(season, captain) -%}
 {% if captain and season %}<a href="{{ team_url(season, captain) }}">{{ captain }}</a>
@@ -76,8 +76,8 @@
         {% else %}<span class="muted">—</span>{% endif %}
       </td>
       {% if result.account_id %}
-        <td class="with-avatar">{% if m.me and m.me.hero %}{{ hero_icon(m.me.hero) }}{{ m.me.hero.name }}{% endif %}</td>
-        <td class="{{ 'win' if m.me and m.me.won else 'loss' }}">{% if m.me %}{{ "Win" if m.me.won else "Loss" }}{% endif %}</td>
+        <td>{% if m.me and m.me.hero %}{{ hero_icon(m.me.hero, alone=True) }}{% endif %}</td>
+        <td class="{{ 'win' if m.me and m.me.won else 'loss' }}">{% if m.me %}{{ result_word(m.match_id, m.me.won, m.by_hand) }}{% endif %}</td>
         <td class="num">{% if m.me %}{{ m.me.kills }}/{{ m.me.deaths }}/{{ m.me.assists }}{% endif %}</td>
       {% else %}
         <td class="small">{{ "Radiant" if m.radiant_win else "Dire" }}</td>
