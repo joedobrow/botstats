@@ -70,8 +70,23 @@
 {%- endmacro %}
 
 {# Season status tag; "Signups open" links to the signup form. #}
-{% macro season_status(season) -%}
-{% if season.signups_open %}<a class="tag status-signups" href="{{ season_url(season) }}/signup">{{ season.status_label }}</a>
+{# A season's status pill. For an admin (pass csrf and next) it opens a menu
+   of the statuses, each a button that sets it. #}
+{% macro season_status(season, csrf=None, next=None) -%}
+{% if csrf %}
+<details class="status-menu">
+  <summary class="tag status-{{ season.status }}" title="Change status">{{ season.status_label }} ▾</summary>
+  <form method="post" action="/admin/status" class="status-options">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="hidden" name="season_id" value="{{ season.id }}">
+    <input type="hidden" name="division_id" value="{{ season.division_id }}">
+    <input type="hidden" name="next" value="{{ next }}">
+    {% for key, label in SEASON_STATUSES.items() %}
+    <button name="status" value="{{ key }}"{% if key == season.status %} class="current" disabled{% endif %}>{{ label }}</button>
+    {% endfor %}
+  </form>
+</details>
+{%- elif season.signups_open %}<a class="tag status-signups" href="{{ season_url(season) }}/signup">{{ season.status_label }}</a>
 {%- else %}<span class="tag status-{{ season.status }}">{{ season.status_label }}</span>{% endif %}
 {%- endmacro %}
 

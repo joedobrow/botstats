@@ -370,6 +370,16 @@ tfoot tr.total th, tfoot tr.total td {
 .tag.status-signups { background: var(--open-bg); color: var(--open-text); }
 a.tag.status-signups:hover { text-decoration: underline; }
 .tag.status-active { background: var(--accent); color: var(--accent-text); }
+.status-menu { position: relative; display: inline-block; }
+.status-menu > summary { cursor: pointer; list-style: none; }
+.status-menu > summary::-webkit-details-marker { display: none; }
+.status-options { position: absolute; z-index: 10; top: calc(100% + 4px); left: 0;
+                  display: flex; flex-direction: column; min-width: 10em; padding: 4px;
+                  background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+                  box-shadow: 0 4px 14px rgba(0, 0, 0, .18); }
+.status-options button { border: 0; background: none; text-align: left; padding: 5px 10px; white-space: nowrap; }
+.status-options button:hover:not(:disabled) { background: var(--tag-bg); }
+.status-options button.current { color: var(--muted); cursor: default; font-weight: 600; }
 .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin: 18px 0; overflow-x: auto; }
 .tabs a { padding: 8px 14px; color: var(--muted); border-bottom: 2px solid transparent; white-space: nowrap; font-weight: 500; }
 .tabs a.active { color: var(--text); border-bottom-color: var(--accent); }

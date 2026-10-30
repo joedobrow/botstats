@@ -251,6 +251,17 @@ document.querySelectorAll(".editable").forEach(function (box) {
   form.querySelector(".edit-cancel").addEventListener("click", close);
   input.addEventListener("keydown", function (e) { if (e.key === "Escape") close(); });
 });
+
+// Status menus close on a click elsewhere or Escape.
+function closeStatusMenus(except) {
+  document.querySelectorAll("details.status-menu[open]").forEach(function (d) {
+    if (d !== except) d.open = false;
+  });
+}
+document.addEventListener("click", function (e) {
+  closeStatusMenus(e.target.closest && e.target.closest("details.status-menu"));
+});
+document.addEventListener("keydown", function (e) { if (e.key === "Escape") closeStatusMenus(null); });
 </script>
 <footer class="wrap muted">Match data from OpenDota and Windrun.io.</footer>
 </body>

@@ -1814,7 +1814,8 @@ async def admin_set_status(request: web.Request):
         raise web.HTTPBadRequest(text="Unknown status.")
     season = _form_season(data)
     store.set_status(season["id"], season["division_id"], data["status"])
-    raise web.HTTPFound(_safe_next(data.get("next")) if data.get("next") else "/admin")
+    raise _go(_safe_next(data.get("next")) if data.get("next") else "/admin",
+              f"{season['label']}: {store.SEASON_STATUSES[data['status']]}.")
 
 
 @routes.post("/admin/division")

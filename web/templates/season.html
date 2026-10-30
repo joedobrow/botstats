@@ -7,7 +7,7 @@
     <div class="muted small">{{ season.division }} ·
       <a href="https://www.dotabuff.com/esports/leagues/{{ season.id }}" rel="noopener"
          title="This season's Dota league on Dotabuff">League {{ season.id }}</a></div>
-    <div class="muted small">{{ "Started" if season.started else "Starts" }} {{ season_start(season, csrf, is_uberadmin, path) }} · {{ season_status(season) }}</div>
+    <div class="muted small">{{ "Started" if season.started else "Starts" }} {{ season_start(season, csrf, is_uberadmin, path) }} · {{ season_status(season, csrf, path) if is_admin else season_status(season) }}</div>
   </div>
   <div class="actions">
     {# The draft room is worth finding before it starts, not only once it has. #}
