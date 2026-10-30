@@ -99,8 +99,6 @@
       Still to place: {% for t in bracket.unplaced %}<span class="team-chip" draggable="true"
         data-captain="{{ t.captain }}">{{ t.name }}</span>{% endfor %}</p>
     {% endif %}
-    <p class="muted small">Best of {{ bracket.best_of }} — first to {{ bracket.needed }}. Rounds after
-      the first fill themselves in from the games, so a corrected result redraws the bracket.</p>
   {% endif %}
 
 {% elif tab == "matchups" %}
