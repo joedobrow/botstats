@@ -1295,6 +1295,39 @@ async def player_recheck(request: web.Request):
     raise _go(f"/player/{account_id}", notice)
 
 
+@routes.post(r"/player/{account_id:\d+}/accounts")
+async def player_accounts(request: web.Request):
+    """Link another account to this player, or (with `remove`) undo a link:
+    the site's side of /set_player add_account."""
+    import rating_group
+    from player_api import account_id_from
+
+    _require_admin(request)
+    account_id = int(request.match_info["account_id"])
+    data = await request.post()
+    user = request.get("user") or {}
+    by = user.get("steam_name") or str(user.get("account_id") or "site")
+    try:
+        if data.get("remove"):
+            other = _form_account(data, "remove")
+            # Every link points at the person's main account. Taking the main
+            # away from one of their others is that other leaving.
+            main = db.person_of(account_id)
+            db.unlink_accounts(account_id if other == main else other, main)
+            notice = f"Unlinked {other}."
+        else:
+            other = account_id_from(data.get("account", ""))
+            if other is None:
+                raise web.HTTPBadRequest(text="That isn't an account id or a profile link.")
+            db.link_account(account_id, other, set_by_name=by)
+            notice = f"Linked {other}."
+    except ValueError as e:
+        raise _go(f"/player/{account_id}", str(e))
+    for aid in {account_id, other, db.person_of(account_id)}:
+        rating_group.recompute(aid)
+    raise _go(f"/player/{account_id}", notice)
+
+
 @routes.get("/match/{match_id}")
 async def match_page(request: web.Request):
     try:

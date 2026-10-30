@@ -20,6 +20,7 @@ model's weights, never leaves the bot.
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 
 STEAM64_OFFSET = 76561197960265728
@@ -27,8 +28,12 @@ STALE_DAYS = 30
 
 
 def account_id_from(raw: str) -> int | None:
-    """A Dotabuff/OpenDota account id, or a Steam64 id converted to one."""
+    """A Dotabuff/OpenDota account id, or a Steam64 id converted to one. A
+    profile link (Dotabuff, OpenDota, Windrun, Stratz, Steam) gives its id."""
     raw = (raw or "").strip()
+    link = re.search(r"/(?:players|profiles)/(\d+)", raw)
+    if link:
+        raw = link.group(1)
     if not raw.isdigit():
         return None
     n = int(raw)

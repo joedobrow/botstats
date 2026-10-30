@@ -207,6 +207,32 @@ def main() -> int:
           str(profile["history"]))
     check("and the title they won on it", profile["titles"] == 1, str(profile["titles"]))
 
+    # Linking accounts, as the site's player page and /set_player both do.
+    A, B, C, D = 9200, 9201, 9202, 9203
+    check("linking files the account under the person", db.link_account(A, B) == A and db.person_of(B) == A)
+    check("linking from a second account files it under their main",
+          db.link_account(B, C) == A and db.person_of(C) == A)
+    for label, args in (("an account already theirs", (A, C)), ("the same account", (A, A)),
+                        ("someone else's account", (MATE, B))):
+        try:
+            db.link_account(*args)
+            check(f"refuses {label}", False)
+        except ValueError:
+            check(f"refuses {label}", True)
+    db.link_account(D, MATE)
+    db.link_account(A, D)
+    check("an account with its own second accounts brings them along",
+          db.person_of(D) == A and db.person_of(MATE) == A, str(db.alt_links()))
+    db.unlink_accounts(A, MATE)
+    db.unlink_accounts(D, A)
+    check("unlinking takes the account out, whichever way it's asked",
+          db.person_of(MATE) == MATE and db.person_of(D) == D and db.person_of(B) == A)
+    from player_api import account_id_from
+    check("a profile link gives its account id",
+          account_id_from("https://www.dotabuff.com/players/87481127") == 87481127
+          and account_id_from("https://steamcommunity.com/profiles/76561198047746855") == 87481127
+          and account_id_from("nope") is None)
+
     print()
     if failures:
         print(f"{len(failures)} FAILED: " + ", ".join(failures))

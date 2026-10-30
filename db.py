@@ -2845,6 +2845,44 @@ def upsert_skill_override(
         """, (account_id, wr, rt, lb, nk, nt, ir, ha, alt, dov, set_by_user_id, set_by_name, now))
 
 
+def link_account(main: int, other: int, set_by_name: str | None = None,
+                 set_by_user_id: int | None = None) -> int:
+    """Say `other` is one more account of the person who plays on `main`.
+    Returns the account the link was filed under: main's own main if main is
+    itself a second account, so one person is always one group with one main.
+
+    Raises ValueError, with a sentence for the admin, when the link would
+    join someone to an account that already belongs to somebody else. An
+    account that had second accounts of its own brings them along.
+    Callers re-pool the rating afterwards (rating_group.recompute).
+    """
+    links = alt_links()
+    main = links.get(main, main)
+    if other == main or links.get(other) == main:
+        raise ValueError(f"{other} is already one of their accounts.")
+    if other in links:
+        raise ValueError(f"{other} is already linked to {links[other]}. Remove that link first.")
+    upsert_skill_override(account_id=other, windrun_rating=None, rank_tier=None, leaderboard_rank=None,
+                          note=None, alt_account_for=main,
+                          set_by_user_id=set_by_user_id, set_by_name=set_by_name)
+    # Stats resolve an account to its owner in one hop, so other's own second
+    # accounts move to main rather than hang off an account that is now one.
+    with _conn() as conn:
+        conn.execute("UPDATE skill_overrides SET alt_account_for = ? WHERE alt_account_for = ?", (main, other))
+    return main
+
+
+def unlink_accounts(a: int, b: int) -> None:
+    """Undo the link between two accounts, whichever of them points at the
+    other. Callers re-pool both (rating_group.recompute)."""
+    links = alt_links()
+    alt = a if links.get(a) == b else b if links.get(b) == a else None
+    if alt is None:
+        raise ValueError(f"{a} and {b} aren't linked.")
+    with _conn() as conn:
+        conn.execute("UPDATE skill_overrides SET alt_account_for = NULL WHERE account_id = ?", (alt,))
+
+
 def delete_skill_override(account_id: int) -> bool:
     """Remove any override row for this account. Returns True if a row was removed."""
     with _conn() as conn:

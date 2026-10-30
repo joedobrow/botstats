@@ -109,11 +109,23 @@
         {% if breakdown.history_hidden %}<span class="muted">hidden</span>
         {% else %}{{ breakdown.ranked_last_year if breakdown.ranked_last_year is not none else "?" }} in the last year ·
           {{ breakdown.ranked_all_time if breakdown.ranked_all_time is not none else "?" }} all time{% endif %}</td></tr>
-      {% if breakdown.linked_accounts %}
       <tr><th>Other accounts</th><td>
-        {% for a in breakdown.linked_accounts %}<a href="/player/{{ a }}">{{ a }}</a>{% if not loop.last %} · {% endif %}{% endfor %}
-        <div class="muted small">{{ breakdown.group_explanation }}</div></td></tr>
-      {% endif %}
+        <div class="linked-accounts">
+          {% for a in also %}
+          <form method="post" action="/player/{{ account_id }}/accounts" class="chip">
+            <input type="hidden" name="csrf" value="{{ csrf }}">
+            <a href="/player/{{ a.account_id }}">{{ a.name }}</a>{% if a.name != a.account_id|string %} <span class="muted small">{{ a.account_id }}</span>{% endif %}
+            <button class="linklike" name="remove" value="{{ a.account_id }}" title="Unlink"
+                    onclick='return confirm({{ ("Unlink " ~ a.name ~ " (" ~ a.account_id ~ ")?")|tojson }})'>×</button>
+          </form>
+          {% endfor %}
+          <form method="post" action="/player/{{ account_id }}/accounts" class="inline">
+            <input type="hidden" name="csrf" value="{{ csrf }}">
+            <input type="text" name="account" required placeholder="Account id or profile link" aria-label="Another account">
+            <button>Link</button>
+          </form>
+        </div>
+        {% if breakdown.group_explanation %}<div class="muted small">{{ breakdown.group_explanation }}</div>{% endif %}</td></tr>
       {% if breakdown.overrides %}
       <tr><th>Overrides</th><td>
         {% for k, v in breakdown.overrides.items() %}<code>{{ k }}={{ v }}</code>{% if not loop.last %} · {% endif %}{% endfor %}

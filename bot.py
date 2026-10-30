@@ -10,7 +10,8 @@ from config import DISCORD_TOKEN, ADMIN_USER_ID, LOOKUP_CHANNEL_IDS, SITE_URL
 from fetcher import fetch_and_store_matches_for_division, fetch_and_store_season
 from db import (init_db, get_division, get_guild_division, update_division,
                 get_all_divisions, get_scold_channel, set_guild_settings, get_guild_settings,
-                get_season, upsert_season, set_current_season, season_label, ranked, qualified)
+                get_season, upsert_season, set_current_season, season_label, ranked, qualified,
+                link_account)
 from formatters import EMBED_COLOUR, format_leaderboard, format_player_stats, format_team_stats
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -1373,15 +1374,10 @@ async def _resolve_player_query(interaction: discord.Interaction, q: str) -> tup
     q = (q or "").strip()
     if not q:
         return None, None, "⚠️ Empty query."
-    if q.isdigit():
-        n = int(q)
-        # Steam64 IDs (17 digits, > offset) — convert to steam32/account_id
-        # by subtracting the steam base. Users often paste these from a
-        # Steam profile URL instead of the friend-ID from Dotabuff.
-        STEAM64_OFFSET = 76561197960265728
-        if n > STEAM64_OFFSET:
-            n -= STEAM64_OFFSET
-        return n, None, None
+    # An account id, a Steam64 id or a profile link.
+    from player_api import account_id_from
+    if account_id_from(q) is not None:
+        return account_id_from(q), None, None
 
     from db import _conn, get_guild_divisions
     # Search every division in this server: a name could be anyone's in it.
@@ -1633,15 +1629,11 @@ async def set_player(
                 ephemeral=True,
             )
             return
-        # Stats and ratings both resolve one account to its owner in a single
-        # hop, so a chain of second accounts would leave games filed under an
-        # account that is itself filed elsewhere. One group, one main.
-        chained = (get_skill_override(parsed_alt_id) or {}).get("alt_account_for")
-        if chained:
-            await interaction.followup.send(
-                f"⚠️ `{parsed_alt_id}` is itself listed as a second account of `{chained}` — "
-                f"point at `{chained}` instead, so all their accounts sit in one group.",
-                ephemeral=True)
+        try:
+            parsed_alt_id = link_account(parsed_alt_id, account_id, set_by_name=interaction.user.display_name,
+                                         set_by_user_id=interaction.user.id)
+        except ValueError as e:
+            await interaction.followup.send(f"⚠️ {e}", ephemeral=True)
             return
 
     # add_account is alt_account_for from the other side: "this player also
@@ -1658,26 +1650,12 @@ async def set_player(
             await interaction.followup.send(
                 "⚠️ `add_account:` can't point at the same account.", ephemeral=True)
             return
-        existing_link = (get_skill_override(other_id) or {}).get("alt_account_for")
-        if existing_link and existing_link != account_id:
-            await interaction.followup.send(
-                f"⚠️ `{other_id}` is already linked to `{existing_link}`. Clear that first "
-                f"(`/set_player name:{other_id} clear:True`).", ephemeral=True)
+        try:
+            link_account(account_id, other_id, set_by_name=interaction.user.display_name,
+                         set_by_user_id=interaction.user.id)
+        except ValueError as e:
+            await interaction.followup.send(f"⚠️ {e}", ephemeral=True)
             return
-        this_link = (get_skill_override(account_id) or {}).get("alt_account_for")
-        if this_link:
-            await interaction.followup.send(
-                f"⚠️ `{account_id}` is itself listed as a second account of `{this_link}` — "
-                f"add the new one to `{this_link}` instead, so all their accounts sit in one group.",
-                ephemeral=True)
-            return
-        upsert_skill_override(
-            account_id=other_id,
-            windrun_rating=None, rank_tier=None, leaderboard_rank=None, note=None,
-            alt_account_for=account_id,
-            set_by_user_id=interaction.user.id,
-            set_by_name=interaction.user.display_name,
-        )
         added_account = (other_id, other_name or str(other_id))
 
     upsert_skill_override(

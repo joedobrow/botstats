@@ -742,6 +742,7 @@ a.tile:focus-visible { outline: 3px solid var(--accent); outline-offset: 4px; }
 .chips { list-style: none; display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 8px 0 12px; padding: 0; }
 .chips li { display: flex; align-items: center; gap: 6px; }
 .chip { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.linked-accounts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; }
 .chips.positions { gap: 6px 20px; }
 
 /* An award opens where it sits — no request, and it still works with the
