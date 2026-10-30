@@ -156,7 +156,7 @@ The bot's web server (port 8080) also serves a small league site modeled on rd2l
 - `/seasons`, `/season/<league_id>/<division>`: every season of every division, with Teams, Matches, Leaders and Signups tabs (`/season/<league_id>` goes to the division, or offers a choice when several play in it)
 - `/players`, `/player/<account_id>`: player search and profiles (league stats per season, heroes, recent matches)
 - `/match/<match_id>`: scoreboard with fantasy points
-- `/`: tiles for Sign-Up (active only while a season has signups open), Seasons, Players and Info (`/info` → Rules, About)
+- `/`: tiles for Sign-Up (active only while a season has signups open), Seasons and Players. Rules and About are in the header
 - `/settings`: Steam log in and out, Discord name, and your signups. Logged-in players can sign up for seasons with open signups
 - `/subs`: the sub finder — players with league games who aren't on a current team, rated at or under the player being replaced
 - `/admin`: create seasons, set each season's status (Upcoming, Signups open, Drafting, Active, Completed; unset seasons default to Active for the newest started one and Completed before it), rename divisions, edit the About and Rules text, download signups as CSV

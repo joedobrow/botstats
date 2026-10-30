@@ -43,14 +43,6 @@
 {% endif %}
 {%- endmacro %}
 
-{% macro tile(href, label, sub="", disabled=False) -%}
-{% if disabled %}
-<span class="tile disabled" aria-disabled="true"><span class="tile-label">{{ label }}</span>{% if sub %}<span class="tile-sub">{{ sub }}</span>{% endif %}</span>
-{% else %}
-<a class="tile" href="{{ href }}"><span class="tile-label">{{ label }}</span>{% if sub %}<span class="tile-sub">{{ sub }}</span>{% endif %}</a>
-{% endif %}
-{%- endmacro %}
-
 {# A season name admins can click to rename in place. #}
 {% macro season_name(season, csrf, is_admin, next) -%}
 {% if is_admin %}

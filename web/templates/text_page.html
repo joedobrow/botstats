@@ -1,6 +1,5 @@
 {% extends "base.html" %}
 {% block content %}
-<p class="small"><a href="/info">← Info</a></p>
 <h1>{{ title }}</h1>
 <div class="prose">
 {% if text.strip() %}{{ text|markdown }}{% else %}<p class="muted">Nothing here yet.</p>{% endif %}

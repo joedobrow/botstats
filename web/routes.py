@@ -364,7 +364,8 @@ async def signup_hub(request: web.Request):
 
 @routes.get("/info")
 async def info(request: web.Request):
-    return render(request, "info.html", title="Info")
+    """Gone: Rules and About are in the header now. Old links land on About."""
+    raise web.HTTPMovedPermanently("/about")
 
 
 @routes.get("/about")
