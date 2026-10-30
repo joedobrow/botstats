@@ -1174,6 +1174,8 @@ async def fantasy_player_page(request: web.Request):
     back = "/fantasy" + ("?" + urlencode(keep) if keep else "")
     return render(request, "fantasy_player.html", title=player["name"], player=player,
                   season=season, back=back, field=table["field"],
+                  # Filtered to a position already, the field is that position.
+                  position_field=None if position else table["field_by_position"].get(player.get("role_position")),
                   rating=store.player_ratings().get(person),
                   duration_mean=fantasy.DURATION_MEAN_MIN)
 

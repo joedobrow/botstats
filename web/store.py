@@ -1435,16 +1435,23 @@ def fantasy_table(season: dict | None, stat: str = "fantasy_points", week: int |
         r["breakdown"] = fantasy.breakdown(r)
         r["qualifies"] = (r.get("games_played") or 0) >= threshold
     # The field's average for each component, so a player's row can be read as
-    # "ahead here, behind there" rather than as twenty-one bare numbers.
-    field: dict[str, dict] = {}
-    for r in qualified:
-        for c in r["breakdown"]:
-            f = field.setdefault(c["key"], {"label": c["label"], "unit": c["unit"],
-                                            "weight": c["weight"], "value": 0.0, "points": 0.0})
-            f["value"] += c["value"]; f["points"] += c["points"]
-    for f in field.values():
-        f["value"] /= max(len(qualified), 1)
-        f["points"] /= max(len(qualified), 1)
+    # "ahead here, behind there" rather than as twenty-one bare numbers. And
+    # each position's, since a 5 is better measured against other 5s.
+    def average(group: list[dict]) -> dict[str, dict]:
+        out: dict[str, dict] = {}
+        for r in group:
+            for c in r["breakdown"]:
+                f = out.setdefault(c["key"], {"label": c["label"], "unit": c["unit"],
+                                              "weight": c["weight"], "value": 0.0, "points": 0.0})
+                f["value"] += c["value"]; f["points"] += c["points"]
+        for f in out.values():
+            f["value"] /= max(len(group), 1)
+            f["points"] /= max(len(group), 1)
+        return out
+
+    field = average(qualified)
+    field_by_position = {p: average([r for r in qualified if r.get("role_position") == p])
+                         for p in {r.get("role_position") for r in qualified} if p}
 
     # Everyone gets a name and a comparison, so that looking up a player who
     # hasn't played enough to rank still answers the question — the ranking is
@@ -1462,7 +1469,8 @@ def fantasy_table(season: dict | None, stat: str = "fantasy_points", week: int |
     for r in qualified:
         r["stat_text"] = format_stat_value(r, stat)
     qualified = [r for r in qualified if r["stat_text"] is not None]
-    return {"rows": qualified, "everyone": rows, "field": field, "threshold": threshold,
+    return {"rows": qualified, "everyone": rows, "field": field,
+            "field_by_position": field_by_position, "threshold": threshold,
             "max_games": max_games, "weights": fantasy.WEIGHTS, "stat": stat,
             "relaxed": relaxed, "asked_min_games": asked,
             "default_min_games": DEFAULT_MIN_GAMES}

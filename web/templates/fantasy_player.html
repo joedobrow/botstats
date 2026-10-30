@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "macros.html" import pos %}
 {% block content %}
 <p class="small"><a href="{{ back }}">← Fantasy</a></p>
 
@@ -21,6 +22,7 @@
     <th data-sort-type="text">Component</th>
     <th class="num" data-sort-type="num" data-sort-first="desc">Their average</th>
     <th class="num" data-sort-type="num" data-sort-first="desc">Field average</th>
+    {% if position_field %}<th class="num" data-sort-type="num" data-sort-first="desc">{{ pos(player.role_position) }} average</th>{% endif %}
     <th class="num" data-sort-type="num">Worth</th>
     <th class="num" data-sort-type="num" data-sort-first="desc">Points</th>
     <th class="num" data-sort-type="num" data-sort-first="desc">vs the field</th>
@@ -31,6 +33,8 @@
       <td>{{ c.label }}{% if c.unit %} <span class="muted small">{{ c.unit }}</span>{% endif %}</td>
       <td class="num" data-sort="{{ c.value }}">{{ "%.2f"|format(c.value) }}</td>
       <td class="num muted" data-sort="{{ field[c.key].value }}">{{ "%.2f"|format(field[c.key].value) }}</td>
+      {% if position_field %}{% set pf = position_field.get(c.key) %}
+      <td class="num muted" data-sort="{{ pf.value if pf else '' }}">{{ "%.2f"|format(pf.value) if pf else "·" }}</td>{% endif %}
       <td class="num muted" data-sort="{{ c.weight }}">{{ "%+.3f"|format(c.weight) }}</td>
       <td class="num" data-sort="{{ c.points }}">{{ "%+.2f"|format(c.points) }}</td>
       <td class="num {{ 'win' if c.vs_field > 0.05 else ('loss' if c.vs_field < -0.05 else '') }}"
@@ -39,7 +43,7 @@
   {% endfor %}
   </tbody>
   <tfoot><tr class="total">
-    <th>Total</th><td></td><td></td><td></td>
+    <th>Total</th><td></td><td></td>{% if position_field %}<td></td>{% endif %}<td></td>
     <td class="num">{{ "%.1f"|format(player.fantasy_points) }}</td><td></td>
   </tr></tfoot>
 </table>
