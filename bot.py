@@ -6,7 +6,7 @@ from discord.ext import tasks
 import logging
 from datetime import datetime, timezone
 
-from config import DISCORD_TOKEN, ADMIN_USER_ID, LOOKUP_CHANNEL_IDS, SITE_URL
+from config import DISCORD_TOKEN, ADMIN_USER_ID, LOOKUP_CHANNEL_IDS, SITE_URL, TIP_URL
 from fetcher import fetch_and_store_matches_for_division, fetch_and_store_season
 from db import (init_db, get_division, get_guild_division, update_division,
                 get_all_divisions, get_scold_channel, set_guild_settings, get_guild_settings,
@@ -2163,8 +2163,7 @@ async def hi_vs_low(interaction: discord.Interaction, players: str, public: bool
 @tree.command(name="tipjar", description="Support the bot creator")
 async def tipjar(interaction: discord.Interaction):
     await interaction.response.send_message(
-        "If you're enjoying the bot, consider tipping the creator!\n"
-        "https://venmo.com/Joe-Dobrow",
+        f"If you're enjoying the bot, consider tipping the creator!\n{TIP_URL}",
         ephemeral=True,
     )
 
@@ -2645,6 +2644,15 @@ async def _setup_once():
             logger.info("Recomputed %d multi-account rating group(s)", n)
     except Exception:
         logger.exception("Group rating recompute failed at startup")
+
+    # The site tells the owner things (feedback) through the bot, by DM.
+    if ADMIN_USER_ID:
+        from web import notify
+
+        async def dm_owner(text: str) -> None:
+            owner = bot.get_user(ADMIN_USER_ID) or await bot.fetch_user(ADMIN_USER_ID)
+            await owner.send(text[:2000])
+        notify.send = dm_owner
 
     # The web server: stream cards, the Sheets API and the league website.
     try:

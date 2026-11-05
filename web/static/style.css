@@ -214,10 +214,12 @@ code { background: var(--tag-bg); padding: 0 4px; border-radius: 4px; }
 
 .wrap { max-width: 1080px; margin: 0 auto; padding: 0 16px; }
 main.wrap { padding-bottom: 48px; min-height: 70vh; }
-footer.wrap { padding-top: 16px; padding-bottom: 32px; font-size: 0.85rem; border-top: 1px solid var(--border); }
+footer.wrap { padding-top: 16px; padding-bottom: 32px; font-size: 0.85rem; border-top: 1px solid var(--border);
+              display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 24px; }
 .muted { color: var(--muted); }
 .small { font-size: 0.85rem; }
 .nowrap { white-space: nowrap; }
+.prewrap { white-space: pre-wrap; }
 
 /* The masthead: a deeper band of the same paper, ruled in red, now carrying
    the whole site's navigation rather than two links. */
@@ -279,6 +281,7 @@ button.linklike.danger { color: var(--loss); }
 form.inline { display: inline; }
 .form { display: flex; flex-direction: column; gap: 14px; max-width: 560px; margin-bottom: 20px; }
 .form.narrow { max-width: 360px; }
+.form.medium { max-width: 560px; }
 .form.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); max-width: none; align-items: end; }
 .form label { display: flex; flex-direction: column; gap: 4px; font-weight: 500; }
 .form label.check { flex-direction: row; align-items: center; gap: 8px; font-weight: 400; }

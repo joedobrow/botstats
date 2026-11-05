@@ -105,3 +105,6 @@ ROLE_LABELS: dict[int, str] = {
     4: "Roaming (Pos 4)",
     5: "Hard Support (Pos 5)",
 }
+
+# Where the site's "Tip jar" and the bot's /tipjar send people.
+TIP_URL: str = os.environ.get("TIP_URL", "https://venmo.com/Joe-Dobrow")

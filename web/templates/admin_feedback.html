@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% from "macros.html" import player_link %}
+{% block content %}
+<p class="small"><a href="/admin">← Admin</a></p>
+<h1>Feedback</h1>
+<div class="scroll">
+<table>
+  <thead><tr><th>Sent</th><th>Message</th><th>From</th><th>Page</th></tr></thead>
+  <tbody>
+  {% for f in feedback %}
+    <tr>
+      <td class="nowrap">{{ f.created_at|date("%b %-d, %-I:%M %p") }}</td>
+      <td class="prewrap">{{ f.message }}</td>
+      <td>{% if f.account_id %}{{ player_link(f.account_id, names[f.account_id].name) }}{% endif %}
+        {% if f.contact %}<div class="muted small">{{ f.contact }}</div>{% endif %}</td>
+      <td>{% if f.page %}<a href="{{ f.page }}">{{ f.page }}</a>{% endif %}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="4" class="muted">No feedback yet.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}

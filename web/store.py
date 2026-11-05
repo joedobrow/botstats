@@ -87,6 +87,15 @@ def init_site_tables() -> None:
     migrations in db.py, which run first (db.init_db)."""
     with _conn() as conn:
         conn.executescript("""
+            CREATE TABLE IF NOT EXISTS site_feedback (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at  TEXT NOT NULL,
+                account_id  INTEGER,            -- who sent it, when logged in
+                contact     TEXT,               -- how to reach them, if they said
+                page        TEXT,               -- the page they came from
+                message     TEXT NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS site_users (
                 account_id     INTEGER PRIMARY KEY,   -- 32-bit Dota account id
                 steam_name     TEXT,
@@ -2027,6 +2036,20 @@ def get_text(key: str) -> str:
     with _conn() as conn:
         row = conn.execute("SELECT value FROM site_text WHERE key = ?", (key,)).fetchone()
     return row["value"] if row else DEFAULT_TEXT.get(key, "")
+
+
+def add_feedback(message: str, *, contact: str | None, page: str | None,
+                 account_id: int | None) -> None:
+    with _conn() as conn:
+        conn.execute("INSERT INTO site_feedback (created_at, account_id, contact, page, message) "
+                     "VALUES (?, ?, ?, ?, ?)", (_now(), account_id, contact, page, message))
+
+
+def list_feedback(limit: int = 200) -> list[dict]:
+    """The newest feedback first."""
+    with _conn() as conn:
+        return [dict(r) for r in conn.execute(
+            "SELECT * FROM site_feedback ORDER BY id DESC LIMIT ?", (limit,))]
 
 
 def set_text(key: str, value: str) -> None:

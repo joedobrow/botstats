@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Feedback</h1>
+<form method="post" class="form medium">
+  {% if csrf %}<input type="hidden" name="csrf" value="{{ csrf }}">{% endif %}
+  <input type="hidden" name="from" value="{{ back }}">
+  <label>Message
+    <textarea name="message" rows="7" maxlength="4000" required autofocus
+              placeholder="A bug, an idea, something that's wrong"></textarea></label>
+  <label>How to reach you <span class="muted small">(optional)</span>
+    <input type="text" name="contact" maxlength="200" value="{{ contact }}" placeholder="Discord name or email"></label>
+  <label class="visually-hidden" aria-hidden="true">Website
+    <input type="text" name="website" tabindex="-1" autocomplete="off"></label>
+  <div class="actions"><button class="primary">Send</button></div>
+</form>
+{% endblock %}

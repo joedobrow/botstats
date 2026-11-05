@@ -18,9 +18,9 @@ from aiohttp import web
 from markupsafe import Markup
 
 import db
-from config import GAME_MODE_FILTERS, LEAGUE_TZ, REGION_CLUSTERS, STEAM_API_KEY
+from config import GAME_MODE_FILTERS, LEAGUE_TZ, REGION_CLUSTERS, STEAM_API_KEY, TIP_URL
 from player_api import account_id_from
-from web import draft, markup, steam, store, uploads
+from web import draft, markup, notify, steam, store, uploads
 
 TEMPLATE_DIR = Path(__file__).parent / "templates"
 STATIC_DIR = Path(__file__).parent / "static"
@@ -47,8 +47,13 @@ routes = web.RouteTableDef()
 # Rendering helpers
 # ---------------------------------------------------------------------------
 
-def _fmt_date(ts: int | None, fmt: str = "%b %-d, %Y") -> str:
-    return datetime.fromtimestamp(ts, LEAGUE_TZ).strftime(fmt) if ts else ""
+def _fmt_date(ts: int | str | None, fmt: str = "%b %-d, %Y") -> str:
+    """A unix time, or an ISO time as the site's tables store them, in the
+    league's time zone."""
+    if not ts:
+        return ""
+    when = datetime.fromisoformat(ts) if isinstance(ts, str) else datetime.fromtimestamp(ts, LEAGUE_TZ)
+    return when.astimezone(LEAGUE_TZ).strftime(fmt)
 
 
 def _fmt_duration(seconds: int | float | None) -> str:
@@ -83,7 +88,8 @@ def rings(account_id: int | None) -> Markup:
 
 
 env.globals.update(season_url=season_url, team_url=team_url, hero=store.hero, rings=rings,
-                   POSITION_NAMES=POSITION_NAMES, SEASON_STATUSES=store.SEASON_STATUSES)
+                   POSITION_NAMES=POSITION_NAMES, SEASON_STATUSES=store.SEASON_STATUSES,
+                   TIP_URL=TIP_URL)
 
 
 def _asset_version() -> int:
@@ -152,12 +158,22 @@ async def session_middleware(request: web.Request, handler):
         request["csrf"] = sess["csrf"]
         request["is_uberadmin"] = sess["account_id"] in UBERADMIN_IDS
         request["is_admin"] = request["is_uberadmin"] or store.is_admin(sess["account_id"])
-    if request.method == "POST" and not request.path.startswith("/api/"):
+    # Feedback is open to visitors who never logged in, so they have no
+    # session to carry a token; the route checks the post came from this site.
+    open_to_visitors = request.path == "/feedback" and not sess
+    if request.method == "POST" and not request.path.startswith("/api/") and not open_to_visitors:
         form = await request.post()
         if not sess or form.get("csrf") != sess["csrf"]:
             return render(request, "message.html", status=403, title="Expired form",
                           message="That form expired. Go back, reload the page and try again.")
     return await handler(request)
+
+
+def _client_ip(request: web.Request) -> str:
+    # Fly puts the real address in Fly-Client-IP; the socket is its proxy.
+    return (request.headers.get("Fly-Client-IP")
+            or request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+            or (request.remote or ""))
 
 
 def _require_user(request: web.Request) -> dict:
@@ -1705,6 +1721,56 @@ async def admin_page(request: web.Request):
                   about=store.get_text("about"), rules=store.get_text("rules"))
 
 
+@routes.get("/feedback")
+async def feedback_page(request: web.Request):
+    user = request.get("user")
+    contact = (store.player_discord(user["account_id"]) or user.get("steam_name")) if user else ""
+    back = _safe_next(request.query.get("from") or "/")
+    return render(request, "feedback.html", title="Feedback", contact=contact or "", back=back)
+
+
+_feedback_times: dict[str, list[float]] = {}
+FEEDBACK_PER_HOUR = 5
+
+
+@routes.post("/feedback")
+async def feedback_submit(request: web.Request):
+    """Save it and DM it to the owner. Anyone may send it, so: it has to come
+    from a page of this site, a field people can't see must stay empty, and
+    one address gets a few an hour."""
+    data = await request.post()
+    origin = request.headers.get("Origin") or request.headers.get("Referer") or ""
+    if urlparse(origin).netloc != request.host:
+        raise web.HTTPForbidden(text="Send feedback from the site's own form.")
+    back = _safe_next(data.get("from") or "/")
+    if data.get("website"):          # the trap field: only a bot fills it in
+        raise _go(back, "Thanks, sent.")
+    message = (data.get("message") or "").strip()[:4000]
+    if not message:
+        raise web.HTTPBadRequest(text="The message is empty.")
+    ip, now = _client_ip(request), time.time()
+    recent = [t for t in _feedback_times.get(ip, []) if now - t < 3600]
+    if len(recent) >= FEEDBACK_PER_HOUR:
+        raise web.HTTPBadRequest(text="That's a lot of feedback for one hour. Try again later.")
+    _feedback_times[ip] = recent + [now]
+    user = request.get("user")
+    contact = (data.get("contact") or "").strip()[:200] or None
+    store.add_feedback(message, contact=contact, page=back,
+                       account_id=user["account_id"] if user else None)
+    who = contact or (user and (user.get("steam_name") or str(user["account_id"]))) or "someone"
+    await notify.owner(f"📬 **Feedback** from {who} (on {back}):\n{message}")
+    raise _go(back, "Thanks, sent.")
+
+
+@routes.get("/admin/feedback")
+async def admin_feedback(request: web.Request):
+    if not request.get("is_admin"):
+        return render(request, "admin_denied.html", title="Admin")
+    feedback = store.list_feedback()
+    names = store.player_identities([f["account_id"] for f in feedback if f["account_id"]])
+    return render(request, "admin_feedback.html", title="Feedback", feedback=feedback, names=names)
+
+
 @routes.get("/admin/traffic")
 async def admin_traffic(request: web.Request):
     """Who is reading the site. Admin-only: it is the league's data, not the
@@ -1998,11 +2064,7 @@ async def view_middleware(request: web.Request, handler):
         if (request.method == "GET" and response.status == 200
                 and response.content_type == "text/html"):
             user = request.get("user")
-            # Fly puts the real address in Fly-Client-IP; the socket is its proxy.
-            ip = (request.headers.get("Fly-Client-IP")
-                  or request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
-                  or (request.remote or ""))
-            store.record_view(request.path, ip=ip,
+            store.record_view(request.path, ip=_client_ip(request),
                               user_agent=request.headers.get("User-Agent", ""),
                               referrer=request.headers.get("Referer", ""),
                               account_id=user["account_id"] if user else None)

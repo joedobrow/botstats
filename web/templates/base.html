@@ -263,6 +263,10 @@ document.addEventListener("click", function (e) {
 });
 document.addEventListener("keydown", function (e) { if (e.key === "Escape") closeStatusMenus(null); });
 </script>
-<footer class="wrap muted">Match data from OpenDota and Windrun.io.</footer>
+<footer class="wrap muted">
+  <span>Match data from OpenDota and Windrun.io.</span>
+  <span class="footer-links"><a href="/feedback?from={{ path|urlencode }}">Give feedback</a> ·
+    <a href="{{ TIP_URL }}" rel="noopener" target="_blank">Tip jar</a></span>
+</footer>
 </body>
 </html>
