@@ -620,6 +620,21 @@ def team_stats(season: dict) -> dict[str, dict]:
     return aggs
 
 
+def field_average(breakdowns: list[list[dict]]) -> dict[str, dict]:
+    """{part key: the average value and points} over these fantasy
+    breakdowns: what a player's or a team's score is read against."""
+    field: dict[str, dict] = {}
+    for parts in breakdowns:
+        for c in parts:
+            f = field.setdefault(c["key"], {"label": c["label"], "unit": c["unit"],
+                                            "weight": c["weight"], "value": 0.0, "points": 0.0})
+            f["value"] += c["value"]; f["points"] += c["points"]
+    for f in field.values():
+        f["value"] /= max(len(breakdowns), 1)
+        f["points"] /= max(len(breakdowns), 1)
+    return field
+
+
 def free_agents(season: dict) -> list[dict]:
     """Players not on any roster this season, best rating first — who a team
     can bring in. Someone drafted under any of their accounts is on a team,
@@ -1438,16 +1453,7 @@ def fantasy_table(season: dict | None, stat: str = "fantasy_points", week: int |
     # "ahead here, behind there" rather than as twenty-one bare numbers. And
     # each position's, since a 5 is better measured against other 5s.
     def average(group: list[dict]) -> dict[str, dict]:
-        out: dict[str, dict] = {}
-        for r in group:
-            for c in r["breakdown"]:
-                f = out.setdefault(c["key"], {"label": c["label"], "unit": c["unit"],
-                                              "weight": c["weight"], "value": 0.0, "points": 0.0})
-                f["value"] += c["value"]; f["points"] += c["points"]
-        for f in out.values():
-            f["value"] /= max(len(group), 1)
-            f["points"] /= max(len(group), 1)
-        return out
+        return field_average([r["breakdown"] for r in group])
 
     field = average(qualified)
     field_by_position = {p: average([r for r in qualified if r.get("role_position") == p])

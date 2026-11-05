@@ -25,7 +25,7 @@ first one somewhere both can reach (usually `db.py`) and call it from both place
 A season's id is its Dota league id, and **divisions share ids**: NA and EU both play
 ADCL Season 1 (20508). Anything that picks a season takes the division too:
 - URLs: `/season/<id>/<division slug>/…`; `?season=<id>&division=<id>` in a query
-  (`routes._query_season`); `<id>/<slug>` in a picker value (`/teams`).
+  (`routes._query_season`, which also takes `?season=<id>/<division id>` from one picker).
 - Admin forms: hidden `season_id` + `division_id`, read with `routes._form_season`.
 - Never `next(s for s in seasons if s["id"] == …)` without the division.
 

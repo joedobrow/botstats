@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "macros.html" import player_link, team_cell, result_word %}
+{% from "macros.html" import player_link, team_cell, team_label, result_word, fantasy_parts %}
 {% block content %}
 <p class="small"><a href="{{ season_url(season) }}">← {{ season.label }}</a></p>
 <div class="team-head big">
@@ -181,9 +181,8 @@
             <select name="captain" aria-label="Opponent">
               <option value="__auto__">Work it out from the rosters</option>
               <option value="__standins__"{% if not opp %} selected{% endif %}>Stand-ins</option>
-              {# People remember teams by their captain, so name both. #}
               {% for cap, name in opponents if cap != team.captain %}
-              <option value="{{ cap }}"{% if cap == opp %} selected{% endif %}>{{ name }}{% if name != cap %} ({{ cap }}){% endif %}</option>
+              <option value="{{ cap }}"{% if cap == opp %} selected{% endif %}>{{ team_label(name, cap) }}</option>
               {% endfor %}
             </select>
             <button class="primary">Save</button>
@@ -213,6 +212,12 @@
   </tbody>
 </table>
 </div>
+
+{% if fantasy %}
+<h2>Fantasy <span class="muted small" title="The five players' points added together"><strong class="rating">{{ "%.1f"|format(fantasy.fantasy_points) }}</strong>
+  a game · {{ fantasy.games_played }} game{{ "" if fantasy.games_played == 1 else "s" }}</span></h2>
+{{ fantasy_parts(fantasy.fantasy_breakdown, fantasy_field, fantasy.fantasy_points, "Team average") }}
+{% endif %}
 {% if is_admin %}
 <dialog id="add-match-dialog" class="dialog">
   <h2 class="flush">Add a game</h2>
@@ -225,7 +230,7 @@
       <select name="opponent" required>
         <option value="" disabled selected>Pick a team</option>
         {% for cap, name in opponents if cap != team.captain %}
-        <option value="{{ cap }}">{{ name }}{% if name != cap %} ({{ cap }}){% endif %}</option>
+        <option value="{{ cap }}">{{ team_label(name, cap) }}</option>
         {% endfor %}
       </select>
     </label>

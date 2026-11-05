@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "macros.html" import pos %}
+{% from "macros.html" import pos, fantasy_parts %}
 {% block content %}
 <p class="small"><a href="{{ back }}">← Fantasy</a></p>
 
@@ -10,42 +10,22 @@
     <div class="muted">
       <strong class="rating">{{ "%.1f"|format(player.fantasy_points) }}</strong> Average Fantasy Points ·
       {{ player.games_played }} game{{ "" if player.games_played == 1 else "s" }}
-      {% if season %} · {{ season.label }}{% endif %} ·
-      <a href="/player/{{ player.account_id }}">Full profile</a>
+      · <a href="/player/{{ player.account_id }}">Full profile</a>
     </div>
   </div>
 </div>
 
-<div class="scroll">
-<table class="sortable">
-  <thead><tr>
-    <th data-sort-type="text">Component</th>
-    <th class="num" data-sort-type="num" data-sort-first="desc">Their average</th>
-    <th class="num" data-sort-type="num" data-sort-first="desc">Field average</th>
-    {% if position_field %}<th class="num" data-sort-type="num" data-sort-first="desc">{{ pos(player.role_position) }} average</th>{% endif %}
-    <th class="num" data-sort-type="num">Worth</th>
-    <th class="num" data-sort-type="num" data-sort-first="desc">Points</th>
-    <th class="num" data-sort-type="num" data-sort-first="desc">vs the field</th>
-  </tr></thead>
-  <tbody>
-  {% for c in player.breakdown|sort(attribute="vs_field", reverse=true) %}
-    <tr>
-      <td>{{ c.label }}{% if c.unit %} <span class="muted small">{{ c.unit }}</span>{% endif %}</td>
-      <td class="num" data-sort="{{ c.value }}">{{ "%.2f"|format(c.value) }}</td>
-      <td class="num muted" data-sort="{{ field[c.key].value }}">{{ "%.2f"|format(field[c.key].value) }}</td>
-      {% if position_field %}{% set pf = position_field.get(c.key) %}
-      <td class="num muted" data-sort="{{ pf.value if pf else '' }}">{{ "%.2f"|format(pf.value) if pf else "·" }}</td>{% endif %}
-      <td class="num muted" data-sort="{{ c.weight }}">{{ "%+.3f"|format(c.weight) }}</td>
-      <td class="num" data-sort="{{ c.points }}">{{ "%+.2f"|format(c.points) }}</td>
-      <td class="num {{ 'win' if c.vs_field > 0.05 else ('loss' if c.vs_field < -0.05 else '') }}"
-          data-sort="{{ c.vs_field }}">{{ "%+.2f"|format(c.vs_field) }}</td>
-    </tr>
-  {% endfor %}
-  </tbody>
-  <tfoot><tr class="total">
-    <th>Total</th><td></td><td></td>{% if position_field %}<td></td>{% endif %}<td></td>
-    <td class="num">{{ "%.1f"|format(player.fantasy_points) }}</td><td></td>
-  </tr></tfoot>
-</table>
-</div>
+<form method="get" class="season-pick">
+  <select name="season" aria-label="Season" onchange="this.form.submit()">
+    <option value="">All seasons</option>
+    {% for s in played_seasons %}
+    <option value="{{ s.id }}/{{ s.division_id }}"{% if season and s.id == season.id and s.division_id == season.division_id %} selected{% endif %}>{{ s.label }}{% if s.show_division %} · {{ s.division }}{% endif %}</option>
+    {% endfor %}
+  </select>
+  {% if position %}<input type="hidden" name="position" value="{{ position }}">{% endif %}
+  <noscript><button>Show</button></noscript>
+</form>
+
+{{ fantasy_parts(player.breakdown, field, player.fantasy_points, "Their average",
+                 position_field, pos(player.role_position) ~ " average" if position_field else "") }}
 {% endblock %}

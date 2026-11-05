@@ -33,6 +33,12 @@
 <span class="draft">{% for p in picks %}{% if p.kind == "hero" %}<img class="draft-model" src="https://cdn.cloudflare.steamstatic.com/apps/dota2/images/dota_react/heroes/icons/{{ p.slug }}.png" alt="{{ p.name }}" title="{{ p.name }}">{% elif p.img %}<img class="draft-ability" src="https://cdn.cloudflare.steamstatic.com{{ p.img }}" alt="{{ p.name }}" title="{{ p.name }}">{% else %}<span class="draft-ability draft-unknown" title="{{ p.name }}">?</span>{% endif %}{% endfor %}</span>
 {%- endmacro %}
 
+{# A team as people remember it: its name, and its captain's when that's
+   different. Plain text, so it fits in an <option>. #}
+{% macro team_label(name, captain) -%}
+{{ name or captain }}{% if name and captain and name != captain %} ({{ captain }}){% endif %}
+{%- endmacro %}
+
 {% macro team_cell(season, captain, team_names) -%}
 {% if captain %}<a href="{{ team_url(season, captain) }}">{{ team_names.get(captain, captain) }}</a>{% else %}<span class="muted">Stand-ins</span>{% endif %}
 {%- endmacro %}
@@ -105,4 +111,43 @@
 {% macro winner_chip(w) -%}
 <span class="chip">{% if w.avatar_url %}<img class="avatar" src="{{ w.avatar_url }}" alt="">{% endif %}
 {%- if w.account_id %}{{ player_link(w.account_id, w.name) }}{% else %}{{ w.name }}{% endif %}</span>
+{%- endmacro %}
+
+{# A fantasy score taken apart: a row per part, best against the field first.
+   parts carry vs_field; `extra` is a second field to read them against (a
+   position's average), headed by extra_label. #}
+{% macro fantasy_parts(parts, field, total, ours_label, extra=None, extra_label="") -%}
+<div class="scroll">
+<table class="sortable">
+  <thead><tr>
+    <th data-sort-type="text">Component</th>
+    <th class="num" data-sort-type="num" data-sort-first="desc">{{ ours_label }}</th>
+    <th class="num" data-sort-type="num" data-sort-first="desc">Field average</th>
+    {% if extra %}<th class="num" data-sort-type="num" data-sort-first="desc">{{ extra_label }}</th>{% endif %}
+    <th class="num" data-sort-type="num">Worth</th>
+    <th class="num" data-sort-type="num" data-sort-first="desc">Points</th>
+    <th class="num" data-sort-type="num" data-sort-first="desc">vs the field</th>
+  </tr></thead>
+  <tbody>
+  {% for c in parts|sort(attribute="vs_field", reverse=true) %}
+    {% set f = field.get(c.key) %}
+    <tr>
+      <td>{{ c.label }}{% if c.unit %} <span class="muted small">{{ c.unit }}</span>{% endif %}</td>
+      <td class="num" data-sort="{{ c.value }}">{{ "%.2f"|format(c.value) }}</td>
+      <td class="num muted" data-sort="{{ f.value if f else '' }}">{{ "%.2f"|format(f.value) if f else "·" }}</td>
+      {% if extra %}{% set pf = extra.get(c.key) %}
+      <td class="num muted" data-sort="{{ pf.value if pf else '' }}">{{ "%.2f"|format(pf.value) if pf else "·" }}</td>{% endif %}
+      <td class="num muted" data-sort="{{ c.weight }}">{{ "%+.3f"|format(c.weight) }}</td>
+      <td class="num" data-sort="{{ c.points }}">{{ "%+.2f"|format(c.points) }}</td>
+      <td class="num {{ 'win' if c.vs_field > 0.05 else ('loss' if c.vs_field < -0.05 else '') }}"
+          data-sort="{{ c.vs_field }}">{{ "%+.2f"|format(c.vs_field) }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+  <tfoot><tr class="total">
+    <th>Total</th><td></td><td></td>{% if extra %}<td></td>{% endif %}<td></td>
+    <td class="num">{{ "%.1f"|format(total) }}</td><td></td>
+  </tr></tfoot>
+</table>
+</div>
 {%- endmacro %}

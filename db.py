@@ -3344,6 +3344,9 @@ def get_team_match_aggregates(season_id: int, division_id: int) -> dict[str, dic
     )
     # Stats kept as the 5-player average (percentages, etc.).
     PER_PLAYER_AVG_KEYS = ("teamfight_participation",)
+    from fantasy import breakdown
+    TEAM_AVERAGED_PARTS = ("teamfight_participation", "duration")
+    part_order: dict[str, dict] = {}    # fantasy part key -> its label, unit, weight
 
     def _per_match_team_stats(side: list[dict], duration: int) -> dict:
         n = len(side)
@@ -3369,14 +3372,18 @@ def get_team_match_aggregates(season_id: int, division_id: int) -> dict[str, dic
             None,
         )
         out["avg_first_tormentor_time"] = ftt
-        # Fantasy points per match: SUM of the 5 players' fp (team total).
-        fps = []
-        for p in side:
-            try:
-                fps.append(_per_match_fp(p))
-            except Exception:
-                pass
-        out["fantasy_points"] = sum(fps) if fps else 0
+        # Fantasy points per match: the five players' scores summed, part by
+        # part, so the team's score can be taken apart like a player's. The
+        # stat behind a part is the five's total, except where a total means
+        # nothing: teamfight share and game length are the five's average.
+        parts = [breakdown(per_match_stats(p)) for p in side]
+        for i, c in enumerate(parts[0] if parts else []):
+            values = [p[i]["value"] for p in parts]
+            out[f"fp:{c['key']}:value"] = (sum(values) / len(values) if c["key"] in TEAM_AVERAGED_PARTS
+                                           else sum(values))
+            out[f"fp:{c['key']}:points"] = sum(p[i]["points"] for p in parts)
+            part_order.setdefault(c["key"], c)
+        out["fantasy_points"] = sum(c["points"] for p in parts for c in p)
         return out
 
     teams: dict[str, dict] = {}
@@ -3417,6 +3424,10 @@ def get_team_match_aggregates(season_id: int, division_id: int) -> dict[str, dic
             vals = [tms.get(k) for tms in team_match_stats if tms.get(k) is not None]
             if vals:
                 agg[k] = sum(vals) / len(vals)
+        agg["fantasy_breakdown"] = [
+            {**{f: c[f] for f in ("key", "label", "unit", "weight")},
+             "value": agg.pop(f"fp:{key}:value", 0.0), "points": agg.pop(f"fp:{key}:points", 0.0)}
+            for key, c in part_order.items()]
         teams[cap] = agg
     return teams
 

@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "macros.html" import player_link, team_cell, signup_button, season_name, season_status, season_start, pos, positions %}
+{% from "macros.html" import player_link, team_cell, team_label, signup_button, season_name, season_status, season_start, pos, positions %}
 {% block content %}
 <div class="page-head">
   <div>
@@ -25,7 +25,7 @@
   {% if season.signups_open or not season.started %}
   {% set tabs = tabs + [("signups", "Signups (" ~ season.signup_count ~ ")")] %}
   {% endif %}
-  {% for key, label in tabs + [("teams", "Teams"), ("matches", "Matches"), ("playoffs", "Playoffs"), ("champions", "Champions"), ("leaders", "Leaders")] %}
+  {% for key, label in tabs + [("teams", "Teams"), ("team-stats", "Team stats"), ("matches", "Matches"), ("playoffs", "Playoffs"), ("champions", "Champions"), ("leaders", "Leaders")] %}
   <a href="?tab={{ key }}" {% if tab == key %}class="active"{% endif %}>{{ label }}</a>
   {% endfor %}
 </nav>
@@ -64,6 +64,7 @@
         {% for round in bracket.rounds %}
         <div class="bracket-round">
           <h3>{{ round_name(loop.index, bracket.rounds|length) }}</h3>
+          <div class="bracket-matches">
           {% for m in round %}
           <div class="bracket-match{% if m.decided %} decided{% endif %}">
             {% for seat, team, name, wins in [(0, m.a, m.a_name, m.a_wins), (1, m.b, m.b_name, m.b_wins)] %}
@@ -72,17 +73,18 @@
                 <select name="seat{{ m.idx * 2 + loop.index0 }}" aria-label="Seat">
                   <option value=""></option>
                   {% for t in bracket.teams|sort(attribute="name") %}
-                  <option value="{{ t.captain }}"{% if t.captain == team %} selected{% endif %}>{{ t.name }}</option>
+                  <option value="{{ t.captain }}"{% if t.captain == team %} selected{% endif %}>{{ team_label(t.name, t.captain) }}</option>
                   {% endfor %}
                 </select>
               {% else %}
-                <span class="bracket-name">{{ name or "—" }}</span>
+                <span class="bracket-name"{% if team %} title="{{ team_label(name, team) }}"{% endif %}>{{ team_label(name, team) if team else "—" }}</span>
               {% endif %}
               <span class="bracket-score">{{ wins if (m.a and m.b) else "" }}</span>
             </div>
             {% endfor %}
           </div>
           {% endfor %}
+          </div>
         </div>
         {% endfor %}
       </div>
@@ -97,7 +99,7 @@
     {% if is_admin and bracket.unplaced %}
     <p class="muted small">Drag a team onto a seat, or pick it from the list.
       Still to place: {% for t in bracket.unplaced %}<span class="team-chip" draggable="true"
-        data-captain="{{ t.captain }}">{{ t.name }}</span>{% endfor %}</p>
+        data-captain="{{ t.captain }}">{{ team_label(t.name, t.captain) }}</span>{% endfor %}</p>
     {% endif %}
   {% endif %}
 
@@ -293,6 +295,57 @@
       </ul>
     </div>
   {% endfor %}
+  </div>
+  {% else %}
+  <p class="muted">Teams appear here once the draft is done.</p>
+  {% endif %}
+
+{% elif tab == "team-stats" %}
+  {% if teams %}
+  <div class="scroll">
+  <table class="sortable stats-table">
+    <thead><tr>
+      <th class="sticky-col" data-sort-type="text">Team</th>
+      <th class="num" data-sort-type="num" data-sort-first="desc" title="Wins">W</th>
+      <th class="num" data-sort-type="num" title="Losses">L</th>
+      <th class="num" data-sort-type="num" data-sort-first="desc" title="Kills a game">K</th>
+      <th class="num" data-sort-type="num" title="Deaths a game">D</th>
+      <th class="num" data-sort-type="num" data-sort-first="desc" title="Assists a game">A</th>
+      <th class="num" data-sort-type="num" data-sort-first="desc" title="(Kills + assists) / deaths">KDA</th>
+      <th class="num" data-sort-type="num" data-sort-first="desc" title="Gold a minute, the five's average">GPM</th>
+      <th class="num" data-sort-type="num" data-sort-first="desc" title="Experience a minute, the five's average">XPM</th>
+      <th class="num" data-sort-type="num" data-sort-first="desc" title="Hero damage a game, the five together">Dmg</th>
+      <th class="num" data-sort-type="num" data-sort-first="desc" title="Towers a game">Twr</th>
+      <th class="num" data-sort-type="num" data-sort-first="desc" title="Roshans a game">Rosh</th>
+      <th class="num" data-sort-type="num" data-sort-first="desc" title="Fantasy points a game, the five together">Fantasy</th>
+      <th class="num" data-sort-type="num" title="Average game length">Length</th>
+    </tr></thead>
+    <tbody>
+    {% for t in teams %}
+      {% set a = stats.get(t.captain) %}
+      <tr>
+        <td class="sticky-col with-logo" data-sort="{{ t.name|lower }}">{% if t.logo_url %}<img class="logo-sm" src="{{ t.logo_url }}" alt="">{% endif %}<a href="{{ team_url(season, t.captain) }}">{{ t.name }}</a></td>
+        <td class="num">{{ t.wins }}</td>
+        <td class="num">{{ t.losses }}</td>
+        {% if a %}
+        <td class="num">{{ "%.1f"|format(a.kills) }}</td>
+        <td class="num">{{ "%.1f"|format(a.deaths) }}</td>
+        <td class="num">{{ "%.1f"|format(a.assists) }}</td>
+        <td class="num">{{ "%.2f"|format(a.kda) }}</td>
+        <td class="num">{{ "%.0f"|format(a.gpm) }}</td>
+        <td class="num">{{ "%.0f"|format(a.xpm) }}</td>
+        <td class="num" data-sort="{{ a.hero_damage }}">{{ "%.0f"|format(a.hero_damage / 1000) }}k</td>
+        <td class="num">{{ "%.1f"|format(a.tower_kills) }}</td>
+        <td class="num">{{ "%.2f"|format(a.roshans_killed) }}</td>
+        <td class="num">{{ "%.1f"|format(a.fantasy_points) }}</td>
+        <td class="num" data-sort="{{ a.avg_duration }}">{{ a.avg_duration|duration }}</td>
+        {% else %}
+        <td class="num muted" colspan="11"></td>
+        {% endif %}
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
   </div>
   {% else %}
   <p class="muted">Teams appear here once the draft is done.</p>

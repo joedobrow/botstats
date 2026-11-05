@@ -458,10 +458,11 @@ ul.plain li:last-child { border-bottom: 0; }
 .bar-day { font-size: 0.6rem; color: var(--muted); text-align: center; padding-top: 3px; }
 .admin-nav a.active { font-weight: 700; color: var(--accent); }
 
-/* Teams: one wide table of what every team averages, then the rosters.
-   The team column stays put while the numbers scroll under it, because a row
-   of figures with no name against it is unreadable. */
-.season-pick select { height: var(--control-h); }
+/* A one-select season picker, as wide as its longest season. */
+.season-pick { margin: 14px 0; }
+.season-pick select { height: var(--control-h); width: auto; max-width: 100%; }
+/* Team stats: the team column stays put while the numbers scroll under it,
+   because a row of figures with no name against it is unreadable. */
 .stats-table { min-width: 860px; }
 .stats-table .sticky-col { position: sticky; left: 0; background: var(--surface); z-index: 1; }
 .stats-table thead .sticky-col { background: var(--surface); }
@@ -482,11 +483,14 @@ h1 .edit-form input[type=text] { font-size: 1.2rem; font-weight: 700; width: aut
 
 /* Playoffs: rounds as columns, each match a pair of seats. */
 .bracket { display: flex; gap: 28px; overflow-x: auto; padding-bottom: 8px; align-items: stretch; }
-.bracket-round { display: flex; flex-direction: column; justify-content: space-around; gap: 18px; min-width: 210px; }
-.bracket-round h3 { margin: 0 0 4px; font-size: 0.95rem; color: var(--muted); }
+/* Headers in one row; under them every seat is the same height, so a match
+   sits halfway between the two that feed it. */
+.bracket-round { display: flex; flex-direction: column; min-width: 230px; }
+.bracket-round h3 { margin: 0 0 10px; font-size: 0.95rem; color: var(--muted); }
+.bracket-matches { flex: 1; display: flex; flex-direction: column; justify-content: space-around; gap: 18px; }
 .bracket-match { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--surface); }
 .bracket-match.decided { border-color: var(--win); }
-.bracket-seat { display: flex; align-items: center; gap: 8px; padding: 7px 10px; }
+.bracket-seat { display: flex; align-items: center; gap: 8px; padding: 0 10px; height: 40px; box-sizing: border-box; }
 .bracket-seat + .bracket-seat { border-top: 1px solid var(--border); }
 .bracket-seat.won { font-weight: 700; color: var(--win); }
 .bracket-seat.out { color: var(--muted); }

@@ -3,7 +3,6 @@
 {% block content %}
 <div class="page-head">
   <h1>Fantasy</h1>
-  <div class="actions"><a class="button" href="/teams">Team stats</a></div>
 </div>
 {% set active = q.keys()|reject("in", ["stat", "page", "theme"])|select|list|length %}
 <button type="button" class="filter-toggle" data-toggle-filters aria-expanded="false">

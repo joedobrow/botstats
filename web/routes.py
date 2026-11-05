@@ -395,12 +395,13 @@ def _season_or_404(request: web.Request) -> dict:
 
 
 def _query_season(q, seasons: list[dict]) -> dict | None:
-    """The season a page's ?season=&division= names. Divisions share a
-    season's id (NA and EU both play ADCL Season 1), so the id alone can be
-    two seasons: the division picks between them, and without one the
-    first division playing it is meant."""
-    sid = str(q.get("season") or "")
-    division = re.sub(r"\D", "", q.get("division", ""))
+    """The season a page's ?season=&division= names, or ?season=<id>/<division
+    id> from a single picker. Divisions share a season's id (NA and EU both
+    play ADCL Season 1), so the id alone can be two seasons: the division
+    picks between them, and without one the first division playing it is
+    meant."""
+    sid, _, division = str(q.get("season") or "").partition("/")
+    division = re.sub(r"\D", "", division or q.get("division", ""))
     found = [s for s in seasons if str(s["id"]) == sid]
     return (next((s for s in found if str(s["division_id"]) == division), None)
             or (found[0] if found else None))
@@ -484,6 +485,8 @@ async def season_page(request: web.Request):
             [p["account_id"] for t in teams for p in t["roster"]]
             + [t["captain_account_id"] for t in teams if t["captain_account_id"]])
         ctx["teams"], ctx["idents"] = teams, idents
+    elif tab == "team-stats":
+        ctx["teams"], ctx["stats"] = store.season_teams(season), store.team_stats(season)
     else:
         ctx["tab"] = "matchups"
         ctx["rounds"] = store.season_matchups(season)
@@ -513,28 +516,16 @@ async def robots(request: web.Request):
 
 @routes.get("/teams")
 async def teams_page(request: web.Request):
-    """Every team of one season, with what they average a game. The season
-    defaults to the one being played, so the teams are one click away."""
+    """Gone: team stats are a tab of the season. Old links, with or without a
+    ?season=<id>/<division> pick, land on that tab."""
     seasons = store.all_seasons()
-    q = request.query
-    # A season appears once per division playing it, so the picker's value is
-    # "<season>/<division>"; ?season=&division= still works for older links.
-    sid, _, slug = q.get("season", "").partition("/")
-    slug = slug or q.get("division", "")
+    sid, _, slug = request.query.get("season", "").partition("/")
     season = next((s for s in seasons if str(s["id"]) == sid
                    and (not slug or s["division_slug"] == slug)), None)
     if season is None:
         current = store.current_seasons()
         season = current[0] if current else (seasons[0] if seasons else None)
-    teams, stats, idents = [], {}, {}
-    if season:
-        teams = store.season_teams(season)
-        stats = store.team_stats(season)
-        idents = store.player_identities(
-            [p["account_id"] for t in teams for p in t["roster"]]
-            + [t["captain_account_id"] for t in teams if t["captain_account_id"]])
-    return render(request, "teams.html", title="Teams", season=season, seasons=seasons,
-                  teams=teams, stats=stats, idents=idents)
+    raise web.HTTPMovedPermanently(f"{season_url(season)}?tab=team-stats" if season else "/seasons")
 
 
 @routes.get("/hall-of-fame")
@@ -699,7 +690,14 @@ async def team_page(request: web.Request):
         member_ids.append(team["captain_account_id"])
     # Every row, alt copies included: a roster can list a player's alt.
     stats = {p["account_id"]: p for p in db.get_all_time_stats(season["division_id"], season["id"])}
+    # The team's fantasy score taken apart, read against every team's.
+    team_stats = store.team_stats(season)
+    fantasy = team_stats.get(captain)
+    fantasy_field = store.field_average([t["fantasy_breakdown"] for t in team_stats.values()])
+    for c in (fantasy or {}).get("fantasy_breakdown", []):
+        c["vs_field"] = c["points"] - fantasy_field[c["key"]]["points"]
     return render(request, "team.html", title=team["name"], season=season, team=team,
+                  fantasy=fantasy, fantasy_field=fantasy_field,
                   matches=team_matches, idents=store.player_identities(member_ids),
                   stats=stats, ratings=db.displayed_ratings(season["division_id"]),
                   team_names={c: t["name"] for c, t in teams.items()},
@@ -1173,8 +1171,14 @@ async def fantasy_player_page(request: web.Request):
         return not_found(request, "Player")
     keep = {k: v for k, v in q.items() if k in _FANTASY_KEEP and v}
     back = "/fantasy" + ("?" + urlencode(keep) if keep else "")
+    # The seasons they have games in, newest first, for the picker.
+    all_seasons = store.all_seasons()
+    played = {(s["id"], s["division_id"]): s
+              for s in (store.season_of_match(all_seasons, m) for m in store.player_matches(person)) if s}
+    played_seasons = sorted(played.values(), key=lambda s: s["season_start"], reverse=True)
     return render(request, "fantasy_player.html", title=player["name"], player=player,
-                  season=season, back=back, field=table["field"],
+                  season=season, back=back, field=table["field"], played_seasons=played_seasons,
+                  position=position,
                   # Filtered to a position already, the field is that position.
                   position_field=None if position else table["field_by_position"].get(player.get("role_position")),
                   rating=store.player_ratings().get(person),
