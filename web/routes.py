@@ -158,10 +158,7 @@ async def session_middleware(request: web.Request, handler):
         request["csrf"] = sess["csrf"]
         request["is_uberadmin"] = sess["account_id"] in UBERADMIN_IDS
         request["is_admin"] = request["is_uberadmin"] or store.is_admin(sess["account_id"])
-    # Feedback is open to visitors who never logged in, so they have no
-    # session to carry a token; the route checks the post came from this site.
-    open_to_visitors = request.path == "/feedback" and not sess
-    if request.method == "POST" and not request.path.startswith("/api/") and not open_to_visitors:
+    if request.method == "POST" and not request.path.startswith("/api/"):
         form = await request.post()
         if not sess or form.get("csrf") != sess["csrf"]:
             return render(request, "message.html", status=403, title="Expired form",
@@ -1723,41 +1720,29 @@ async def admin_page(request: web.Request):
 
 @routes.get("/feedback")
 async def feedback_page(request: web.Request):
-    user = request.get("user")
-    contact = (store.player_discord(user["account_id"]) or user.get("steam_name")) if user else ""
+    user = _require_user(request)
+    contact = store.player_discord(user["account_id"]) or user.get("steam_name") or ""
     back = _safe_next(request.query.get("from") or "/")
-    return render(request, "feedback.html", title="Feedback", contact=contact or "", back=back)
+    return render(request, "feedback.html", title="Feedback", contact=contact, back=back)
 
 
-_feedback_times: dict[str, list[float]] = {}
-FEEDBACK_PER_HOUR = 5
+FEEDBACK_PER_DAY = 6
 
 
 @routes.post("/feedback")
 async def feedback_submit(request: web.Request):
-    """Save it and DM it to the owner. Anyone may send it, so: it has to come
-    from a page of this site, a field people can't see must stay empty, and
-    one address gets a few an hour."""
+    """Save it and DM it to the owner. Signed-in players only, a few a day."""
+    user = _require_user(request)
     data = await request.post()
-    origin = request.headers.get("Origin") or request.headers.get("Referer") or ""
-    if urlparse(origin).netloc != request.host:
-        raise web.HTTPForbidden(text="Send feedback from the site's own form.")
     back = _safe_next(data.get("from") or "/")
-    if data.get("website"):          # the trap field: only a bot fills it in
-        raise _go(back, "Thanks, sent.")
     message = (data.get("message") or "").strip()[:4000]
     if not message:
         raise web.HTTPBadRequest(text="The message is empty.")
-    ip, now = _client_ip(request), time.time()
-    recent = [t for t in _feedback_times.get(ip, []) if now - t < 3600]
-    if len(recent) >= FEEDBACK_PER_HOUR:
-        raise web.HTTPBadRequest(text="That's a lot of feedback for one hour. Try again later.")
-    _feedback_times[ip] = recent + [now]
-    user = request.get("user")
+    if store.feedback_count_since(user["account_id"], hours=24) >= FEEDBACK_PER_DAY:
+        raise web.HTTPBadRequest(text=f"That's {FEEDBACK_PER_DAY} today, the most a day. Try again tomorrow.")
     contact = (data.get("contact") or "").strip()[:200] or None
-    store.add_feedback(message, contact=contact, page=back,
-                       account_id=user["account_id"] if user else None)
-    who = contact or (user and (user.get("steam_name") or str(user["account_id"]))) or "someone"
+    store.add_feedback(message, contact=contact, page=back, account_id=user["account_id"])
+    who = contact or user.get("steam_name") or str(user["account_id"])
     await notify.owner(f"📬 **Feedback** from {who} (on {back}):\n{message}")
     raise _go(back, "Thanks, sent.")
 

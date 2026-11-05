@@ -2045,6 +2045,14 @@ def add_feedback(message: str, *, contact: str | None, page: str | None,
                      "VALUES (?, ?, ?, ?, ?)", (_now(), account_id, contact, page, message))
 
 
+def feedback_count_since(account_id: int, hours: int) -> int:
+    """How much feedback this person has sent in the last `hours`."""
+    since = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat(timespec="seconds")
+    with _conn() as conn:
+        return conn.execute("SELECT COUNT(*) FROM site_feedback WHERE account_id = ? AND created_at >= ?",
+                            (account_id, since)).fetchone()[0]
+
+
 def list_feedback(limit: int = 200) -> list[dict]:
     """The newest feedback first."""
     with _conn() as conn:
