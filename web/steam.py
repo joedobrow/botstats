@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 OPENID_URL = "https://steamcommunity.com/openid/login"
 _CLAIMED_ID_RE = re.compile(r"^https://steamcommunity\.com/openid/id/(\d{17})$")
 TIMEOUT = aiohttp.ClientTimeout(total=15)
+_MUST_BE_SIGNED = {"claimed_id", "identity", "return_to", "response_nonce", "assoc_handle", "op_endpoint"}
 
 
 def login_url(return_to: str, realm: str) -> str:
@@ -42,7 +43,13 @@ async def verify(params: dict[str, str], expected_return_to: str) -> int | None:
     if not (params.get("openid.return_to") or "").startswith(expected_return_to):
         return None
     m = _CLAIMED_ID_RE.match(params.get("openid.claimed_id") or "")
-    if not m:
+    if not m or params.get("openid.identity") != params.get("openid.claimed_id"):
+        return None
+    # Steam checks the signature over the fields openid.signed names, and the
+    # caller writes that list. Unless it covers who signed in and where the
+    # answer was for, a real login could be replayed under someone else's id.
+    signed = set((params.get("openid.signed") or "").split(","))
+    if not _MUST_BE_SIGNED <= signed:
         return None
     body = {k: v for k, v in params.items() if k.startswith("openid.")}
     body["openid.mode"] = "check_authentication"

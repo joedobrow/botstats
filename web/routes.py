@@ -199,8 +199,23 @@ def _base_url(request: web.Request) -> str:
     return f"{proto}://{request.host}"
 
 
+def _csv_cell(value):
+    """A value for a CSV someone will open in a spreadsheet. Text a player
+    wrote that starts like a formula ("=HYPERLINK(…)") would run as one, so
+    it's written as text instead."""
+    if isinstance(value, str) and value[:1] in ("=", "+", "-", "@", "\t", "\r"):
+        return "'" + value
+    return value
+
+
 def _safe_next(target: str | None) -> str:
-    return target if target and target.startswith("/") and not target.startswith("//") else "/"
+    """A path on this site to send someone back to, or "/". Browsers read a
+    backslash as a slash, so "/\\evil.example" is as off-site as "//evil.example";
+    control characters and those are refused outright."""
+    if (not target or not target.startswith("/") or target.startswith("//")
+            or "\\" in target or any(ord(ch) < 32 for ch in target)):
+        return "/"
+    return target
 
 
 def _go(url: str, notice: str | None = None, **query) -> web.HTTPFound:
@@ -1290,7 +1305,8 @@ async def player_page(request: web.Request):
                   season_rows=season_rows, matches=matches[:10], match_total=len(matches),
                   rating=store.player_ratings().get(account_id),
                   breakdown=breakdown, unavailable=unavailable,
-                  discord=store.player_discord(account_id))
+                  # Signed-in players only, as on the sub finder: not for crawlers.
+                  discord=store.player_discord(account_id) if request.get("user") else None)
 
 
 @routes.post(r"/player/{account_id:\d+}/recheck")
@@ -1479,13 +1495,23 @@ async def draft_page(request: web.Request):
                   my_teams=[c for c in st.order if draft.may_act_for(st, c, me)])
 
 
+_ws_per_ip: dict[str, int] = {}
+WS_PER_IP = 10
+
+
 @routes.get("/season/{season_id}/{division}/draft/ws")
 async def draft_ws(request: web.Request):
     """One socket per watcher. The server says what the room looks like; the
     client never says what it thinks is true."""
     season = _season_or_404(request)
+    # Every message goes to every socket, so one address opening hundreds
+    # would slow the room for the captains. A household has a few tabs at most.
+    ip = _client_ip(request)
+    if _ws_per_ip.get(ip, 0) >= WS_PER_IP:
+        raise web.HTTPTooManyRequests(text="Too many draft-room tabs open from here.")
     ws = web.WebSocketResponse(heartbeat=25)
     await ws.prepare(request)
+    _ws_per_ip[ip] = _ws_per_ip.get(ip, 0) + 1
     r = draft.room(season)
     user = request.get("user")
     r.join(ws, (user or {}).get("account_id"))
@@ -1499,6 +1525,9 @@ async def draft_ws(request: web.Request):
                 break
     finally:
         r.leave(ws)
+        _ws_per_ip[ip] -= 1
+        if not _ws_per_ip[ip]:
+            del _ws_per_ip[ip]
         await draft.push(season)
     return ws
 
@@ -1974,7 +2003,7 @@ async def admin_signups_csv(request: web.Request):
     buf = io.StringIO()
     w = csv.writer(buf)
     w.writerow(store.SIGNUP_EXPORT_COLUMNS)
-    w.writerows(store.signup_export(season, _base_url(request)))
+    w.writerows([[_csv_cell(v) for v in row] for row in store.signup_export(season, _base_url(request))])
     return web.Response(
         text=buf.getvalue(), content_type="text/csv",
         headers={"Content-Disposition": f'attachment; filename="signups-{season["id"]}-{season["division_slug"]}.csv"'},
@@ -2086,9 +2115,24 @@ async def error_middleware(request: web.Request, handler):
                               "in a minute, and tell an admin if it keeps happening.")
 
 
+async def _security_headers(request: web.Request, response: web.StreamResponse) -> None:
+    """Browser protections on every response, static files and errors too.
+    Pages can't be framed by another site (a framed admin form is a
+    clickjacking target); stream cards can, since OBS and overlays show them."""
+    h = response.headers
+    h.setdefault("X-Content-Type-Options", "nosniff")
+    h.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    if not request.path.startswith("/card/"):
+        h.setdefault("X-Frame-Options", "DENY")
+        h.setdefault("Content-Security-Policy", "frame-ancestors 'none'; object-src 'none'; base-uri 'self'")
+    if request.headers.get("X-Forwarded-Proto") == "https":
+        h.setdefault("Strict-Transport-Security", "max-age=31536000")
+
+
 def setup(app: web.Application) -> None:
     """Add the website's routes to the bot's aiohttp app."""
     store.init_site_tables()
+    app.on_response_prepare.append(_security_headers)
     app.middlewares.append(crawler_middleware)
     app.middlewares.append(canonical_host_middleware)
     app.middlewares.append(error_middleware)

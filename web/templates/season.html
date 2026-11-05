@@ -471,7 +471,7 @@
         {% if is_admin %}
         <td>{{ s.discord or "" }}</td>
         <td>
-          <form method="post" action="/admin/signup/delete" class="inline" onsubmit="return confirm('Remove {{ s.name|e }} from signups?')">
+          <form method="post" action="/admin/signup/delete" class="inline" data-confirm="Remove {{ s.name }} from signups?">
             <input type="hidden" name="csrf" value="{{ csrf }}">
             <input type="hidden" name="season_id" value="{{ season.id }}">
             <input type="hidden" name="division_id" value="{{ season.division_id }}">

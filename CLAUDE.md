@@ -58,6 +58,11 @@ ADCL Season 1 (20508). Anything that picks a season takes the division too:
   `data-sort-first="desc"` on numbers and `data-sort` on cells whose text isn't the
   sort key. Numbers are `class="num"`. Empty tables get a muted
   "Nobody/No … yet" row spanning every column.
+- Never put a template value inside an `on…="…"` handler: the browser
+  HTML-unescapes the attribute before running it, so a player's name becomes
+  code. Ask "are you sure?" with `data-confirm="…"` on the form or button
+  (handled in `base.html`); pass data to scripts as `|tojson` in a
+  `<script type="application/json">` block.
 - No explainer text. Say it in a label, a column header's `title`, or not at all.
 - American spelling in anything a user reads (favorite, color).
 

@@ -6,6 +6,7 @@ Designed to run inside the Discord bot's asyncio event loop.
 
 from __future__ import annotations
 
+import hmac
 import html as _html
 import logging
 from pathlib import Path
@@ -103,6 +104,14 @@ def _render_stat_lines_html(lines: list[str]) -> str:
 # ---------------------------------------------------------------------------
 # Card handlers
 # ---------------------------------------------------------------------------
+
+def _owner_key(request: web.Request) -> bool:
+    """Whether the call carries the sheet's RATINGS_API_KEY. Compared in
+    constant time, so the answer's timing doesn't spell the key out."""
+    from config import RATINGS_API_KEY
+    given = request.headers.get("X-Api-Key", "")
+    return bool(RATINGS_API_KEY) and hmac.compare_digest(given.encode(), RATINGS_API_KEY.encode())
+
 
 async def player_card_handler(request: web.Request) -> web.Response:
     """Serve a player card as HTML. URL: /card/player/<account_id>"""
@@ -351,7 +360,7 @@ async def ratings_api_handler(request: web.Request) -> web.Response:
 
     if not RATINGS_API_KEY:
         return web.Response(text="Ratings API not configured", status=503)
-    if request.headers.get("X-Api-Key") != RATINGS_API_KEY:
+    if not _owner_key(request):
         return web.Response(text="Unauthorized", status=401)
 
     from db import get_all_rating_cache_rows, get_rating_cache_row
@@ -408,7 +417,7 @@ async def costs_api_handler(request: web.Request) -> web.Response:
 
     if not RATINGS_API_KEY:
         return web.Response(text="Ratings API not configured", status=503)
-    if request.headers.get("X-Api-Key") != RATINGS_API_KEY:
+    if not _owner_key(request):
         return web.Response(text="Unauthorized", status=401)
 
     season = _season_from_query(request)
@@ -442,7 +451,7 @@ async def season_stats_api_handler(request: web.Request) -> web.Response:
 
     if not RATINGS_API_KEY:
         return web.Response(text="Ratings API not configured", status=503)
-    if request.headers.get("X-Api-Key") != RATINGS_API_KEY:
+    if not _owner_key(request):
         return web.Response(text="Unauthorized", status=401)
 
     season = _season_from_query(request)
@@ -521,12 +530,11 @@ def _not_modified(request: web.Request, etag: str, last_modified: str) -> bool:
 def _player_api_caller(request: web.Request) -> str | None:
     """Who's calling /api/player: "owner" for the sheet's RATINGS_API_KEY, a
     PLAYER_API_KEYS label for a handed-out key, or None."""
-    import hmac
-    from config import PLAYER_API_KEYS, RATINGS_API_KEY
+    from config import PLAYER_API_KEYS
     given = request.headers.get("X-Api-Key", "")
     if not given:
         return None
-    if RATINGS_API_KEY and hmac.compare_digest(given.encode(), RATINGS_API_KEY.encode()):
+    if _owner_key(request):
         return "owner"
     for key, label in PLAYER_API_KEYS.items():
         if hmac.compare_digest(given.encode(), key.encode()):

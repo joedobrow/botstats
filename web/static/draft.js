@@ -14,7 +14,7 @@
   const who = id => (NAMES[id] && NAMES[id].name) || ("#" + id);
   const face = id => {
     const a = NAMES[id] && NAMES[id].avatar_url;
-    return a ? `<img class="avatar" src="${a}" alt="">` : "";
+    return a ? `<img class="avatar" src="${esc(a)}" alt="">` : "";
   };
   const esc = s => String(s).replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
   const PROFILES = D.profiles || {};

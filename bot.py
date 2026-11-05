@@ -20,7 +20,10 @@ logger = logging.getLogger(__name__)
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True  # required for /sync_roles_channels' guild.fetch_members
-bot = discord.Client(intents=intents)
+# Names and statements come from players, and a Steam name can be "@everyone":
+# only the users a message means to mention get pinged.
+bot = discord.Client(intents=intents,
+                     allowed_mentions=discord.AllowedMentions(everyone=False, roles=False, users=True))
 tree = app_commands.CommandTree(bot)
 
 

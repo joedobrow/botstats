@@ -116,7 +116,7 @@
             <input type="hidden" name="csrf" value="{{ csrf }}">
             <a href="/player/{{ a.account_id }}">{{ a.name }}</a>{% if a.name != a.account_id|string %} <span class="muted small">{{ a.account_id }}</span>{% endif %}
             <button class="linklike" name="remove" value="{{ a.account_id }}" title="Unlink"
-                    onclick='return confirm({{ ("Unlink " ~ a.name ~ " (" ~ a.account_id ~ ")?")|tojson }})'>×</button>
+                    data-confirm="Unlink {{ a.name }} ({{ a.account_id }})?">×</button>
           </form>
           {% endfor %}
           <form method="post" action="/player/{{ account_id }}/accounts" class="inline">
