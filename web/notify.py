@@ -1,14 +1,17 @@
-"""Messages from the site to the league's owner.
+"""The site's line to the bot.
 
-The site runs inside the bot's process, so the bot sets `send` when it
-starts: a coroutine that DMs the owner on Discord. Run on its own (a local
-preview), the site has no bot, and a message is only logged.
+The site runs inside the bot's process, so the bot hands it what it needs
+when it starts: `send`, a coroutine that DMs the owner on Discord, and
+`client`, the bot itself, for the Discord sync on Admin → Discord. Run on
+its own (a local preview) the site has neither: messages are only logged
+and the sync says the bot isn't here.
 """
 import logging
 
 logger = logging.getLogger(__name__)
 
-send = None   # async (text: str) -> None, set by bot.py
+send = None     # async (text: str) -> None, set by bot.py
+client = None   # the discord.Client, set by bot.py
 
 
 async def owner(text: str) -> bool:

@@ -1,5 +1,4 @@
 import asyncio
-import os
 import discord
 from discord import app_commands
 from discord.ext import tasks
@@ -19,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 intents = discord.Intents.default()
 intents.message_content = True
-intents.members = True  # required for /sync_roles_channels' guild.fetch_members
+intents.members = True  # the site's Discord sync lists the server's members (discord_sync.plan)
 # Names and statements come from players, and a Steam name can be "@everyone":
 # only the users a message means to mention get pinged.
 bot = discord.Client(intents=intents,
@@ -42,7 +41,7 @@ def _require_division(interaction: discord.Interaction):
 
 # Stat/match/quote commands post to the channel by default; pass public:False
 # to get the reply as a whisper only you can see. Owner-only commands
-# (set_player, sync_roles_channels, nuke) are always private
+# (set_player, nuke) are always private
 # and take no public param.
 PUBLIC_BY_DEFAULT_PARAM_DESCRIPTION = "Post the result in the channel; set False to only show it to you (default: True)"
 
@@ -1464,7 +1463,7 @@ async def _resolve_player_query(interaction: discord.Interaction, q: str) -> tup
     rating="Manual internal rating — overrides EVERYTHING; windrun/badge/trust-weights are ignored",
     add_account="Another account this player uses (name/id/nickname/Steam64) — rating becomes the best of their accounts",
     alt_account_for="The reverse: say THIS account is a second account of that player",
-    discord_handle="Override Discord handle for /sync_roles_channels (use when rd2l has wrong info)",
+    discord_handle="Their Discord name, overriding what they gave the site (the Discord sync matches on it)",
     note="Optional note (e.g. 'smurf — real rank is 10k')",
     hide_avatar="True to hide their Steam avatar everywhere (inappropriate profile pic). False to unhide.",
     clear="Set True to remove any existing override for this player",
@@ -2174,283 +2173,8 @@ async def tipjar(interaction: discord.Interaction):
 # /start_new_season used to live here: a rollover driven by a slash command with
 # a CSV attachment, setting up a league nobody could see the result of until
 # they loaded the site. It's the admin pages' job now — Admin → Season setup,
-# which previews before it writes (season_setup.roll_over).
-
-
-
-@tree.command(name="sync_roles_channels",
-              description="[Owner] Sync players/captains roles + rebuild Captain Rooms voice channels from RD2L")
-@app_commands.describe(
-    players_url="RD2L players page URL (falls back to env RD2L_PLAYERS_URL)",
-    captains_url="RD2L captains page URL (falls back to env RD2L_CAPTAINS_URL)",
-    players_role="Role name to sync for players (default: 'players')",
-    captains_role="Role name to sync for captains (default: 'captains')",
-    category="Category to rebuild voice channels in (default: 'Captain Rooms')",
-    dry_run="Preview matches + unmatched without applying any changes",
-)
-async def sync_roles_channels(
-    interaction: discord.Interaction,
-    players_url: str = None,
-    captains_url: str = None,
-    players_role: str = "players",
-    captains_role: str = "captains",
-    category: str = "Captain Rooms",
-    dry_run: bool = False,
-):
-    is_admin = interaction.user.guild_permissions.administrator
-    is_owner = ADMIN_USER_ID and interaction.user.id == ADMIN_USER_ID
-    if not (is_admin or is_owner):
-        await interaction.response.send_message("⚠️ Admins/owner only.", ephemeral=True)
-        return
-
-    await interaction.response.defer(ephemeral=True)
-
-    p_url = players_url or os.environ.get("RD2L_PLAYERS_URL")
-    c_url = captains_url or os.environ.get("RD2L_CAPTAINS_URL")
-    if not p_url or not c_url:
-        await interaction.followup.send(
-            "⚠️ Missing URLs. Set fly secrets `RD2L_PLAYERS_URL` + "
-            "`RD2L_CAPTAINS_URL`, or pass `players_url:` / `captains_url:`.",
-            ephemeral=True,
-        )
-        return
-
-    guild = interaction.guild
-    def _find_ci(items, name):
-        low = name.lower()
-        return next((x for x in items if x.name.lower() == low), None)
-    p_role = _find_ci(guild.roles, players_role)
-    c_role = _find_ci(guild.roles, captains_role)
-    cat = _find_ci(guild.categories, category)
-    missing = []
-    if not p_role:  missing.append(f"role `{players_role}`")
-    if not c_role:  missing.append(f"role `{captains_role}`")
-    if not cat:     missing.append(f"category `{category}`")
-    # Dry-run just needs to preview matches — no need to gate on missing
-    # roles/category since we won't touch them. Real run hard-errors.
-    if missing and not dry_run:
-        await interaction.followup.send(f"⚠️ Not found in this guild: {', '.join(missing)}", ephemeral=True)
-        return
-
-    from rd2l import fetch_roster_from_page, fetch_discord_handles
-
-    try:
-        await interaction.edit_original_response(content="⏳ Fetching rosters from rd2l.gg …")
-        players = await fetch_roster_from_page(p_url, label="players")
-        captains = await fetch_roster_from_page(c_url, label="captains")
-
-        # Captains sometimes appear only on the captains page and not in the
-        # players CSV — treat both as separate rosters. Union the account_ids
-        # so we only scrape each profile once.
-        all_ids = sorted({p["account_id"] for p in players} | {c["account_id"] for c in captains})
-        await interaction.edit_original_response(
-            content=f"⏳ Scraping Discord handles for {len(all_ids)} players (~{len(all_ids)*0.5:.0f}s) …"
-        )
-        handles = await fetch_discord_handles(all_ids)
-    except Exception as e:
-        logger.exception("rd2l fetch failed")
-        await interaction.followup.send(f"❌ rd2l fetch failed: {e}", ephemeral=True)
-        return
-
-    # Load per-account discord overrides in one query so we can prefer them
-    # over the scraped rd2l handle. Set via /set_player discord_handle:...
-    from db import _conn as _db_conn
-    all_ids_list = list(all_ids)
-    overrides: dict[int, str] = {}
-    if all_ids_list:
-        placeholders = ",".join("?" * len(all_ids_list))
-        with _db_conn() as conn:
-            for r in conn.execute(
-                f"SELECT account_id, discord_override FROM skill_overrides "
-                f"WHERE discord_override IS NOT NULL AND discord_override != '' "
-                f"AND account_id IN ({placeholders})",
-                tuple(all_ids_list),
-            ).fetchall():
-                overrides[r["account_id"]] = r["discord_override"]
-
-    for p in players:
-        p["discord_handle"] = overrides.get(p["account_id"]) or handles.get(p["account_id"])
-        p["overridden"] = p["account_id"] in overrides
-    for c in captains:
-        c["discord_handle"] = overrides.get(c["account_id"]) or handles.get(c["account_id"])
-        c["overridden"] = c["account_id"] in overrides
-
-    # Build a handle→Member map. Uses guild.fetch_members which requires
-    # the `members` privileged intent both in code (Intents.members) AND
-    # enabled in the Discord Developer Portal.
-    await interaction.edit_original_response(content="⏳ Loading guild members …")
-    try:
-        members = [m async for m in guild.fetch_members(limit=None)]
-    except discord.ClientException as e:
-        await interaction.followup.send(
-            f"❌ Can't load guild members: {e}\n"
-            "Enable **Server Members Intent** for this bot at "
-            "https://discord.com/developers/applications → your bot → Bot tab.",
-            ephemeral=True,
-        )
-        return
-
-    import re as _re
-    def _norm(s: str) -> str:
-        return (s or "").strip().lower().lstrip("@")
-    handle_map: dict[str, discord.Member] = {}
-    for m in members:
-        # New-style username (no #discriminator), old-style user#1234, nick.
-        for key in filter(None, [m.name, f"{m.name}#{m.discriminator}", m.global_name, m.nick]):
-            handle_map.setdefault(_norm(key), m)
-
-    def _candidates(handle: str) -> list[str]:
-        """Extract every reasonable string to try as a match key from a scraped
-        rd2l handle. Handles old-style `user#1234`, parenthetical notes, stray
-        punctuation, and space-before-#."""
-        if not handle:
-            return []
-        raw = handle.strip()
-        cands: list[str] = [raw]
-        # Collapse whitespace around # (e.g. "redground #4230" → "redground#4230")
-        cands.append(_re.sub(r"\s*#\s*", "#", raw))
-        # Strip trailing "#1234" (or with stray chars before it like "?#3582")
-        cands.append(_re.sub(r"\s*[^\w]*#\s*\d+.*$", "", raw))
-        # Bare stripped-of-# (username only) — handles migrated users where
-        # rd2l still has the old discriminator on file.
-        for c in list(cands):
-            if "#" in c:
-                cands.append(c.split("#", 1)[0])
-        # Content inside parens (e.g. "Name (real_handle)" → "real_handle")
-        for m in _re.finditer(r"\(([^)]+)\)", raw):
-            cands.append(m.group(1))
-        # Same string with the parenthetical stripped
-        no_paren = _re.sub(r"\s*\([^)]*\)\s*", " ", raw).strip()
-        if no_paren:
-            cands.append(no_paren)
-        # Trim trailing punctuation on each candidate
-        cands = [_re.sub(r"[?!.,\s]+$", "", c).strip() for c in cands]
-        return [c for c in dict.fromkeys(cands) if c]  # dedupe, preserve order
-
-    def _match(handle: str | None) -> discord.Member | None:
-        if not handle:
-            return None
-        for c in _candidates(handle):
-            hit = handle_map.get(_norm(c))
-            if hit:
-                return hit
-        return None
-
-    matched_p, unmatched_p = [], []
-    for p in players:
-        m = _match(p["discord_handle"])
-        (matched_p if m else unmatched_p).append((p, m))
-    matched_c, unmatched_c = [], []
-    for c in captains:
-        m = _match(c["discord_handle"])
-        (matched_c if m else unmatched_c).append((c, m))
-
-    def _fmt_unmatched(rows):
-        def _line(r):
-            handle = r["discord_handle"] or "none scraped"
-            src = " (override)" if r.get("overridden") else ""
-            return f"• `{r['name']}` (id `{r['account_id']}`) — handle: `{handle}`{src}"
-        return "\n".join(_line(r) for r, _ in rows) or "_(none)_"
-
-    if dry_run:
-        setup_note = f"\n⚠️ Not found (would block real run): {', '.join(missing)}" if missing else ""
-        summary = (
-            f"🔍 **Dry run** — no changes applied.\n"
-            f"Players: {len(matched_p)} matched / {len(unmatched_p)} unmatched\n"
-            f"Captains: {len(matched_c)} matched / {len(unmatched_c)} unmatched"
-            f"{setup_note}\n\n"
-            f"**Unmatched players:**\n{_fmt_unmatched(unmatched_p)}\n\n"
-            f"**Unmatched captains:**\n{_fmt_unmatched(unmatched_c)}"
-        )
-        await interaction.followup.send(summary[:2000], ephemeral=True)
-        return
-
-    # Apply roles: strip from everyone, then add to matched. Doing this via
-    # the member iteration + per-role add/remove avoids replacing anyone's
-    # full role set (only the target role changes per member).
-    err_role_remove = 0
-    err_role_add_p = 0
-    err_role_add_c = 0
-    err_ch_delete = 0
-    err_ch_create = 0
-    first_error: str | None = None
-    def _note_err(exc):
-        nonlocal first_error
-        if first_error is None:
-            first_error = f"{type(exc).__name__}: {exc}"
-
-    await interaction.edit_original_response(content="⏳ Removing existing roles …")
-    for m in members:
-        try:
-            to_remove = [r for r in (p_role, c_role) if r in m.roles]
-            if to_remove:
-                await m.remove_roles(*to_remove, reason="/sync_roles_channels: reset")
-        except Exception as e:
-            err_role_remove += 1
-            _note_err(e)
-            logger.exception("role removal failed for %s", m)
-
-    await interaction.edit_original_response(content="⏳ Adding roles to matched members …")
-    for _, m in matched_p:
-        try:
-            await m.add_roles(p_role, reason="/sync_roles_channels: players")
-        except Exception as e:
-            err_role_add_p += 1
-            _note_err(e)
-            logger.exception("add players role failed for %s", m)
-    for _, m in matched_c:
-        try:
-            await m.add_roles(c_role, reason="/sync_roles_channels: captains")
-        except Exception as e:
-            err_role_add_c += 1
-            _note_err(e)
-            logger.exception("add captains role failed for %s", m)
-
-    # Rebuild Captain Rooms: nuke everything in the category, then create one
-    # voice channel per captain (alphabetical, captain's own name).
-    await interaction.edit_original_response(content=f"⏳ Rebuilding `{category}` channels …")
-    for ch in list(cat.channels):
-        try:
-            await ch.delete(reason="/sync_roles_channels: rebuild")
-        except Exception as e:
-            err_ch_delete += 1
-            _note_err(e)
-            logger.exception("channel delete failed for %s", ch)
-
-    for c in sorted(captains, key=lambda x: x["name"].lower()):
-        try:
-            await guild.create_voice_channel(name=c["name"], category=cat,
-                                             reason="/sync_roles_channels: per-captain room")
-        except Exception as e:
-            err_ch_create += 1
-            _note_err(e)
-            logger.exception("channel create failed for captain %s", c["name"])
-
-    total_errs = err_role_remove + err_role_add_p + err_role_add_c + err_ch_delete + err_ch_create
-    header = "✅ Sync complete." if total_errs == 0 else f"⚠️ Sync finished with {total_errs} error(s)."
-    summary = (
-        f"{header}\n"
-        f"• Players: {len(matched_p) - err_role_add_p} roled / {len(unmatched_p)} unmatched"
-        f"{f' / {err_role_add_p} failed' if err_role_add_p else ''}\n"
-        f"• Captains: {len(matched_c) - err_role_add_c} roled / {len(unmatched_c)} unmatched"
-        f"{f' / {err_role_add_c} failed' if err_role_add_c else ''}\n"
-        f"• Role-remove failures: {err_role_remove}\n"
-        f"• Rebuilt {len(captains) - err_ch_create} voice channels in `{category}`"
-        f"{f' ({err_ch_delete} delete + {err_ch_create} create failures)' if (err_ch_delete or err_ch_create) else ''}\n"
-    )
-    if first_error:
-        summary += f"\n**First error:** `{first_error}`"
-        if "Missing Permissions" in first_error or "Forbidden" in first_error:
-            summary += (
-                "\n_Fix: grant the bot's role **Manage Roles** + **Manage Channels**, "
-                "and drag its role **above** the `players` / `captains` roles in Server Settings → Roles._"
-            )
-        summary += "\n"
-    if unmatched_p:
-        summary += f"\n**Unmatched players:**\n{_fmt_unmatched(unmatched_p)}\n"
-    if unmatched_c:
-        summary += f"\n**Unmatched captains:**\n{_fmt_unmatched(unmatched_c)}"
-    await interaction.followup.send(summary[:2000], ephemeral=True)
+# which previews before it writes (season_setup.roll_over). /sync_roles_channels
+# is Admin → Discord (discord_sync), working from the site's signups.
 
 
 @tree.command(name="refresh_leaderboard", description="[Admin] Manually trigger a data fetch from OpenDota")
@@ -2648,9 +2372,11 @@ async def _setup_once():
     except Exception:
         logger.exception("Group rating recompute failed at startup")
 
-    # The site tells the owner things (feedback) through the bot, by DM.
+    # The site reaches Discord through the bot: feedback DMs to the owner,
+    # and the role sync on Admin → Discord.
+    from web import notify
+    notify.client = bot
     if ADMIN_USER_ID:
-        from web import notify
 
         async def dm_owner(text: str) -> None:
             owner = bot.get_user(ADMIN_USER_ID) or await bot.fetch_user(ADMIN_USER_ID)

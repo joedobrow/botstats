@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import csv
 import io
 import logging
@@ -1774,6 +1775,94 @@ async def feedback_submit(request: web.Request):
     who = contact or user.get("steam_name") or str(user["account_id"])
     await notify.owner(f"📬 **Feedback** from {who} (on {back}):\n{message}")
     raise _go(back, "Thanks, sent.")
+
+
+# Discord sync runs, by server: {"running": bool, "lines": [...], "at": time}.
+# A sync takes a while (a role change at a time, under Discord's rate limits),
+# so it runs in the background and the page reports on it.
+_discord_runs: dict[int, dict] = {}
+_discord_tasks: set[asyncio.Task] = set()
+
+
+def _discord_servers(q) -> list[dict]:
+    """Each Discord server the league's divisions use, with each division's
+    seasons and the one chosen for the sync: ?season_<division id>=<season
+    id>, else the division's newest season with signups."""
+    seasons = store.all_seasons()          # newest first
+    servers: dict[int, dict] = {}
+    for d in store.divisions():
+        if not d.get("guild_id"):
+            continue
+        mine = [s for s in seasons if s["division_id"] == d["id"]]
+        asked = re.sub(r"\D", "", q.get(f"season_{d['id']}", ""))
+        chosen = (next((s for s in mine if str(s["id"]) == asked), None)
+                  or next((s for s in mine if s["signup_count"]), None)
+                  or (mine[0] if mine else None))
+        server = servers.setdefault(int(d["guild_id"]), {"guild_id": int(d["guild_id"]), "divisions": []})
+        server["divisions"].append({"division": d, "seasons": mine, "chosen": chosen})
+    return list(servers.values())
+
+
+@routes.get("/admin/discord")
+async def admin_discord(request: web.Request):
+    """Discord roles and captain rooms for the seasons being signed up for,
+    previewed: who will get which role, and who can't be found."""
+    import discord_sync
+
+    _require_admin(request)
+    servers = _discord_servers(request.query)
+    for server in servers:
+        server["run"] = _discord_runs.get(server["guild_id"])
+        if notify.client is None:
+            server["problem"] = "The bot isn't running here, so Discord can't be reached."
+            continue
+        people = store.signed_up_people([d["chosen"] for d in server["divisions"] if d["chosen"]])
+        try:
+            server["plan"] = await discord_sync.plan(notify.client, server["guild_id"], people)
+        except LookupError as e:
+            server["problem"] = str(e)
+    return render(request, "admin_discord.html", title="Discord", servers=servers,
+                  roles=(discord_sync.PLAYERS_ROLE, discord_sync.CAPTAINS_ROLE),
+                  category=discord_sync.CAPTAIN_ROOMS)
+
+
+@routes.post("/admin/discord/sync")
+async def admin_discord_sync(request: web.Request):
+    """Reset the server's players and captains roles, hand them out again and
+    rebuild the captain rooms, in the background."""
+    import discord_sync
+
+    _require_admin(request)
+    data = await request.post()
+    guild_id = int(re.sub(r"\D", "", data.get("guild_id", "")) or 0)
+    server = next((s for s in _discord_servers(data) if s["guild_id"] == guild_id), None)
+    if server is None:
+        raise web.HTTPBadRequest(text="No division uses that Discord server.")
+    if notify.client is None:
+        raise web.HTTPBadRequest(text="The bot isn't running here, so Discord can't be reached.")
+    if (_discord_runs.get(guild_id) or {}).get("running"):
+        raise web.HTTPBadRequest(text="A sync is already running for that server.")
+    chosen = [d["chosen"] for d in server["divisions"] if d["chosen"]]
+    by = (request.get("user") or {}).get("steam_name") or "an admin"
+    run = _discord_runs[guild_id] = {"running": True, "lines": [], "at": time.time(), "by": by,
+                                     "seasons": [f"{s['label']} · {s['division']}" for s in chosen]}
+
+    async def job():
+        try:
+            plan = await discord_sync.plan(notify.client, guild_id, store.signed_up_people(chosen))
+            run["lines"] = await discord_sync.apply(plan)
+        except Exception as e:
+            logger.exception("Discord sync failed")
+            run["lines"] = [f"The sync stopped: {e}"]
+        finally:
+            run["running"], run["at"] = False, time.time()
+
+    task = asyncio.create_task(job())
+    _discord_tasks.add(task)
+    task.add_done_callback(_discord_tasks.discard)
+    raise _go("/admin/discord?" + urlencode({f"season_{d['division']['id']}": d["chosen"]["id"]
+                                              for d in server["divisions"] if d["chosen"]}),
+              "Sync started.")
 
 
 @routes.get("/admin/feedback")

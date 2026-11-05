@@ -20,6 +20,7 @@ fantasy.py          The fantasy points formula
 formatters.py       Discord embeds
 rating_compute.py   Player ratings (rating_group.py pools a player's accounts)
 season_setup.py     Rolling a division over to a new season
+discord_sync.py     Season roles and captain rooms (Admin → Discord)
 config.py           Environment variables and constants
 web/                The website: routes.py, store.py, draft.py, templates/, static/
 botstats/           The web server the site runs in, stream cards and the APIs
@@ -57,7 +58,6 @@ for t in tests/test_*.py; do python3 $t; done
 | `SITE_UBERADMIN_STEAM_IDS` | Comma-separated ids of uberadmins (can add and remove site admins) |
 | `RATINGS_API_KEY` | Key for `/api/ratings`, `/api/costs` and `/api/season_stats` |
 | `PLAYER_API_KEYS` | `label:key` pairs for `/api/player` |
-| `RD2L_PLAYERS_URL`, `RD2L_CAPTAINS_URL` | Defaults for `/sync_roles_channels` |
 | `LOOKUP_CHANNEL_IDS` | Channels where anyone may use `/lookup` |
 | `LEAGUE_TZ` | Default `America/New_York` |
 | `TIP_URL` | The site's Tip jar and `/tipjar` |
@@ -94,6 +94,9 @@ fly ssh sftp get /tmp/snap.db copy.db -a dota-bot
   on its start date.
 - New seasons are set up under **Admin → Season setup** on the site; weeks,
   playoffs, champions and awards on the season's own page.
+- **Admin → Discord** hands out the server's `players` and `captains` roles
+  from a season's signups and rebuilds the `Captain Rooms` voice channels,
+  for every division sharing that Discord server at once.
 - The weekly fetch runs Thursdays at 09:00 UTC, after Wednesday league night.
   `/refresh_leaderboard` runs it on demand.
 
@@ -107,7 +110,6 @@ Image cards: `/player_card`, `/team_card`, `/h2h_card`, `/h2h_player`.
 
 Admin: `/config` (point the server's division at a league),
 `/refresh_leaderboard`, `/nuke`. Owner: `/set_player` (nicknames, rating
-overrides, linking a player's accounts), `/refresh_ratings`,
-`/sync_roles_channels`.
+overrides, linking a player's accounts), `/refresh_ratings`.
 
 `/tipjar` links the tip jar.

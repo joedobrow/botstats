@@ -18,6 +18,7 @@ first one somewhere both can reach (usually `db.py`) and call it from both place
 | Fantasy points | `fantasy.py` (`calculate_fantasy_points`, `breakdown`, `describe`) | arithmetic in templates |
 | Who is a person? | `db.person_of`, `db.accounts_of_people`, `store.alt_links()`: one row per person, filed under their main account. Anything matching a person to a season (drafts, captains, teams, titles) checks all of their accounts | comparing raw account ids |
 | How do I reach them on Discord? | `store.discord_handles()` / `store.player_discord()` | reading `site_users.discord` or signups directly |
+| The site doing something in Discord | `web.notify.client` (the bot) and `notify.owner()`, set by `bot.py` at startup | importing `bot` from the site |
 | Display names, avatars, badges | `store.player_identities` (bot's `db.get_display_names` rule) | `players.name` |
 
 ## Seasons are (id, division)

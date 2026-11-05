@@ -1,21 +1,11 @@
 """
-RD2L.gg scraping helpers for /sync_roles_channels.
-
-We use rd2l.gg's public HTML pages directly — the CSV export variants
-(?captains=1 etc.) are known to be unreliable (union in the wrong pool).
-The HTML pages are clean, ~1 request each.
-
-Endpoints:
-  - PLAYERS: HTML page at .../players — one <a href="/profile/N">Name</a>
-    per player, ~one per row of the draft-sheet table.
-  - CAPTAINS: HTML page at .../captains — same anchor pattern, just captains.
-  - DISCORD HANDLE: HTML page at /profile/<id> — regex-scraped for the
-    "Discord Name" field.
+RD2L.gg imports for Admin → Season setup: a season drafted on RD2L's sheet
+brings its rosters (a published CSV) and team names (rd2l.gg's teams page).
+A season drafted in the site's own draft room needs neither.
 """
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import re
 
@@ -25,70 +15,6 @@ logger = logging.getLogger(__name__)
 
 REQUEST_TIMEOUT = 30
 UA_HEADERS = {"User-Agent": "RD2L-EST-WED-Bot (contact: jdobrow@gmail.com)"}
-
-
-_PROFILE_ANCHOR_RE = re.compile(
-    r'<a[^>]+href="/profile/(\d+)"[^>]*>(.*?)</a>', re.DOTALL
-)
-
-
-async def fetch_roster_from_page(url: str, label: str = "roster") -> list[dict]:
-    """Fetch a rd2l.gg HTML roster page (/players or /captains) and return
-    [{name, account_id}], deduped by account_id in first-seen order.
-    """
-    timeout = aiohttp.ClientTimeout(total=REQUEST_TIMEOUT)
-    async with aiohttp.ClientSession(timeout=timeout, headers=UA_HEADERS) as s:
-        async with s.get(url) as r:
-            if r.status != 200:
-                raise RuntimeError(f"{label} page: HTTP {r.status} for {url}")
-            html = await r.text()
-    out: list[dict] = []
-    seen: set[int] = set()
-    for m in _PROFILE_ANCHOR_RE.finditer(html):
-        aid = int(m.group(1))
-        if aid in seen:
-            continue
-        raw_name = re.sub(r"<[^>]+>", "", m.group(2)).strip()
-        raw_name = re.sub(r"\s+", " ", raw_name)
-        if raw_name:
-            seen.add(aid)
-            out.append({"account_id": aid, "name": raw_name})
-    return out
-
-
-_DISCORD_RE = re.compile(
-    r'<p class="title">Discord Name</p>\s*<p class="subtitle">([^<]*)</p>'
-)
-
-
-async def fetch_discord_handle(session: aiohttp.ClientSession, account_id: int) -> str | None:
-    """Scrape a single player's rd2l.gg profile for their Discord handle.
-    Returns the raw string (as they entered it), or None on failure."""
-    url = f"https://rd2l.gg/profile/{account_id}"
-    try:
-        async with session.get(url) as r:
-            if r.status != 200:
-                return None
-            html = await r.text()
-    except Exception:
-        logger.warning("Discord scrape failed for %d", account_id, exc_info=False)
-        return None
-    m = _DISCORD_RE.search(html)
-    return m.group(1).strip() if m and m.group(1).strip() else None
-
-
-async def fetch_discord_handles(account_ids: list[int], concurrency: int = 6) -> dict[int, str | None]:
-    """Fetch Discord handles for many players concurrently.
-    Bounded concurrency so we don't hammer rd2l.gg. Returns {account_id: handle_or_None}."""
-    timeout = aiohttp.ClientTimeout(total=REQUEST_TIMEOUT)
-    sem = asyncio.Semaphore(concurrency)
-    result: dict[int, str | None] = {}
-    async with aiohttp.ClientSession(timeout=timeout, headers=UA_HEADERS) as s:
-        async def _one(aid: int):
-            async with sem:
-                result[aid] = await fetch_discord_handle(s, aid)
-        await asyncio.gather(*(_one(aid) for aid in account_ids))
-    return result
 
 
 # ---------------------------------------------------------------------------
