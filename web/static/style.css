@@ -491,6 +491,9 @@ h1 .edit-form input[type=text] { font-size: 1.2rem; font-weight: 700; width: aut
 .bracket-round { display: flex; flex-direction: column; min-width: 230px; }
 .bracket-round h3 { margin: 0 0 10px; font-size: 0.95rem; color: var(--muted); }
 .bracket-matches { flex: 1; display: flex; flex-direction: column; justify-content: space-around; gap: 18px; }
+.bracket-prize { min-width: 0; }
+.bracket-ring { font-size: 1.8rem; line-height: 1; opacity: 0.45; }
+.bracket-ring.won { opacity: 1; }
 .bracket-match { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--surface); }
 .bracket-match.decided { border-color: var(--win); }
 .bracket-seat { display: flex; align-items: center; gap: 8px; padding: 0 10px; height: 40px; box-sizing: border-box; }

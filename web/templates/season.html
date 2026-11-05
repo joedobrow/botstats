@@ -87,6 +87,12 @@
           </div>
         </div>
         {% endfor %}
+        {# Past the final, what it's for. A blank header keeps it level with the final. #}
+        <div class="bracket-round bracket-prize" aria-hidden="true">
+          <h3>&nbsp;</h3>
+          <div class="bracket-matches"><span class="bracket-ring{% if bracket.champion %} won{% endif %}"
+            {% if bracket.champion %}title="{{ bracket.champion_name }}"{% endif %}>&#x1F48D;</span></div>
+        </div>
       </div>
       {% if is_admin %}
       <div class="actions">
