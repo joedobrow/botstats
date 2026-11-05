@@ -28,3 +28,11 @@ rating_curve_analysis.features.json
 
 # Website uploads (team logos) — live on the data volume in production
 uploads/
+
+# League signup sheets and analysis made from them: players' statements,
+# Discord names and ratings. Kept on this machine for the scripts/ that read
+# them, never published.
+data/captains.csv
+data/draft-sheet*.csv
+data/players*.csv
+team_playoff_analysis.csv

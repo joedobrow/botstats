@@ -368,7 +368,7 @@
     <tbody>
     {% for m in rows %}
       <tr>
-        <td class="nowrap">{{ m.start_time|date("%b %-d") }}</td>
+        <td class="nowrap"><a href="/match/{{ m.match_id }}">{{ m.start_time|date("%b %-d") }}</a></td>
         {% if with_teams %}
         <td {% if m.radiant_win %}class="win"{% endif %}>{{ team_cell(season, m.radiant_team, team_names) }}</td>
         <td class="num">{{ m.radiant_score }}–{{ m.dire_score }}</td>

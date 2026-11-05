@@ -408,6 +408,15 @@ a.tag.status-signups:hover { text-decoration: underline; }
 .hero-list { display: flex; flex-wrap: wrap; gap: 8px; }
 .hero-chip { display: flex; align-items: center; gap: 8px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 5px 10px; }
 h2.side { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.scoreboard { table-layout: fixed; min-width: 780px; }
+.scoreboard .sb-player { width: 150px; }
+.scoreboard .sb-draft { width: 210px; }
+.scoreboard .sb-kda { width: 44px; }
+.scoreboard .sb-lh { width: 76px; }
+.scoreboard .sb-rate { width: 58px; }
+.scoreboard .sb-dmg { width: 88px; }
+.scoreboard .sb-fantasy { width: 80px; }
+.scoreboard .sb-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 h2.side.radiant { color: var(--radiant); }
 h2.side.dire { color: var(--dire); }
 h2.side .score { color: var(--text); }
