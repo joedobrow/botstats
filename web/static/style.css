@@ -470,6 +470,13 @@ ul.plain li:last-child { border-bottom: 0; }
 .bar-day { font-size: 0.6rem; color: var(--muted); text-align: center; padding-top: 3px; }
 .admin-nav a.active { font-weight: 700; color: var(--accent); }
 
+/* adcl.gg/soon: a clock alone on the night palette. */
+body.soon { min-height: 100vh; margin: 0; display: grid; place-items: center; background: var(--bg); }
+.soon-clock { font: 600 clamp(2.6rem, 14vw, 9rem)/1 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+              color: var(--text); letter-spacing: 0.04em; font-variant-numeric: tabular-nums; }
+.soon-clock.done { color: var(--accent); animation: soon-pulse 1.6s ease-in-out infinite; }
+@keyframes soon-pulse { 50% { opacity: 0.35; } }
+
 /* A one-select season picker, as wide as its longest season. */
 .season-pick { margin: 14px 0; }
 .season-pick select { height: var(--control-h); width: auto; max-width: 100%; }

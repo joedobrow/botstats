@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>· · ·</title>
+<meta property="og:title" content="· · ·">
+<meta property="og:site_name" content="ADCL">
+<meta name="theme-color" content="#1a1510">
+<meta name="robots" content="noindex">
+<link rel="icon" href="/favicon.ico?v={{ asset_version }}" sizes="16x16 32x32 48x48">
+<link rel="stylesheet" href="/static/style.css?v={{ asset_version }}">
+</head>
+<body class="soon">
+<div class="soon-clock" id="clock" data-target="{{ target }}">{{ initial }}</div>
+<script>
+(function () {
+  var el = document.getElementById("clock"), target = +el.dataset.target * 1000;
+  var pad = function (n) { return (n < 10 ? "0" : "") + n; };
+  function tick() {
+    var left = Math.max(0, Math.round((target - Date.now()) / 1000));
+    el.textContent = pad(Math.floor(left / 3600)) + ":" + pad(Math.floor(left % 3600 / 60)) + ":" + pad(left % 60);
+    if (!left) { el.classList.add("done"); return; }
+    setTimeout(tick, 1000 - Date.now() % 1000);
+  }
+  tick();
+})();
+</script>
+</body>
+</html>
