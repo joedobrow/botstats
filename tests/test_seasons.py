@@ -83,6 +83,9 @@ def main() -> int:
     # The leaderboard cut every table shares.
     check("early on, half the most anyone has played", db.min_games_for(6) == 3)
     check("late on, never more than ten", db.min_games_for(30) == 10)
+    check("a minimum someone asks for wins", db.games_needed(30, 4) == 4 and db.games_needed(30, 0) == 0)
+    check("a draft-relative stat ranks everyone drafted by default", db.games_needed(30, None, "value") == 0)
+    check("but takes a minimum when one is asked for", db.games_needed(30, 10, "value") == 10)
 
     print()
     if failures:

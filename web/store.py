@@ -1424,7 +1424,7 @@ def season_leaders(season: dict) -> tuple[list[dict], int, int]:
 # Stats that only mean anything against one draft, so they stay in a season
 # and skip the games cut: a deserved cost or an attendance rate is measured
 # from the draft, not from the games.
-DRAFT_RELATIVE = {"value", "attendance"}
+DRAFT_RELATIVE = db.DRAFT_RELATIVE_STATS
 
 DEFAULT_MIN_GAMES = db.DEFAULT_MIN_GAMES
 
@@ -1438,8 +1438,7 @@ def fantasy_table(season: dict | None, stat: str = "fantasy_points", week: int |
 
     season=None pools every season; week picks one of that season's weeks.
     min_games keeps a stand-in's one good night off the top of the table, and
-    defaults to the bot's own cut (db.min_games_for); 0 shows everyone. A draft-relative stat
-    ignores it, since being drafted is the qualification there.
+    defaults to the bot's own cut (db.games_needed); 0 shows everyone.
     """
     import fantasy
 
@@ -1460,10 +1459,7 @@ def fantasy_table(season: dict | None, stat: str = "fantasy_points", week: int |
         rows = [r for r in rows if r.get("cost") is not None]
 
     max_games = max((r.get("games_played") or 0 for r in rows), default=0)
-    if stat in DRAFT_RELATIVE:
-        threshold = 0
-    else:
-        threshold = db.min_games_for(max_games) if min_games is None else min_games
+    threshold = db.games_needed(max_games, min_games, stat)
     qualified = [r for r in rows if (r.get("games_played") or 0) >= threshold]
     # Early in a season nobody has ten games yet, and a leaderboard showing
     # nothing is worse than one showing everyone with a line saying why the

@@ -2110,12 +2110,25 @@ def min_games_for(max_games: int) -> int:
     return min(DEFAULT_MIN_GAMES, max_games // 2)
 
 
-def qualified(stats: list[dict], min_games: int | None = None) -> tuple[list[dict], int, int]:
-    """Players with enough games to rank, so stand-ins don't top a
-    leaderboard: min_games_for by default; min_games sets it outright
-    instead, and 0 ranks everyone. Returns (rows, threshold, max_games)."""
+# Stats measured against a player's draft cost: only drafted players have one.
+DRAFT_RELATIVE_STATS = {"value", "attendance"}
+
+
+def games_needed(max_games: int, min_games: int | None = None, stat: str | None = None) -> int:
+    """How many games it takes to rank: min_games when someone asks for a
+    number (0 ranks everyone); otherwise min_games_for, except on a
+    draft-relative stat, where being drafted is the qualification."""
+    if min_games is not None:
+        return max(0, min_games)
+    return 0 if stat in DRAFT_RELATIVE_STATS else min_games_for(max_games)
+
+
+def qualified(stats: list[dict], min_games: int | None = None,
+              stat: str | None = None) -> tuple[list[dict], int, int]:
+    """Players with enough games to rank (games_needed), so stand-ins don't
+    top a leaderboard. Returns (rows, threshold, max_games)."""
     max_games = max((s.get("games_played") or 0 for s in stats), default=0)
-    threshold = min_games_for(max_games) if min_games is None else max(0, min_games)
+    threshold = games_needed(max_games, min_games, stat)
     return [s for s in stats if (s.get("games_played") or 0) >= threshold], threshold, max_games
 
 

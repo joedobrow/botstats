@@ -10,7 +10,7 @@ from fetcher import fetch_and_store_matches_for_division, fetch_and_store_season
 from db import (init_db, get_division, get_guild_division, update_division,
                 get_all_divisions, get_scold_channel, set_guild_settings, get_guild_settings,
                 get_season, upsert_season, set_current_season, season_label, ranked, qualified,
-                link_account)
+                link_account, DRAFT_RELATIVE_STATS)
 from formatters import EMBED_COLOUR, format_leaderboard, format_player_stats, format_team_stats
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -336,12 +336,11 @@ async def leaderboard(interaction: discord.Interaction, stat: app_commands.Choic
             stats = ranked(get_stats_for_season_week(season_id, division["id"], resolved_week))
             week_label = f"Week {resolved_week}"
 
-        # value/attendance lean on draft data: filter to drafted-only players
-        # (cost set) and skip the min-games threshold. Other stats apply a
-        # min-games qualification. Either way, top 10 unless all=True.
-        draft_only_stats = {"value", "attendance"}
-        if stat.value in draft_only_stats:
+        # value/attendance lean on draft data: drafted players only. The games
+        # bar is db.games_needed, the site's too. Either way, top 10 unless all=True.
+        if stat.value in DRAFT_RELATIVE_STATS:
             stats = [s for s in stats if s.get("cost") is not None]
+        if stat.value in DRAFT_RELATIVE_STATS and min_games is None:
             threshold = None
             max_games = None
         elif all and min_games is None:
@@ -351,7 +350,7 @@ async def leaderboard(interaction: discord.Interaction, stat: app_commands.Choic
             # The bar is db.min_games_for (the site's too) unless min_games
             # names one; all=True with a min_games still means "no top ten",
             # not "no bar".
-            stats, threshold, max_games = qualified(stats, min_games)
+            stats, threshold, max_games = qualified(stats, min_games, stat.value)
 
         limit = None if all else 10
 

@@ -12,7 +12,7 @@ first one somewhere both can reach (usually `db.py`) and call it from both place
 |---|---|---|
 | Which season is a division playing? | `db.playing_season_id`, i.e. `division["current_season_id"]` from any `db` division getter; `store.current_seasons()` on the site | the raw `divisions.current_season_id` column (that's `division["season_pointer"]`, which only the weekly fetch reads) |
 | What rating do we show? | `db.displayed_ratings(division)`, `db.displayed_rating(aid, division)`, `store.player_ratings()` | `player_ratings_cache.internal_rating` plus your own fantasy adjustment |
-| Who has enough games to rank? | `db.qualified` / `db.min_games_for` | a fixed number in a template or route |
+| Who has enough games to rank? | `db.qualified` / `db.games_needed` | a fixed number in a template or route |
 | Standings, tiebreaks | `store.season_teams` (the bot's `/standings` calls it) | re-sorting teams elsewhere |
 | A player's season stats | `db.get_all_time_stats(division, season)` | `store.aggregate` (only for totals the bot has no view of) |
 | Fantasy points | `fantasy.py` (`calculate_fantasy_points`, `breakdown`, `describe`) | arithmetic in templates |
