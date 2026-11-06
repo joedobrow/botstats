@@ -471,6 +471,11 @@ async def season_any_division(request: web.Request):
 async def season_page(request: web.Request):
     season = _season_or_404(request)
     tab = request.query.get("tab", "matchups")
+    # Leaders and Team stats were tabs of their own before they became the
+    # Fantasy tab's two views; old links still land on the right one.
+    view = request.query.get("view")
+    if tab in ("leaders", "team-stats"):
+        tab, view = "fantasy", "teams" if tab == "team-stats" else view
     ctx: dict = {"season": season, "tab": tab, "title": season["label"],
                  "draft_started": draft.state(season).phase != draft.LOBBY}
     if tab == "playoffs":
@@ -497,8 +502,12 @@ async def season_page(request: web.Request):
         ctx["awards"] = store.season_awards(season)
         ctx["award_choices"] = list(store.AWARD_LABELS.items())
         ctx["season_team_names"] = sorted(t["name"] for t in store.season_teams(season))
-    elif tab == "leaders":
-        ctx["leaders"], ctx["min_games"], ctx["max_games"] = store.season_leaders(season)
+    elif tab == "fantasy":
+        ctx["view"] = "teams" if view == "teams" else "players"
+        if ctx["view"] == "teams":
+            ctx["teams"], ctx["stats"] = store.season_teams(season), store.team_stats(season)
+        else:
+            ctx["leaders"], ctx["min_games"], ctx["max_games"] = store.season_leaders(season)
     elif tab == "matches":
         matches = store.season_matches(season)
         attributed = [m for m in matches if m["radiant_team"] or m["dire_team"]]
@@ -514,8 +523,6 @@ async def season_page(request: web.Request):
             [p["account_id"] for t in teams for p in t["roster"]]
             + [t["captain_account_id"] for t in teams if t["captain_account_id"]])
         ctx["teams"], ctx["idents"] = teams, idents
-    elif tab == "team-stats":
-        ctx["teams"], ctx["stats"] = store.season_teams(season), store.team_stats(season)
     else:
         ctx["tab"] = "matchups"
         ctx["rounds"] = store.season_matchups(season)
@@ -554,7 +561,7 @@ async def teams_page(request: web.Request):
     if season is None:
         current = store.current_seasons()
         season = current[0] if current else (seasons[0] if seasons else None)
-    raise web.HTTPMovedPermanently(f"{season_url(season)}?tab=team-stats" if season else "/seasons")
+    raise web.HTTPMovedPermanently(f"{season_url(season)}?tab=fantasy&view=teams" if season else "/seasons")
 
 
 @routes.get("/hall-of-fame")

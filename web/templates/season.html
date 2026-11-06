@@ -25,7 +25,7 @@
   {% if season.signups_open or not season.started %}
   {% set tabs = tabs + [("signups", "Signups (" ~ season.signup_count ~ ")")] %}
   {% endif %}
-  {% for key, label in tabs + [("teams", "Teams"), ("team-stats", "Team stats"), ("matches", "Matches"), ("playoffs", "Playoffs"), ("champions", "Champions"), ("leaders", "Leaders")] %}
+  {% for key, label in tabs + [("teams", "Teams"), ("matches", "Matches"), ("playoffs", "Playoffs"), ("champions", "Champions"), ("fantasy", "Fantasy")] %}
   <a href="?tab={{ key }}" {% if tab == key %}class="active"{% endif %}>{{ label }}</a>
   {% endfor %}
 </nav>
@@ -306,7 +306,52 @@
   <p class="muted">Teams appear here once the draft is done.</p>
   {% endif %}
 
-{% elif tab == "team-stats" %}
+{% elif tab == "matches" %}
+  {% if more_matches %}
+  <p><a class="button" href="/matches?season={{ season.id }}&division={{ season.division_id }}">See all</a></p>
+  {% endif %}
+  {% macro match_table(rows, with_teams) %}
+  <div class="scroll">
+  <table>
+    <thead><tr><th>Date</th>{% if with_teams %}<th>Radiant</th><th class="num">Score</th><th>Dire</th>{% else %}<th class="num">Score</th><th>Winner</th>{% endif %}<th class="num">Length</th><th></th></tr></thead>
+    <tbody>
+    {% for m in rows %}
+      <tr>
+        <td class="nowrap"><a href="/match/{{ m.match_id }}">{{ m.start_time|date("%b %-d") }}</a></td>
+        {% if with_teams %}
+        <td {% if m.radiant_win %}class="win"{% endif %}>{{ team_cell(season, m.radiant_team, team_names) }}</td>
+        <td class="num">{{ m.radiant_score }}–{{ m.dire_score }}</td>
+        <td {% if not m.radiant_win %}class="win"{% endif %}>{{ team_cell(season, m.dire_team, team_names) }}</td>
+        {% else %}
+        <td class="num">{{ m.radiant_score }}–{{ m.dire_score }}</td>
+        <td>{{ "Radiant" if m.radiant_win else "Dire" }}</td>
+        {% endif %}
+        <td class="num">{{ m.duration|duration }}</td>
+        <td><a href="/match/{{ m.match_id }}">Details</a></td>
+      </tr>
+    {% else %}
+      <tr><td colspan="6" class="muted">No matches yet.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% endmacro %}
+  {{ match_table(matches, True) }}
+  {% if other_matches %}
+  <h2>Other games</h2>
+  <p class="muted small">Games in this league where neither side was a drafted roster, such as inhouses and pickup games.</p>
+  {{ match_table(other_matches, False) }}
+  {% endif %}
+
+{% elif tab == "fantasy" %}
+  <div class="subtabs-row">
+    <nav class="subtabs" aria-label="Fantasy">
+      {% for key, label in [("players", "Players"), ("teams", "Teams")] %}
+      <a href="?tab=fantasy&amp;view={{ key }}"{% if view == key %} class="active" aria-current="page"{% endif %}>{{ label }}</a>
+      {% endfor %}
+    </nav>
+  </div>
+  {% if view == "teams" %}
   {% if teams %}
   <div class="scroll">
   <table class="sortable stats-table">
@@ -356,45 +401,7 @@
   {% else %}
   <p class="muted">Teams appear here once the draft is done.</p>
   {% endif %}
-
-{% elif tab == "matches" %}
-  {% if more_matches %}
-  <p><a class="button" href="/matches?season={{ season.id }}&division={{ season.division_id }}">See all</a></p>
-  {% endif %}
-  {% macro match_table(rows, with_teams) %}
-  <div class="scroll">
-  <table>
-    <thead><tr><th>Date</th>{% if with_teams %}<th>Radiant</th><th class="num">Score</th><th>Dire</th>{% else %}<th class="num">Score</th><th>Winner</th>{% endif %}<th class="num">Length</th><th></th></tr></thead>
-    <tbody>
-    {% for m in rows %}
-      <tr>
-        <td class="nowrap"><a href="/match/{{ m.match_id }}">{{ m.start_time|date("%b %-d") }}</a></td>
-        {% if with_teams %}
-        <td {% if m.radiant_win %}class="win"{% endif %}>{{ team_cell(season, m.radiant_team, team_names) }}</td>
-        <td class="num">{{ m.radiant_score }}–{{ m.dire_score }}</td>
-        <td {% if not m.radiant_win %}class="win"{% endif %}>{{ team_cell(season, m.dire_team, team_names) }}</td>
-        {% else %}
-        <td class="num">{{ m.radiant_score }}–{{ m.dire_score }}</td>
-        <td>{{ "Radiant" if m.radiant_win else "Dire" }}</td>
-        {% endif %}
-        <td class="num">{{ m.duration|duration }}</td>
-        <td><a href="/match/{{ m.match_id }}">Details</a></td>
-      </tr>
-    {% else %}
-      <tr><td colspan="6" class="muted">No matches yet.</td></tr>
-    {% endfor %}
-    </tbody>
-  </table>
-  </div>
-  {% endmacro %}
-  {{ match_table(matches, True) }}
-  {% if other_matches %}
-  <h2>Other games</h2>
-  <p class="muted small">Games in this league where neither side was a drafted roster, such as inhouses and pickup games.</p>
-  {{ match_table(other_matches, False) }}
-  {% endif %}
-
-{% elif tab == "leaders" %}
+  {% else %}
   <div class="scroll">
   <table class="sortable">
     <thead><tr><th data-sort-type="num">#</th><th data-sort-type="text">Player</th><th class="num" data-sort-type="num" data-sort-first="desc">Games</th><th class="num" data-sort-type="num" data-sort-first="desc">W–L</th><th class="num" data-sort-type="num" data-sort-first="desc">Fantasy</th><th class="num" data-sort-type="num" data-sort-first="desc" title="What they were worth at the draft, less what they cost">Value</th><th class="num" data-sort-type="num" data-sort-first="desc" title="Share of their team's games they turned up for">Attendance</th></tr></thead>
@@ -420,6 +427,7 @@
     </tbody>
   </table>
   </div>
+  {% endif %}
 
 {% elif tab == "signups" %}
   <div class="subtabs-row">
