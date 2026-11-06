@@ -397,18 +397,6 @@ async def info(request: web.Request):
     raise web.HTTPMovedPermanently("/about")
 
 
-# What adcl.gg/soon counts down to: 10:00 AM Eastern, Nov 7, 2026.
-SOON_AT = 1794063600
-
-
-@routes.get("/soon")
-async def soon(request: web.Request):
-    """A clock and nothing else, for a teaser in announcements."""
-    left = max(0, SOON_AT - int(time.time()))
-    return render(request, "soon.html", title="· · ·", target=SOON_AT,
-                  initial=f"{left // 3600:02d}:{left % 3600 // 60:02d}:{left % 60:02d}")
-
-
 @routes.get("/about")
 async def about(request: web.Request):
     return render(request, "text_page.html", title="About", text=store.get_text("about"))
