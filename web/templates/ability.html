@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+{% from "macros.html" import player_link, pick_icon, pick_link, draft_icons, result_word %}
+{% block content %}
+{% set hero = a.ability_id < 0 %}
+<p class="small"><a href="/fantasy?view={{ 'heroes' if hero else 'abilities' }}{% if back_query %}&{{ back_query }}{% endif %}">← {{ "Heroes" if hero else "Abilities" }}</a></p>
+<div class="page-head">
+  <h1 class="pick-title">{{ pick_icon(a) }} {{ a.name }}</h1>
+  <form method="get" class="inline-filters">
+    <select name="season" aria-label="Season" onchange="this.form.submit()">
+      <option value=""{% if not season %} selected{% endif %}>Every season</option>
+      {% for s in seasons %}<option value="{{ s.id }}"{% if season and season.id == s.id %} selected{% endif %}>{{ s.label }}</option>{% endfor %}
+    </select>
+    {% if divisions|length > 1 %}
+    <select name="division" aria-label="Division" onchange="this.form.submit()">
+      <option value="">Any division</option>
+      {% for d in divisions %}<option value="{{ d.id }}"{% if (season and season.division_id == d.id) or (not season and division_id == d.id) %} selected{% endif %}>{{ d.name }}</option>{% endfor %}
+    </select>
+    {% endif %}
+    <noscript><button>Show</button></noscript>
+  </form>
+</div>
+
+{% set s = a.summary %}
+{% if not s %}
+<p class="muted">Not drafted{% if season %} in {{ season.label }}{% endif %}.</p>
+{% else %}
+<div class="stat-row">
+  <div><span class="stat">{{ s.games_played }}</span><span class="label">Picks · by {{ s.players }} player{{ "s" if s.players != 1 }}</span></div>
+  <div><span class="stat">{{ s.wins }}–{{ s.losses }}</span><span class="label">{{ "%.0f"|format(s.win_pct) }}% won</span></div>
+  <div><span class="stat">{{ "%.1f"|format(s.fantasy_points) }}</span><span class="label" title="Average fantasy points of the players who drafted it">Fantasy</span></div>
+  <div><span class="stat {{ 'win' if s.lift >= 0.5 else 'loss' if s.lift <= -0.5 }}">{{ "%+.1f"|format(s.lift) }}</span><span class="label" title="How those players scored compared with their own average">vs own average</span></div>
+  <div><span class="stat">{{ "%.1f"|format(s.pick_order) }}</span><span class="label" title="Average pick number in the draft, 1 to 50">Avg pick</span></div>
+  <div><span class="stat">{{ "%.1f"|format(s.stuns) }}s</span><span class="label" title="Average stun seconds of the players who drafted it">Stuns</span></div>
+  <div><span class="stat stat-small">{{ "%.1f"|format(s.kills) }}/{{ "%.1f"|format(s.deaths) }}/{{ "%.1f"|format(s.assists) }}</span><span class="label">K/D/A</span></div>
+</div>
+{% if world %}
+<div class="stat-row">
+  <div><span class="stat">{{ "%.1f"|format(world.win_pct) if world.win_pct is not none else "—" }}%</span><span class="label" title="Windrun.io's win rate for it in high-skill public games">Public win %</span></div>
+  <div><span class="stat">{{ "%.1f"|format(world.pick_num) if world.pick_num is not none else "—" }}</span><span class="label" title="Windrun.io's average pick number for it in high-skill public games">Public avg pick</span></div>
+</div>
+{% endif %}
+
+<div class="ability-columns">
+  <section>
+    <h2>Pick round</h2>
+    {% set most = [a.rounds|max, 1]|max %}
+    <div class="round-bars">
+      {% for n in a.rounds %}
+      <div class="round-bar"><span class="muted small">Round {{ loop.index }}</span>
+        <span class="round-fill"><span style="width: {{ (100 * n / most)|round(1) }}%"></span></span>
+        <span class="num small">{{ n }}</span></div>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section>
+    <h2>Drafted with</h2>
+    <div class="scroll">
+    <table class="sortable compact">
+      <thead><tr><th data-sort-type="text">{{ "Ability" if hero else "Pick" }}</th>
+        <th class="num" data-sort-type="num" data-sort-first="desc" title="Games drafted together by the same player">Together</th>
+        <th class="num" data-sort-type="num" data-sort-first="desc">Win %</th></tr></thead>
+      <tbody>
+      {% for p in a.partners[:15] %}
+        <tr><td data-sort="{{ p.name|lower }}">{{ pick_link(p.ability_id, p, back_query) }}</td>
+          <td class="num">{{ p.games }}</td>
+          <td class="num {{ 'win' if p.win_pct > 50 else 'loss' if p.win_pct < 50 }}" data-sort="{{ p.win_pct }}">{{ "%.0f"|format(p.win_pct) }}%</td></tr>
+      {% else %}<tr><td colspan="3" class="muted">Nothing yet.</td></tr>{% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </section>
+</div>
+
+<h2>Who drafts it</h2>
+<div class="scroll">
+<table class="sortable">
+  <thead><tr><th data-sort-type="text">Player</th>
+    <th class="num" data-sort-type="num" data-sort-first="desc">Games</th>
+    <th class="num" data-sort-type="num" data-sort-first="desc">W–L</th>
+    <th class="num" data-sort-type="num" data-sort-first="desc">Fantasy</th>
+    <th class="num" data-sort-type="num" data-sort-first="desc" title="Compared with their own average">vs own avg</th></tr></thead>
+  <tbody>
+  {% for p in a.pickers %}
+    <tr><td data-sort="{{ p.name|lower }}">{{ player_link(p.account_id, p.name) }}</td>
+      <td class="num">{{ p.games }}</td>
+      <td class="num" data-sort="{{ p.wins / p.games }}">{{ p.wins }}–{{ p.games - p.wins }}</td>
+      <td class="num" data-sort="{{ p.fantasy_points }}">{{ "%.1f"|format(p.fantasy_points) }}</td>
+      <td class="num {{ 'win' if p.lift >= 0.5 else 'loss' if p.lift <= -0.5 }}" data-sort="{{ p.lift }}">{{ "%+.1f"|format(p.lift) }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+
+<h2>Games</h2>
+<div class="scroll">
+<table class="sortable">
+  <thead><tr><th data-sort-type="num" data-sort-first="desc">Date</th><th data-sort-type="text">Player</th><th>Draft</th>
+    <th class="num" data-sort-type="num" title="Pick number in the draft">Pick</th>
+    <th data-sort-type="text">Result</th>
+    <th class="num" data-sort-type="num" data-sort-first="desc">Fantasy</th>
+    <th class="num" data-sort-type="num" data-sort-first="desc" title="Compared with their own average">vs own avg</th></tr></thead>
+  <tbody>
+  {% for g in a.games %}
+    <tr><td class="nowrap" data-sort="{{ g.start_time }}"><a href="/match/{{ g.match_id }}">{{ g.start_time|date("%b %-d, %Y") }}</a></td>
+      <td data-sort="{{ g.name|lower }}">{{ player_link(g.account_id, g.name) }}</td>
+      <td>{{ draft_icons(g.build) }}</td>
+      <td class="num">{{ g.pick_order }}</td>
+      <td class="{{ 'win' if g.won else 'loss' }}">{{ result_word(g.match_id, g.won) }}</td>
+      <td class="num" data-sort="{{ g.fantasy_points }}">{{ "%.1f"|format(g.fantasy_points) }}</td>
+      <td class="num {{ 'win' if g.lift >= 0.5 else 'loss' if g.lift <= -0.5 }}" data-sort="{{ g.lift }}">{{ "%+.1f"|format(g.lift) }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}
+{% endblock %}

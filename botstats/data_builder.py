@@ -156,10 +156,17 @@ async def build_ad_data() -> Optional[dict]:
     heroes_abilities: dict[int, list[dict]] = {}
     hero_model_stats: dict[int, dict] = {}
 
+    # Every pick by its id (hero models negative), for the site's ability
+    # pages to set the league's numbers beside the public's (global_stats).
+    by_id: dict[int, dict] = {}
     for stat in ability_stats:
         aid = stat.get("abilityId")
         if aid is None:
             continue
+        wr, pp = stat.get("winrate"), stat.get("avgPickPosition")
+        by_id[aid] = {"win_pct": round(wr * 100, 2) if isinstance(wr, (int, float)) else None,
+                      "pick_num": round(pp, 2) if isinstance(pp, (int, float)) else None,
+                      "picks": stat.get("numPicks")}
 
         # Negative ability IDs are hero model rows (abilityId = -heroId, ownerHero is None)
         if aid < 0:
@@ -269,9 +276,41 @@ async def build_ad_data() -> Optional[dict]:
         "data_json": json.dumps(data_compact, ensure_ascii=False),
         "hs_json": json.dumps(hs_stats, ensure_ascii=False),
         "roles_json": json.dumps(roles, ensure_ascii=False),
+        "by_id": by_id,
     }
 
     _cache = result
     _cache_time = time.monotonic()
     logger.info("Built AD helper data: %d heroes, %d ability stats", len(data_compact), len(hs_stats))
     return result
+
+
+def global_stats(ability_id: int) -> dict | None:
+    """Windrun's high-skill numbers for one pick, from the AD helper's copy.
+    Never fetches on a page's time: when the copy is missing or stale, a
+    fetch starts in the background and this answers from what there is."""
+    import asyncio
+    global _refreshing, _last_try
+    now = time.monotonic()
+    stale = not _cache or (now - _cache_time) >= CACHE_TTL
+    if stale and not _refreshing and now - _last_try >= RETRY_AFTER:
+        # One fetch at a time, and a pause after a failed one: windrun being
+        # down shouldn't mean a request per page view.
+        _refreshing, _last_try = True, now
+
+        async def refresh():
+            global _refreshing
+            try:
+                await build_ad_data()
+            finally:
+                _refreshing = False
+        try:
+            asyncio.get_running_loop().create_task(refresh())
+        except RuntimeError:
+            _refreshing = False
+    return (_cache.get("by_id") or {}).get(ability_id)
+
+
+_refreshing = False
+_last_try = float("-inf")
+RETRY_AFTER = 600

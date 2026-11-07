@@ -28,9 +28,20 @@
 {%- elif alone %}{{ h.name }}{% endif %}
 {%- endmacro %}
 
-{# A player's Ability Draft picks as icons: the hero model, then abilities. #}
+{# One drafted pick's icon (store.draft_pick): a hero model or an ability. #}
+{% macro pick_icon(p) -%}
+{% if p.kind == "hero" %}<img class="draft-model" loading="lazy" src="https://cdn.cloudflare.steamstatic.com/apps/dota2/images/dota_react/heroes/icons/{{ p.slug }}.png" alt="{{ p.name }}" title="{{ p.name }}">{% elif p.img %}<img class="draft-ability" loading="lazy" src="https://cdn.cloudflare.steamstatic.com{{ p.img }}" alt="{{ p.name }}" title="{{ p.name }}">{% else %}<span class="draft-ability draft-unknown" title="{{ p.name }}">?</span>{% endif %}
+{%- endmacro %}
+
+{# A pick's name with its icon, linked to its page. #}
+{% macro pick_link(id, p, query="") -%}
+<a class="pick-link" href="/ability/{{ id }}{% if query %}?{{ query }}{% endif %}">{{ pick_icon(p) }}<span>{{ p.name }}</span></a>
+{%- endmacro %}
+
+{# A player's Ability Draft picks as icons: the hero model, then abilities.
+   Each links to its page when the picks carry their ids. #}
 {% macro draft_icons(picks) -%}
-<span class="draft">{% for p in picks %}{% if p.kind == "hero" %}<img class="draft-model" src="https://cdn.cloudflare.steamstatic.com/apps/dota2/images/dota_react/heroes/icons/{{ p.slug }}.png" alt="{{ p.name }}" title="{{ p.name }}">{% elif p.img %}<img class="draft-ability" src="https://cdn.cloudflare.steamstatic.com{{ p.img }}" alt="{{ p.name }}" title="{{ p.name }}">{% else %}<span class="draft-ability draft-unknown" title="{{ p.name }}">?</span>{% endif %}{% endfor %}</span>
+<span class="draft">{% for p in picks %}{% if p.id %}<a href="/ability/{{ p.id }}">{{ pick_icon(p) }}</a>{% else %}{{ pick_icon(p) }}{% endif %}{% endfor %}</span>
 {%- endmacro %}
 
 {# A team as people remember it: its name, and its captain's when that's

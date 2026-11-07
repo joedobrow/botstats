@@ -983,3 +983,21 @@ a.result-link { color: inherit; }
 .post-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; }
 .reaction { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; border: 1px solid var(--border);
             border-radius: 999px; font-size: 0.85rem; background: var(--bg); }
+
+/* Fantasy → Abilities and Heroes, and each pick's page (ability.html). */
+.pick-link { display: inline-flex; align-items: center; gap: 8px; }
+.pick-link img { width: 26px; height: 26px; border-radius: 4px; }
+.pick-link img.draft-model { object-fit: contain; }
+.pick-link .draft-unknown { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 4px; background: var(--tag-bg); color: var(--muted); font-size: 0.8rem; }
+.pick-title { display: flex; align-items: center; gap: 12px; }
+.pick-title img { width: 48px; height: 48px; border-radius: 6px; object-fit: contain; }
+.inline-filters { display: flex; gap: 8px; flex-wrap: wrap; }
+.inline-filters select { width: auto; }
+.ability-columns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 24px; margin-top: 8px; }
+@media (max-width: 720px) { .ability-columns { grid-template-columns: 1fr; } }
+.round-bars { display: flex; flex-direction: column; gap: 8px; }
+.round-bar { display: grid; grid-template-columns: 64px 1fr 32px; align-items: center; gap: 10px; }
+.round-fill { height: 12px; background: var(--tag-bg); border-radius: 999px; overflow: hidden; }
+.round-fill > span { display: block; height: 100%; background: var(--accent); border-radius: 999px; }
+.inline-filters { flex-direction: row; align-items: center; }
+.stat.stat-small { font-size: 1.05rem; line-height: 1.75rem; white-space: nowrap; }

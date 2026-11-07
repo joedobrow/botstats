@@ -2101,7 +2101,7 @@ def match_detail(match_id: int) -> dict | None:
     for p in players:
         p["display_name"] = idents.get(p["account_id"], {}).get("name") or p["name"]
         p["hero"] = hero(p["hero_id"])
-        p["draft"] = [draft_pick(i) for i in draft.get(p["account_id"], [])]
+        p["draft"] = [{**draft_pick(i), "id": i} for i in draft.get(p["account_id"], [])]
         p["match_duration"] = m["duration"]
         p["fantasy_points"] = db._per_match_fp(p)
         p["fantasy_breakdown"] = fantasy.breakdown(db.per_match_stats(p))
@@ -2207,3 +2207,130 @@ def unclaimed_sides(season: dict) -> list[dict]:
 def unclaimed_count() -> int:
     """Games needing a ruling in the seasons being played now: the admin alert."""
     return sum(len(unclaimed_sides(s)) for s in current_seasons())
+
+
+# ---------------------------------------------------------------------------
+# Abilities and hero models, by what the players who drafted them did
+# (db.get_draft_picks). A pick's numbers are its player's whole game.
+# ---------------------------------------------------------------------------
+
+def _pick_rows(season: dict | None, only_divisions: list[dict] | None = None) -> list[dict]:
+    if season:
+        scopes = [db.season_scope(season["id"], season["division_id"])]
+        key = ("draft_picks", season["id"], season["division_id"])
+    else:
+        divs = only_divisions if only_divisions is not None else divisions()
+        scopes = [db.MatchScope(d["id"]) for d in divs]
+        key = ("draft_picks", None, tuple(sorted(d["id"] for d in divs)))
+    return db._derived(key, lambda: [r for sc in scopes for r in db.get_draft_picks(sc)])
+
+
+def _own_averages(rows: list[dict], links: dict[int, int]) -> dict[int, float]:
+    """{person: their average fantasy points per game}, over the same games."""
+    games: dict[tuple[int, int], float] = {}
+    for r in rows:
+        games[(r["match_id"], links.get(r["account_id"], r["account_id"]))] = r["fantasy_points"]
+    totals: dict[int, list[float]] = {}
+    for (_, person), fp in games.items():
+        totals.setdefault(person, []).append(fp)
+    return {p: sum(v) / len(v) for p, v in totals.items()}
+
+
+_PICK_AVERAGED = ("fantasy_points", "lift", "pick_order", "stuns", "kills", "deaths", "assists",
+                  "hero_damage", "gpm")
+
+
+def _summarize(picks: list[dict], own: dict[int, float], links: dict[int, int]) -> dict:
+    n = len(picks)
+    sums = dict.fromkeys(_PICK_AVERAGED, 0.0)
+    for r in picks:
+        person = links.get(r["account_id"], r["account_id"])
+        r["lift"] = r["fantasy_points"] - own.get(person, r["fantasy_points"])
+        for k in _PICK_AVERAGED:
+            sums[k] += r.get(k) or 0
+    wins = sum(1 for r in picks if r["won"])
+    out = {k: sums[k] / n for k in _PICK_AVERAGED}
+    out.update(games_played=n, wins=wins, losses=n - wins, win_pct=100 * wins / n,
+               players=len({links.get(r["account_id"], r["account_id"]) for r in picks}),
+               first_round=100 * sum(1 for r in picks if r["pick_order"] <= 10) / n)
+    return out
+
+
+def _ability_summaries(season: dict | None, only_divisions: list[dict] | None = None) -> list[dict]:
+    rows = _pick_rows(season, only_divisions)
+    key = ("ability_summaries", season["id"] if season else None,
+           season["division_id"] if season else tuple(sorted(d["id"] for d in (only_divisions or divisions()))))
+
+    def build():
+        links = db.alt_links()
+        own = _own_averages(rows, links)
+        by: dict[int, list[dict]] = {}
+        for r in rows:
+            by.setdefault(r["ability_id"], []).append(r)
+        out = []
+        for aid, picks in by.items():
+            s = _summarize(picks, own, links)
+            s.update(ability_id=aid, **draft_pick(aid))
+            out.append(s)
+        return out
+    return db._derived(key, build)
+
+
+def ability_table(season: dict | None, *, heroes: bool = False, min_games: int | None = None,
+                  only_divisions: list[dict] | None = None) -> dict:
+    """The Abilities (or, heroes=True, hero models) view of /fantasy: one row
+    per pick, most picked first, ranked by the leaderboard's games rule
+    (db.qualified) on the number of times it was drafted."""
+    rows = [r for r in _ability_summaries(season, only_divisions) if (r["ability_id"] < 0) == heroes]
+    qualified, threshold, max_games = db.qualified(rows, min_games)
+    relaxed = bool(rows) and not qualified
+    if relaxed:
+        qualified, threshold = list(rows), 0
+    qualified.sort(key=lambda r: (-r["games_played"], -r["win_pct"]))
+    return {"rows": qualified, "threshold": threshold, "max_games": max_games, "relaxed": relaxed,
+            "total": len(rows), "picks": sum(r["games_played"] for r in rows)}
+
+
+def ability_detail(ability_id: int, season: dict | None,
+                   only_divisions: list[dict] | None = None) -> dict | None:
+    """One ability's page: its numbers, when it goes in the draft, what it's
+    drafted with, who drafts it, and every game it was in."""
+    rows = _pick_rows(season, only_divisions)
+    mine = [r for r in rows if r["ability_id"] == ability_id]
+    if not mine:
+        return None
+    links = db.alt_links()
+    own = _own_averages(rows, links)
+    summary = next(s for s in _ability_summaries(season, only_divisions) if s["ability_id"] == ability_id)
+    _summarize(mine, own, links)                 # each pick's lift, for the games list
+
+    builds: dict[tuple[int, int], list[dict]] = {}
+    for r in rows:
+        builds.setdefault((r["match_id"], r["account_id"]), []).append(r)
+    rounds = [0] * 5
+    partners: dict[int, list[int]] = {}
+    pickers: dict[int, list[dict]] = {}
+    games = []
+    for r in mine:
+        rounds[min(4, (r["pick_order"] - 1) // 10)] += 1
+        build = sorted(builds[(r["match_id"], r["account_id"])], key=lambda b: (b["ability_id"] >= 0, b["pick_order"]))
+        for b in build:
+            if b["ability_id"] != ability_id:
+                partners.setdefault(b["ability_id"], []).append(1 if r["won"] else 0)
+        pickers.setdefault(links.get(r["account_id"], r["account_id"]), []).append(r)
+        games.append({**r, "build": [{**draft_pick(b["ability_id"]), "id": b["ability_id"]} for b in build]})
+    games.sort(key=lambda g: -g["start_time"])
+
+    partner_rows = sorted(({"ability_id": a, **draft_pick(a), "games": len(w), "wins": sum(w),
+                            "win_pct": 100 * sum(w) / len(w)} for a, w in partners.items()),
+                          key=lambda p: (-p["games"], -p["win_pct"]))
+    idents = player_identities(list(pickers) + [g["account_id"] for g in games])
+    picker_rows = sorted(({"account_id": p, "name": idents.get(p, {}).get("name") or str(p),
+                           "games": len(g), "wins": sum(1 for x in g if x["won"]),
+                           "fantasy_points": sum(x["fantasy_points"] for x in g) / len(g),
+                           "lift": sum(x["lift"] for x in g) / len(g)} for p, g in pickers.items()),
+                         key=lambda p: (-p["games"], -p["fantasy_points"]))
+    for g in games:
+        g["name"] = idents.get(g["account_id"], {}).get("name") or str(g["account_id"])
+    return {"ability_id": ability_id, **draft_pick(ability_id), "summary": summary,
+            "rounds": rounds, "partners": partner_rows, "pickers": picker_rows, "games": games}

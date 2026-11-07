@@ -1,13 +1,22 @@
 {% extends "base.html" %}
-{% from "macros.html" import player_link %}
+{% from "macros.html" import player_link, pick_link %}
 {% block content %}
 <div class="page-head">
   <h1>Fantasy</h1>
 </div>
-{% set active = q.keys()|reject("in", ["stat", "page", "theme"])|select|list|length %}
+{% set scope_q = ("&season=" ~ season.id if season else "") ~ ("&division=" ~ division_id if division_id else "") %}
+<div class="subtabs-row">
+  <nav class="subtabs" aria-label="Fantasy">
+    {% for key, label in [("players", "Players"), ("abilities", "Abilities"), ("heroes", "Heroes")] %}
+    <a href="/fantasy?view={{ key }}{{ scope_q }}"{% if view == key %} class="active" aria-current="page"{% endif %}>{{ label }}</a>
+    {% endfor %}
+  </nav>
+</div>
+{% set active = q.keys()|reject("in", ["stat", "page", "theme", "view"])|select|list|length %}
 <button type="button" class="filter-toggle" data-toggle-filters aria-expanded="false">
   Filters{% if active %} ({{ active }}){% endif %}</button>
 <form method="get" class="form grid filters collapsible{% if active %} open{% endif %}">
+  {% if view != "players" %}<input type="hidden" name="view" value="{{ view }}">{% endif %}
   <label>Season
     <select name="season">
       {% if not draft_relative %}<option value=""{% if not season %} selected{% endif %}>Every season</option>{% endif %}
@@ -24,6 +33,7 @@
       {% endfor %}
     </select>
   </label>
+  {% if view == "players" %}
   <label>Stat
     <select name="stat" onchange="this.form.submit()">
       {% for key, label in stats %}
@@ -55,9 +65,52 @@
            value="{{ q.get('min_games') if q.get('min_games') else table.asked_min_games }}"
            title="How many games it takes to appear here: by default {{ table.default_min_games }}, or half the most anyone has played if that's fewer. 0 shows everyone.">
   </label>
+  {% else %}
+  <label>Minimum picks
+    <input type="number" name="min_games" min="0" max="500" value="{{ q.get('min_games') or picks.threshold }}"
+           title="How many times it has to have been drafted to appear here. 0 shows everything.">
+  </label>
+  {% endif %}
   <div class="actions"><button class="primary">Show</button>
-    {% if q %}<a class="button" href="/fantasy">Clear</a>{% endif %}</div>
+    {% if active %}<a class="button" href="/fantasy{% if view != 'players' %}?view={{ view }}{% endif %}">Clear</a>{% endif %}</div>
 </form>
+
+{% if view != "players" %}
+{% set noun = "hero" if view == "heroes" else "ability" %}
+<p class="muted small">{{ picks.rows|length }} of {{ picks.total }} {{ "heroes" if view == "heroes" else "abilities" }} · {{ picks.picks }} picks</p>
+<div class="scroll">
+<table class="sortable">
+  <thead><tr>
+    <th data-sort-type="text">{{ noun|title }}</th>
+    <th class="num" data-sort-type="num" data-sort-first="desc" title="Times drafted">Picks</th>
+    <th class="num" data-sort-type="num" data-sort-first="desc">Win %</th>
+    <th class="num" data-sort-type="num" data-sort-first="desc" title="Average fantasy points of the players who drafted it">Fantasy</th>
+    <th class="num" data-sort-type="num" data-sort-first="desc" title="How those players scored compared with their own average">vs own avg</th>
+    <th class="num" data-sort-type="num" title="Average pick number in the draft, 1 to 50">Avg pick</th>
+    <th class="num" data-sort-type="num" data-sort-first="desc" title="Average stun seconds of the players who drafted it">Stuns</th>
+    <th class="num" data-sort-type="num" data-sort-first="desc" title="Kills / deaths / assists of the players who drafted it, sorted by kills plus assists over deaths">K/D/A</th>
+    <th class="num" data-sort-type="num" data-sort-first="desc" title="Different players who drafted it">Players</th>
+  </tr></thead>
+  <tbody>
+  {% for r in picks.rows %}
+    <tr>
+      <td data-sort="{{ r.name|lower }}">{{ pick_link(r.ability_id, r, pick_query) }}</td>
+      <td class="num">{{ r.games_played }}</td>
+      <td class="num {{ 'win' if r.win_pct > 50 else 'loss' if r.win_pct < 50 }}" data-sort="{{ r.win_pct }}">{{ "%.0f"|format(r.win_pct) }}%</td>
+      <td class="num" data-sort="{{ r.fantasy_points }}">{{ "%.1f"|format(r.fantasy_points) }}</td>
+      <td class="num {{ 'win' if r.lift >= 0.5 else 'loss' if r.lift <= -0.5 }}" data-sort="{{ r.lift }}">{{ "%+.1f"|format(r.lift) }}</td>
+      <td class="num" data-sort="{{ r.pick_order }}">{{ "%.1f"|format(r.pick_order) }}</td>
+      <td class="num" data-sort="{{ r.stuns }}">{{ "%.1f"|format(r.stuns) }}</td>
+      <td class="num nowrap" data-sort="{{ (r.kills + r.assists) / [r.deaths, 1]|max }}">{{ "%.1f"|format(r.kills) }}/{{ "%.1f"|format(r.deaths) }}/{{ "%.1f"|format(r.assists) }}</td>
+      <td class="num">{{ r.players }}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="9" class="muted">No drafts recorded with those filters.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
 
 {% if not_found %}
 <div class="errors"><p>No games recorded for “{{ q.get('player') }}”, so there's nothing to break
@@ -106,4 +159,5 @@
 </div>
 
 <p><a class="button" href="/fantasy/formula">How the score is worked out</a></p>
+{% endif %}
 {% endblock %}

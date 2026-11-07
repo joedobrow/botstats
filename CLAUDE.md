@@ -16,6 +16,7 @@ first one somewhere both can reach (usually `db.py`) and call it from both place
 | Which team played a side of a game | `db.get_match_team_captains` (3 of a roster, or an admin's ruling in Admin → Uncredited games) | counting roster overlap yourself |
 | Standings, tiebreaks | `store.season_teams` (the bot's `/standings` calls it) | re-sorting teams elsewhere |
 | A player's season stats | `db.get_all_time_stats(division, season)` | `store.aggregate` (only for totals the bot has no view of) |
+| An ability's or hero model's numbers | `store.ability_table` / `store.ability_detail`, built on `db.get_draft_picks` (each pick with its player's game) | your own join of `match_drafts` and `players` |
 | Fantasy points | `fantasy.py` (`calculate_fantasy_points`, `breakdown`, `describe`) | arithmetic in templates |
 | Who is a person? | `db.person_of`, `db.accounts_of_people`, `store.alt_links()`: one row per person, filed under their main account. Anything matching a person to a season (drafts, captains, teams, titles) checks all of their accounts | comparing raw account ids |
 | How do I reach them on Discord? | `store.discord_handles()` / `store.player_discord()` | reading `site_users.discord` or signups directly |

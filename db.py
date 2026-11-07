@@ -48,11 +48,16 @@ _derived_cache: dict = {}
 
 
 def _db_version() -> tuple:
+    """Changes whenever the database does. A write lands in the WAL (it
+    grows or is rewritten, so its mtime moves) and a checkpoint moves it into
+    the database file. An empty WAL is left out: SQLite truncates it when a
+    connection closes, which touches its mtime after a mere read, and counting
+    that emptied the derived cache every few page views."""
     out = []
     for path in (DB_PATH, f"{DB_PATH}-wal"):
         try:
             st = os.stat(path)
-            out.append((st.st_mtime_ns, st.st_size))
+            out.append((st.st_mtime_ns, st.st_size) if st.st_size else None)
         except OSError:
             out.append(None)
     return tuple(out)
@@ -3956,6 +3961,34 @@ def save_match_draft(match_id: int, picks: list[tuple[int, int, int]]) -> None:
         conn.execute("DELETE FROM match_drafts WHERE match_id = ?", (match_id,))
         conn.executemany("INSERT INTO match_drafts (match_id, pick_order, account_id, ability_id) VALUES (?, ?, ?, ?)",
                          [(match_id, *p) for p in picks])
+
+
+def get_draft_picks(scope: MatchScope) -> list[dict]:
+    """Every drafted pick in the scope's games, with what its player did in
+    that game: one row per pick, carrying the player's whole stat line, the
+    game's fantasy points (the formula's own arithmetic, _per_match_fp) and
+    whether they won.
+
+    The Abilities and Heroes views add these up per pick. A player's numbers
+    are their whole game, so an ability's "stuns" are the stuns of whoever
+    drafted it, not the ability's own. Hand-entered games have no draft or
+    player rows, so they never appear."""
+    where, params = scope.where("m")
+    with _conn() as conn:
+        rows = conn.execute(f"""
+            SELECT p.*, d.pick_order, d.ability_id, m.duration AS match_duration,
+                   m.start_time, m.league_id, m.division_id AS match_division_id
+            FROM match_drafts d
+            JOIN matches m ON m.match_id = d.match_id
+            JOIN players p ON p.match_id = d.match_id AND p.account_id = d.account_id
+            WHERE {where}
+        """, params).fetchall()
+    out = []
+    for r in rows:
+        d = dict(r)
+        d["fantasy_points"] = _per_match_fp(d)
+        out.append(d)
+    return out
 
 
 def get_match_draft(match_id: int) -> dict[int, list[int]]:

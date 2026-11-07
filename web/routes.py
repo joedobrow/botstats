@@ -136,6 +136,9 @@ def render(request: web.Request, template: str, status: int = 200, **ctx) -> web
                asset_version=_asset_version())
     html = env.get_template(template).render(**ctx)
     resp = web.Response(text=html, content_type="text/html", status=status)
+    # Tables of hundreds of rows are mostly repeated markup: gzip makes the
+    # Abilities view a tenth of its size. Only when the browser asks for it.
+    resp.enable_compression()
     if store_theme:
         resp.set_cookie(THEME_COOKIE, store_theme, max_age=365 * 86400, samesite="Lax", path="/")
     elif store_theme == "":
@@ -1135,6 +1138,10 @@ async def fantasy_page(request: web.Request):
     season_options = list({s["id"]: s for s in seasons}.values())
     division_id = int(re.sub(r"\D", "", q.get("division", "")) or 0) or None
     season = _query_season(q, seasons)
+    view = q.get("view") if q.get("view") in ("abilities", "heroes") else "players"
+    if view != "players":
+        return _fantasy_picks_page(request, view, season, seasons=season_options,
+                                   divisions=divisions, division_id=division_id)
     stat = q.get("stat") if q.get("stat") in STAT_LABELS else "fantasy_points"
     # Value and attendance are measured against a draft — what a player cost
     # and how much of their team's season they turned up for — so pooled
@@ -1146,11 +1153,7 @@ async def fantasy_page(request: web.Request):
     week = re.sub(r"\D", "", q.get("week", ""))
     position = re.sub(r"\D", "", q.get("position", ""))
     weeks = store.weeks_with_games(season) if season else []
-    # Without a season chosen, a division still narrows which games count.
-    if season is None and division_id:
-        store_divisions = [d for d in divisions if d["id"] == division_id]
-    else:
-        store_divisions = None
+    store_divisions = _scope_divisions(season, division_id)
     min_games = re.sub(r"\D", "", q.get("min_games", ""))
     table = store.fantasy_table(season, stat=stat,
                                 week=int(week) if week and season else None,
@@ -1184,7 +1187,58 @@ async def fantasy_page(request: web.Request):
                   stat_label=dict(stats).get(stat, stat), weeks=weeks,
                   not_found=bool(q.get("player")),
                   player_query=urlencode({k: v for k, v in q.items() if k in _FANTASY_KEEP and v}),
-                  labels=fantasy.LABELS, duration_mean=fantasy.DURATION_MEAN_MIN)
+                  labels=fantasy.LABELS, duration_mean=fantasy.DURATION_MEAN_MIN, view=view)
+
+
+def _scope_divisions(season: dict | None, division_id: int | None) -> list[dict] | None:
+    """Without a season chosen, a division still narrows which games count."""
+    if season is None and division_id:
+        return [d for d in store.divisions() if d["id"] == division_id]
+    return None
+
+
+def _fantasy_picks_page(request: web.Request, view: str, season: dict | None, *, seasons, divisions,
+                        division_id) -> web.Response:
+    """/fantasy's Abilities and Heroes views: each pick by what the players
+    who drafted it did (store.ability_table)."""
+    q = request.query
+    min_games = re.sub(r"\D", "", q.get("min_games", ""))
+    table = store.ability_table(season, heroes=view == "heroes",
+                                min_games=int(min_games) if min_games else None,
+                                only_divisions=_scope_divisions(season, division_id))
+    return render(request, "fantasy.html", title="Fantasy", view=view, picks=table, q=q,
+                  seasons=seasons, divisions=divisions, division_id=division_id, season=season,
+                  pick_query=_pick_query(season, division_id))
+
+
+def _pick_query(season: dict | None, division_id: int | None) -> str:
+    """The season and division an ability link carries to its page."""
+    if season:
+        return urlencode({"season": f"{season['id']}/{season['division_id']}"})
+    return urlencode({"division": division_id}) if division_id else ""
+
+
+@routes.get(r"/ability/{ability_id:-?\d+}")
+async def ability_page(request: web.Request):
+    """One ability (or, negative, a hero model): its numbers, when it goes,
+    what it goes with, who takes it, and every game it was drafted in."""
+    from botstats.data_builder import global_stats
+
+    q = request.query
+    ability_id = int(request.match_info["ability_id"])
+    seasons = store.all_seasons()
+    season = _query_season(q, seasons)
+    division_id = int(re.sub(r"\D", "", q.get("division", "")) or 0) or None
+    detail = store.ability_detail(ability_id, season, _scope_divisions(season, division_id))
+    if detail is None:
+        if ability_id == 0 or not (season or division_id):
+            return not_found(request, "Ability")
+        # Not drafted in that season: say so on the page, rather than a 404.
+        detail = {"ability_id": ability_id, **store.draft_pick(ability_id), "summary": None}
+    return render(request, "ability.html", title=detail["name"], a=detail,
+                  world=global_stats(ability_id), season=season, division_id=division_id,
+                  seasons=list({s["id"]: s for s in seasons}.values()), divisions=store.divisions(),
+                  back_query=_pick_query(season, division_id))
 
 
 @routes.get("/fantasy/formula")
