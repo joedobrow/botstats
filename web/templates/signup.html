@@ -1,9 +1,10 @@
 {% extends "base.html" %}
-{% from "macros.html" import pos %}
+{% from "macros.html" import pos, league_night %}
 {% block content %}
 <p class="small"><a href="{{ season_url(season) }}">← {{ season.label }}</a></p>
 <h1>{% if existing %}Edit your signup{% else %}Sign up{% endif %}</h1>
 <p class="muted">{{ season.division }} · {{ season.label }} · signing up as <strong>{{ user.steam_name or user.account_id }}</strong></p>
+{% if season.schedule %}<p class="signup-night">Games: <strong>{{ league_night(season.schedule) }}</strong></p>{% endif %}
 
 {% if errors %}
 <div class="errors">{% for e in errors %}<p>{{ e }}</p>{% endfor %}</div>

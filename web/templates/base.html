@@ -104,6 +104,22 @@ document.querySelectorAll("[data-theme-toggle]").forEach(function (b) {
 {% block content %}{% endblock %}
 </main>
 <script>
+// League night in the reader's own zone, when it isn't the division's:
+// "Wednesdays · 8:00 PM ET" gains "· Thursdays 2:00 AM your time".
+document.querySelectorAll("[data-local-night]").forEach(function (el) {
+  try {
+    var at = new Date(Number(el.dataset.localNight) * 1000);
+    var when = function (zone) {
+      var z = zone ? { timeZone: zone } : {};
+      return at.toLocaleDateString("en-US", Object.assign({ weekday: "long" }, z)) + "s " +
+             at.toLocaleTimeString("en-US", Object.assign({ hour: "numeric", minute: "2-digit" }, z));
+    };
+    var mine = when();
+    if (mine === when(el.dataset.tz)) return;
+    el.textContent = " · " + mine + " your time";
+    el.hidden = false;
+  } catch (e) {}
+});
 // Sortable tables: <table class="sortable">; a header's data-sort-type is
 // "num" or "text", data-sort-first="desc" to start descending. A cell's
 // data-sort, when present, is the value sorted by; empty values go last.

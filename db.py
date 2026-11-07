@@ -191,7 +191,7 @@ DRAFT_EVENTS_INDEX = (
 
 # Bumped by each structural migration in _MIGRATIONS; stored in the database
 # as PRAGMA user_version so every migration runs exactly once, in order.
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 
 def init_db():
@@ -211,7 +211,10 @@ def init_db():
                 game_mode         TEXT NOT NULL,         -- 'cm' or 'ad'
                 guild_id          INTEGER,               -- Discord server its commands run in (several divisions may share one)
                 current_season_id INTEGER REFERENCES seasons(id),  -- what commands default to
-                created_at        TEXT NOT NULL
+                created_at        TEXT NOT NULL,
+                play_day          INTEGER,               -- league night: 0 Monday … 6 Sunday
+                play_time         TEXT,                  -- 'HH:MM' in play_tz
+                play_tz           TEXT                   -- IANA zone, e.g. America/New_York
             );
 
             -- Per-Discord-server settings.
@@ -1181,8 +1184,27 @@ def _add_draft_events(conn: sqlite3.Connection) -> None:
         raise
 
 
+def _add_division_schedule(conn: sqlite3.Connection) -> None:
+    """Migration 7: when a division plays (divisions.play_day, play_time,
+    play_tz), set on Admin → Divisions and shown to people signing up."""
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        have = _cols(conn, "divisions")
+        for col, kind in (("play_day", "INTEGER"), ("play_time", "TEXT"), ("play_tz", "TEXT")):
+            if col not in have:
+                conn.execute(f"ALTER TABLE divisions ADD COLUMN {col} {kind}")
+        conn.execute("PRAGMA user_version = 7")
+        conn.execute("COMMIT")
+        logger.info("Migration 7: added division schedules")
+    except Exception:
+        if conn.in_transaction:
+            conn.execute("ROLLBACK")
+        raise
+
+
 _MIGRATIONS = [_migrate_seasons_to_ids, _migrate_to_divisions, _add_match_drafts,
-               _player_cost_nullable, _add_season_awards, _add_draft_events]
+               _player_cost_nullable, _add_season_awards, _add_draft_events,
+               _add_division_schedule]
 
 
 def _migrate_ranked_mmr_overrides_to_rank():
@@ -1340,13 +1362,45 @@ def create_division(name: str, slug: str, region: str, game_mode: str,
 
 
 def update_division(division_id: int, **fields) -> None:
-    """Change any of: name, slug, region, game_mode, guild_id, current_season_id."""
-    allowed = {"name", "slug", "region", "game_mode", "guild_id", "current_season_id"}
+    """Change any of: name, slug, region, game_mode, guild_id, current_season_id,
+    play_day, play_time, play_tz."""
+    allowed = {"name", "slug", "region", "game_mode", "guild_id", "current_season_id",
+               "play_day", "play_time", "play_tz"}
     assert set(fields) <= allowed, set(fields) - allowed
     if fields:
         with _conn() as conn:
             conn.execute(f"UPDATE divisions SET {', '.join(f'{k} = ?' for k in fields)} WHERE id = ?",
                          [*fields.values(), division_id])
+
+
+WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+# The zones a division can play in, as an admin picks them, and what they're
+# called on the site. US zones go by their season-free names (ET, not EST).
+PLAY_ZONES = {"America/New_York": "ET", "America/Chicago": "CT", "America/Denver": "MT",
+              "America/Los_Angeles": "PT", "Europe/London": "UK", "Europe/Berlin": "CET",
+              "Europe/Moscow": "MSK", "Australia/Sydney": "AET", "UTC": "UTC"}
+
+
+def division_schedule(division: dict) -> dict | None:
+    """When a division plays: {day, time, tz, label, next_at}, or None when
+    it isn't set. label reads "Wednesdays · 8:00 PM ET"; next_at is the next
+    such night as a unix time, for a page to show in its reader's own zone."""
+    from zoneinfo import ZoneInfo
+    day, at, tz = division.get("play_day"), division.get("play_time"), division.get("play_tz")
+    if day is None or not at or tz not in PLAY_ZONES:
+        return None
+    try:
+        hour, minute = (int(x) for x in at.split(":"))
+        zone = ZoneInfo(tz)
+    except (ValueError, KeyError):
+        return None
+    now = datetime.now(zone)
+    nxt = now.replace(hour=hour, minute=minute, second=0, microsecond=0) + timedelta(days=(day - now.weekday()) % 7)
+    if nxt <= now:
+        nxt += timedelta(days=7)
+    clock = nxt.strftime("%-I:%M %p") if minute else nxt.strftime("%-I %p")
+    return {"day": day, "time": at, "tz": tz, "next_at": int(nxt.timestamp()),
+            "label": f"{WEEKDAYS[day]}s · {clock} {PLAY_ZONES[tz]}"}
 
 
 def get_all_divisions() -> list[dict]:

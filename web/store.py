@@ -356,6 +356,7 @@ def all_seasons() -> list[dict]:
             "show_division": many_divisions,
             "status": statuses.get(key),
             "signup_count": signup_counts.get(key, 0),
+            "schedule": db.division_schedule(d),
         })
     out.sort(key=lambda s: (s["season_start"], -s["division_id"]), reverse=True)
     _fill_default_statuses(out)

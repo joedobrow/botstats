@@ -162,3 +162,9 @@
 </table>
 </div>
 {%- endmacro %}
+
+{# When a division plays (db.division_schedule), and the same in the
+   reader's own time zone when that's different (filled in by base.html). #}
+{% macro league_night(schedule) -%}
+{% if schedule %}<span class="league-night">{{ schedule.label }}<span class="muted" data-local-night="{{ schedule.next_at }}" data-tz="{{ schedule.tz }}" hidden></span></span>{% endif %}
+{%- endmacro %}

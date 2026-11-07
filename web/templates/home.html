@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "macros.html" import player_link, team_cell, season_status %}
+{% from "macros.html" import player_link, team_cell, season_status, league_night %}
 {% from "content.html" import post_card %}
 {% block content %}
 <section class="banner">
@@ -47,6 +47,7 @@
         {% else %}
           <a class="muted" href="{{ season_url(r.season) }}?tab=signups">{{ r.season.signup_count }} signed up</a>
           <span class="muted">starts {{ r.starts }}</span>
+          {% if r.season.schedule %}<span class="muted">{{ league_night(r.season.schedule) }}</span>{% endif %}
         {% endif %}
       </div>
       {% if r.kind == "playing" %}

@@ -233,7 +233,8 @@ def _go(url: str, notice: str | None = None, **query) -> web.HTTPFound:
     params = {k: v for k, v in {**query, "notice": notice}.items() if v}
     if not params:
         return web.HTTPFound(url)
-    return web.HTTPFound(url + ("&" if "?" in url else "?") + urlencode(params))
+    url, hash_, anchor = url.partition("#")      # the query goes before a #section
+    return web.HTTPFound(url + ("&" if "?" in url else "?") + urlencode(params) + hash_ + anchor)
 
 
 # ---------------------------------------------------------------------------
@@ -1826,6 +1827,7 @@ async def admin_page(request: web.Request):
         admins = [{"account_id": aid, "name": idents[aid]["name"], "uberadmin": aid in UBERADMIN_IDS,
                    "added_at": (added_by.get(aid) or {}).get("added_at")} for aid in ids]
     return render(request, "admin.html", title="Admin", seasons=store.all_seasons(),
+                  weekdays=db.WEEKDAYS, play_zones=db.PLAY_ZONES,
                   divisions=store.divisions(), admins=admins,
                   regions=sorted(REGION_CLUSTERS), game_modes=sorted(GAME_MODE_FILTERS),
                   about=store.get_text("about"), rules=store.get_text("rules"))
@@ -2175,10 +2177,21 @@ async def admin_division(request: web.Request):
         guild_id = int(guild_raw) if guild_raw else None
         if guild_id != division["guild_id"]:
             fields["guild_id"] = guild_id
+    # League night. An empty day clears it.
+    if "play_day" in data:
+        day = re.sub(r"\D", "", data.get("play_day") or "")
+        at = (data.get("play_time") or "").strip()
+        tz = data.get("play_tz") or ""
+        if day and (not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", at) or tz not in db.PLAY_ZONES
+                    or int(day) > 6):
+            raise web.HTTPBadRequest(text="League night needs a day, a time and a time zone.")
+        night = ((int(day), at, tz) if day else (None, None, None))
+        if night != (division.get("play_day"), division.get("play_time"), division.get("play_tz")):
+            fields.update(play_day=night[0], play_time=night[1], play_tz=night[2])
     if fields:
         db.update_division(division["id"], **fields)
         logger.info("Division %s updated: %s", division["id"], fields)
-    raise web.HTTPFound("/admin#divisions")
+    raise _go("/admin#divisions", f"{division['name']} saved." if fields else None)
 
 
 @routes.post("/admin/text")
