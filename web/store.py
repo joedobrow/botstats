@@ -2237,7 +2237,8 @@ def _own_averages(rows: list[dict], links: dict[int, int]) -> dict[int, float]:
 
 
 _PICK_AVERAGED = ("fantasy_points", "lift", "pick_order", "stuns", "kills", "deaths", "assists",
-                  "hero_damage", "gpm")
+                  "hero_damage", "gpm", "last_hits", "building_damage", "hero_healing",
+                  "teamfight_participation")
 
 
 def _summarize(picks: list[dict], own: dict[int, float], links: dict[int, int]) -> dict:

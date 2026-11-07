@@ -32,6 +32,15 @@
   <div><span class="stat">{{ "%.1f"|format(s.stuns) }}s</span><span class="label" title="Average stun seconds of the players who drafted it">Stuns</span></div>
   <div><span class="stat stat-small">{{ "%.1f"|format(s.kills) }}/{{ "%.1f"|format(s.deaths) }}/{{ "%.1f"|format(s.assists) }}</span><span class="label">K/D/A</span></div>
 </div>
+<div class="stat-row">
+  <div><span class="stat">{{ "{:,.0f}".format(s.hero_damage) }}</span><span class="label">Hero damage</span></div>
+  <div><span class="stat">{{ "%.1f"|format(s.deaths) }}</span><span class="label">Deaths</span></div>
+  <div><span class="stat">{{ "%.0f"|format(s.gpm) }}</span><span class="label">GPM</span></div>
+  <div><span class="stat">{{ "%.0f"|format(100 * s.teamfight_participation) }}%</span><span class="label">Teamfight participation</span></div>
+  <div><span class="stat">{{ "%.0f"|format(s.last_hits) }}</span><span class="label">Last hits</span></div>
+  <div><span class="stat">{{ "{:,.0f}".format(s.building_damage) }}</span><span class="label">Building damage</span></div>
+  <div><span class="stat">{{ "{:,.0f}".format(s.hero_healing) }}</span><span class="label">Hero healing</span></div>
+</div>
 {% if world %}
 <div class="stat-row">
   <div><span class="stat">{{ "%.1f"|format(world.win_pct) if world.win_pct is not none else "—" }}%</span><span class="label" title="Windrun.io's win rate for it in high-skill public games">Public win %</span></div>
