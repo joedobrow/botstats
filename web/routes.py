@@ -512,13 +512,16 @@ async def season_page(request: web.Request):
         ctx["rounds"] = store.season_matchups(season)
         ctx["weeks"] = store.season_weeks(season)
     elif tab == "signups":
-        ctx["signup_levels"] = store.SIGNUP_LEVELS
+        # Players first: they're most of a season's signups and what most
+        # people come here to look at.
+        levels = sorted(store.SIGNUP_LEVELS, key=lambda kv: kv[0] != "player")
+        ctx["signup_levels"] = levels
         ctx["store_level_labels"] = store.SIGNUP_LEVEL_LABELS
         signups = store.list_signups(season)
-        by_level = {key: [r for r in signups if r["level_is"] == key] for key, _ in store.SIGNUP_LEVELS}
+        by_level = {key: [r for r in signups if r["level_is"] == key] for key, _ in levels}
         level = request.query.get("list")
         if level not in by_level:
-            level = next((k for k, rows in by_level.items() if rows), store.SIGNUP_LEVELS[0][0])
+            level = next((k for k, rows in by_level.items() if rows), levels[0][0])
         ctx["signup_list"], ctx["signups_by_level"] = level, by_level
         ctx["signups"] = by_level[level]
         ctx["signup_total"] = len(signups)
