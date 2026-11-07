@@ -1002,3 +1002,5 @@ a.result-link { color: inherit; }
 .inline-filters { flex-direction: row; align-items: center; }
 .stat.stat-small { font-size: 1.05rem; line-height: 1.75rem; white-space: nowrap; }
 .vs-avg { display: block; margin-top: 4px; font-size: 0.75rem; color: var(--muted); white-space: nowrap; }
+table.collapsed tbody tr:nth-child(n+7) { display: none; }
+.more-toggle { margin-top: 8px; }

@@ -70,12 +70,12 @@
   <section>
     <h2>Drafted with</h2>
     <div class="scroll">
-    <table class="sortable compact">
+    <table class="sortable compact{% if a.partners|length > 6 %} collapsed{% endif %}" id="partners">
       <thead><tr><th data-sort-type="text">Ability</th>
         <th class="num" data-sort-type="num" data-sort-first="desc" title="Games drafted together by the same player">Together</th>
         <th class="num" data-sort-type="num" data-sort-first="desc">Win %</th></tr></thead>
       <tbody>
-      {% for p in a.partners[:15] %}
+      {% for p in a.partners[:40] %}
         <tr><td data-sort="{{ p.name|lower }}">{{ pick_link(p.ability_id, p, back_query) }}</td>
           <td class="num">{{ p.games }}</td>
           <td class="num {{ 'win' if p.win_pct > 50 else 'loss' if p.win_pct < 50 }}" data-sort="{{ p.win_pct }}">{{ "%.0f"|format(p.win_pct) }}%</td></tr>
@@ -83,6 +83,9 @@
       </tbody>
     </table>
     </div>
+    {% if a.partners|length > 6 %}
+    <button type="button" class="small-button more-toggle" data-expands="partners" aria-expanded="false">More</button>
+    {% endif %}
   </section>
 </div>
 
@@ -128,4 +131,15 @@
 </table>
 </div>
 {% endif %}
+<script>
+// A long table shows its first rows until "More" opens the rest (.collapsed).
+document.querySelectorAll("[data-expands]").forEach(function (button) {
+  var table = document.getElementById(button.dataset.expands);
+  button.addEventListener("click", function () {
+    var open = table.classList.toggle("collapsed") === false;
+    button.textContent = open ? "Less" : "More";
+    button.setAttribute("aria-expanded", open);
+  });
+});
+</script>
 {% endblock %}
