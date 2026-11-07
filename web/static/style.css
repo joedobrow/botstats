@@ -285,7 +285,7 @@ form.inline { display: inline; }
 .form.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); max-width: none; align-items: end; }
 .form label { display: flex; flex-direction: column; gap: 4px; font-weight: 500; }
 .form label.check { flex-direction: row; align-items: center; gap: 8px; font-weight: 400; }
-input[type=text], input[type=number], input[type=date], input[type=search], select, textarea {
+input[type=text], input[type=number], input[type=date], input[type=time], input[type=search], select, textarea {
   font: inherit; line-height: 1.35; padding: 7px 9px; border-radius: 6px;
   border: 1px solid var(--border); background: var(--surface); color: var(--text); width: 100%;
 }
@@ -294,10 +294,12 @@ input[type=text], input[type=number], input[type=date], input[type=search], sele
    them 2px apart in a row. One height for all of them, so a filter bar lines
    up by construction rather than by coincidence. Compact controls inside a
    table keep their own size. */
-input[type=text], input[type=number], input[type=date], input[type=search], select {
+input[type=text], input[type=number], input[type=date], input[type=time], input[type=search], select {
   height: var(--control-h);
 }
-td input[type=text], td select, h1 .edit-form input[type=text] { height: auto; }
+td input[type=text], td input[type=time], td select, h1 .edit-form input[type=text] { height: auto; }
+td input[type=time] { width: auto; padding: 3px 6px; color-scheme: light dark; }
+.night-pick { display: flex; gap: 4px; }
 .form .actions button, .form .actions .button, .search button { height: var(--control-h); }
 /* A select sizes itself by the browser's own metrics and draws the browser's
    own arrow, so beside an input of identical padding it still came out a
@@ -315,6 +317,8 @@ select::-ms-expand { display: none; }
 td input[type=text] { width: auto; max-width: 220px; padding: 3px 6px; }
 td select { width: auto; padding: 3px 26px 3px 6px; background-position: right 7px center; }
 td input.short { max-width: 110px; }
+td input.tiny { max-width: 72px; }
+td input.id { max-width: 92px; }
 fieldset { border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; margin: 0; display: flex; flex-direction: column; gap: 4px; }
 legend { font-weight: 500; padding: 0 4px; }
 .actions { display: flex; gap: 10px; flex-wrap: wrap; }

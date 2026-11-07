@@ -102,7 +102,7 @@
     server cluster and game mode. Which season a division is on is set by Season setup above.</p>
   <div class="scroll">
   <table>
-    <thead><tr><th>Name</th><th>URL name</th><th>Region</th><th>Mode</th><th>Discord server</th><th>League night</th><th>Season</th><th></th></tr></thead>
+    <thead><tr><th>Name</th><th>URL name</th><th>Region</th><th>Mode</th><th title="Discord server id">Discord</th><th>League night</th><th>Season</th><th></th></tr></thead>
     <tbody>
     {% for d in divisions %}
       <tr>
@@ -110,8 +110,8 @@
           <input type="hidden" name="csrf" value="{{ csrf }}">
           <input type="hidden" name="division_id" value="{{ d.id }}">
         </form>
-        <td><input form="division-{{ d.id }}" type="text" name="name" value="{{ d.name }}" maxlength="80" aria-label="Division name"></td>
-        <td><input form="division-{{ d.id }}" type="text" name="slug" value="{{ d.slug }}" maxlength="40" aria-label="URL name" class="short"></td>
+        <td><input form="division-{{ d.id }}" type="text" name="name" value="{{ d.name }}" maxlength="80" aria-label="Division name" class="id"></td>
+        <td><input form="division-{{ d.id }}" type="text" name="slug" value="{{ d.slug }}" maxlength="40" aria-label="URL name" class="tiny"></td>
         <td><select form="division-{{ d.id }}" name="region" aria-label="Region">
           {% for r in regions %}<option value="{{ r }}"{% if r == d.region %} selected{% endif %}>{{ r }}</option>{% endfor %}
         </select></td>
@@ -119,19 +119,19 @@
           {% for m in game_modes %}<option value="{{ m }}"{% if m == d.game_mode %} selected{% endif %}>{{ m|upper }}</option>{% endfor %}
         </select></td>
         <td><input form="division-{{ d.id }}" type="text" name="guild_id" value="{{ d.guild_id or "" }}"
-              inputmode="numeric" class="short" aria-label="Discord server id"></td>
-        <td class="nowrap">
+              inputmode="numeric" class="id" aria-label="Discord server id" title="{{ d.guild_id or "" }}"></td>
+        <td><span class="night-pick">
           <select form="division-{{ d.id }}" name="play_day" aria-label="League night: day">
             <option value="">—</option>
-            {% for name in weekdays %}<option value="{{ loop.index0 }}"{% if d.play_day == loop.index0 %} selected{% endif %}>{{ name }}</option>{% endfor %}
+            {% for name in weekdays %}<option value="{{ loop.index0 }}"{% if d.play_day == loop.index0 %} selected{% endif %}>{{ name[:3] }}</option>{% endfor %}
           </select>
           <input form="division-{{ d.id }}" type="time" name="play_time" value="{{ d.play_time or "20:00" }}" step="900" aria-label="League night: time">
           <select form="division-{{ d.id }}" name="play_tz" aria-label="League night: time zone">
             {% for tz, short in play_zones.items() %}<option value="{{ tz }}"{% if tz == (d.play_tz or "America/New_York") %} selected{% endif %}>{{ short }}</option>{% endfor %}
-          </select>
+          </select></span>
         </td>
         <td class="muted">{{ d.current_season_id or "" }}</td>
-        <td><button form="division-{{ d.id }}">Save</button></td>
+        <td><button form="division-{{ d.id }}" class="primary">Save</button></td>
       </tr>
     {% endfor %}
     </tbody>
