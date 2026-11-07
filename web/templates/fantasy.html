@@ -7,7 +7,7 @@
 {% set scope_q = ("&season=" ~ season.id if season else "") ~ ("&division=" ~ division_id if division_id else "") %}
 <div class="subtabs-row">
   <nav class="subtabs" aria-label="Fantasy">
-    {% for key, label in [("players", "Players"), ("abilities", "Abilities"), ("heroes", "Heroes")] %}
+    {% for key, label in [("players", "Players"), ("abilities", "Abilities")] %}
     <a href="/fantasy?view={{ key }}{{ scope_q }}"{% if view == key %} class="active" aria-current="page"{% endif %}>{{ label }}</a>
     {% endfor %}
   </nav>
@@ -76,12 +76,11 @@
 </form>
 
 {% if view != "players" %}
-{% set noun = "hero" if view == "heroes" else "ability" %}
-<p class="muted small">{{ picks.rows|length }} of {{ picks.total }} {{ "heroes" if view == "heroes" else "abilities" }} · {{ picks.picks }} picks</p>
+<p class="muted small">{{ picks.rows|length }} of {{ picks.total }} abilities · {{ picks.picks }} picks</p>
 <div class="scroll">
 <table class="sortable">
   <thead><tr>
-    <th data-sort-type="text">{{ noun|title }}</th>
+    <th data-sort-type="text">Ability</th>
     <th class="num" data-sort-type="num" data-sort-first="desc" title="Times drafted">Picks</th>
     <th class="num" data-sort-type="num" data-sort-first="desc">Win %</th>
     <th class="num" data-sort-type="num" data-sort-first="desc" title="Average fantasy points of the players who drafted it">Fantasy</th>

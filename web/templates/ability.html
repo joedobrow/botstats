@@ -1,8 +1,7 @@
 {% extends "base.html" %}
 {% from "macros.html" import player_link, pick_icon, pick_link, draft_icons, result_word %}
 {% block content %}
-{% set hero = a.ability_id < 0 %}
-<p class="small"><a href="/fantasy?view={{ 'heroes' if hero else 'abilities' }}{% if back_query %}&{{ back_query }}{% endif %}">← {{ "Heroes" if hero else "Abilities" }}</a></p>
+<p class="small"><a href="/fantasy?view=abilities{% if back_query %}&{{ back_query }}{% endif %}">← Abilities</a></p>
 <div class="page-head">
   <h1 class="pick-title">{{ pick_icon(a) }} {{ a.name }}</h1>
   <form method="get" class="inline-filters">
@@ -57,7 +56,7 @@
     <h2>Drafted with</h2>
     <div class="scroll">
     <table class="sortable compact">
-      <thead><tr><th data-sort-type="text">{{ "Ability" if hero else "Pick" }}</th>
+      <thead><tr><th data-sort-type="text">Ability</th>
         <th class="num" data-sort-type="num" data-sort-first="desc" title="Games drafted together by the same player">Together</th>
         <th class="num" data-sort-type="num" data-sort-first="desc">Win %</th></tr></thead>
       <tbody>

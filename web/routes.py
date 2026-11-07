@@ -1138,7 +1138,8 @@ async def fantasy_page(request: web.Request):
     season_options = list({s["id"]: s for s in seasons}.values())
     division_id = int(re.sub(r"\D", "", q.get("division", "")) or 0) or None
     season = _query_season(q, seasons)
-    view = q.get("view") if q.get("view") in ("abilities", "heroes") else "players"
+    # "heroes" was its own view once; hero models are abilities now.
+    view = "abilities" if q.get("view") in ("abilities", "heroes") else "players"
     if view != "players":
         return _fantasy_picks_page(request, view, season, seasons=season_options,
                                    divisions=divisions, division_id=division_id)
@@ -1199,12 +1200,11 @@ def _scope_divisions(season: dict | None, division_id: int | None) -> list[dict]
 
 def _fantasy_picks_page(request: web.Request, view: str, season: dict | None, *, seasons, divisions,
                         division_id) -> web.Response:
-    """/fantasy's Abilities and Heroes views: each pick by what the players
-    who drafted it did (store.ability_table)."""
+    """/fantasy's Abilities view: each pick, hero models included, by what
+    the players who drafted it did (store.ability_table)."""
     q = request.query
     min_games = re.sub(r"\D", "", q.get("min_games", ""))
-    table = store.ability_table(season, heroes=view == "heroes",
-                                min_games=int(min_games) if min_games else None,
+    table = store.ability_table(season, min_games=int(min_games) if min_games else None,
                                 only_divisions=_scope_divisions(season, division_id))
     return render(request, "fantasy.html", title="Fantasy", view=view, picks=table, q=q,
                   seasons=seasons, divisions=divisions, division_id=division_id, season=season,

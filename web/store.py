@@ -2276,12 +2276,13 @@ def _ability_summaries(season: dict | None, only_divisions: list[dict] | None = 
     return db._derived(key, build)
 
 
-def ability_table(season: dict | None, *, heroes: bool = False, min_games: int | None = None,
+def ability_table(season: dict | None, *, min_games: int | None = None,
                   only_divisions: list[dict] | None = None) -> dict:
-    """The Abilities (or, heroes=True, hero models) view of /fantasy: one row
-    per pick, most picked first, ranked by the leaderboard's games rule
-    (db.qualified) on the number of times it was drafted."""
-    rows = [r for r in _ability_summaries(season, only_divisions) if (r["ability_id"] < 0) == heroes]
+    """The Abilities view of /fantasy: one row per pick, hero models included
+    (in Ability Draft a model is drafted like any ability), most picked first,
+    ranked by the leaderboard's games rule (db.qualified) on the number of
+    times it was drafted."""
+    rows = _ability_summaries(season, only_divisions)
     qualified, threshold, max_games = db.qualified(rows, min_games)
     relaxed = bool(rows) and not qualified
     if relaxed:
