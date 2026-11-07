@@ -2334,5 +2334,13 @@ def ability_detail(ability_id: int, season: dict | None,
                          key=lambda p: (-p["games"], -p["fantasy_points"]))
     for g in games:
         g["name"] = idents.get(g["account_id"], {}).get("name") or str(g["account_id"])
-    return {"ability_id": ability_id, **draft_pick(ability_id), "summary": summary,
+    # The average player's game over the same games, to hold each number
+    # up against: every player-game once, however many picks it holds.
+    seen: dict[tuple[int, int], dict] = {}
+    for r in rows:
+        seen.setdefault((r["match_id"], r["account_id"]), r)
+    field = {k: sum((g.get(k) or 0) for g in seen.values()) / len(seen) for k in _PICK_AVERAGED
+             if k not in ("lift", "pick_order")}
+    field["win_pct"] = 100 * sum(1 for g in seen.values() if g["won"]) / len(seen)
+    return {"ability_id": ability_id, **draft_pick(ability_id), "summary": summary, "field": field,
             "rounds": rounds, "partners": partner_rows, "pickers": picker_rows, "games": games}

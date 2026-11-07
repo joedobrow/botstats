@@ -1001,3 +1001,4 @@ a.result-link { color: inherit; }
 .round-fill > span { display: block; height: 100%; background: var(--accent); border-radius: 999px; }
 .inline-filters { flex-direction: row; align-items: center; }
 .stat.stat-small { font-size: 1.05rem; line-height: 1.75rem; white-space: nowrap; }
+.vs-avg { display: block; margin-top: 4px; font-size: 0.75rem; color: var(--muted); white-space: nowrap; }
