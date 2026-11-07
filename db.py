@@ -1550,11 +1550,38 @@ class MatchScope:
             clauses.append(f"{alias}.league_id IN "
                            f"(SELECT season_id FROM season_divisions WHERE division_id = ?)")
             params.append(self.division_id)
+        # A season starts on its start date: games in its league before then
+        # (tryouts, a scrim on the ticket) aren't the season's.
+        starts = season_start_times()
+        if self.league_id is not None:
+            if self.league_id in starts:
+                clauses.append(f"{alias}.start_time >= ?"); params.append(starts[self.league_id])
+        elif starts:
+            clauses.append("(CASE " + " ".join(f"WHEN {alias}.league_id = ? THEN {alias}.start_time >= ?"
+                                               for _ in starts) + " ELSE 1 END)")
+            for sid, t in starts.items():
+                params += [sid, t]
         if self.start is not None:
             clauses.append(f"{alias}.start_time >= ?"); params.append(self.start)
         if self.end is not None:
             clauses.append(f"{alias}.start_time <= ?"); params.append(self.end)
         return " AND ".join(clauses), params
+
+
+def season_start_times() -> dict[int, int]:
+    """{season id: unix time its start date begins, in the league's time zone}.
+    MatchScope leaves out a league's games from before then."""
+    from config import LEAGUE_TZ   # here, not at the top: db is imported by scripts without a bot token
+    with _conn() as conn:
+        rows = conn.execute("SELECT id, season_start FROM seasons WHERE season_start IS NOT NULL").fetchall()
+    out = {}
+    for r in rows:
+        try:
+            day = datetime.strptime(r["season_start"], "%Y-%m-%d")
+        except (TypeError, ValueError):
+            continue
+        out[r["id"]] = int(day.replace(tzinfo=LEAGUE_TZ).timestamp())
+    return out
 
 
 def season_scope(season_id: int, division_id: int) -> MatchScope:
