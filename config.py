@@ -108,3 +108,6 @@ ROLE_LABELS: dict[int, str] = {
 
 # Where the site's "Tip jar" and the bot's /tipjar send people.
 TIP_URL: str = os.environ.get("TIP_URL", "https://venmo.com/Joe-Dobrow")
+
+# The Discord channel the site's Blog copies (content_mirror). 0 turns it off.
+CONTENT_CHANNEL_ID: int = int(os.environ.get("CONTENT_CHANNEL_ID") or 0)

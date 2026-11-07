@@ -21,6 +21,7 @@ formatters.py       Discord embeds
 rating_compute.py   Player ratings (rating_group.py pools a player's accounts)
 season_setup.py     Rolling a division over to a new season
 discord_sync.py     Season roles and captain rooms (Admin → Discord)
+content_mirror.py   The site's Blog: a copy of the #content channel
 config.py           Environment variables and constants
 web/                The website: routes.py, store.py, draft.py, templates/, static/
 botstats/           The web server the site runs in, stream cards and the APIs
@@ -61,6 +62,7 @@ for t in tests/test_*.py; do python3 $t; done
 | `LOOKUP_CHANNEL_IDS` | Channels where anyone may use `/lookup` |
 | `LEAGUE_TZ` | Default `America/New_York` |
 | `TIP_URL` | The site's Tip jar and `/tipjar` |
+| `CONTENT_CHANNEL_ID` | The Discord channel the Blog copies; unset turns the Blog's copying off |
 | `DB_PATH` | Default `/data/dota_stats.db` when `/data` exists |
 
 ## Deploying

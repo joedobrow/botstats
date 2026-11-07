@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% from "content.html" import post_card %}
+{% block content %}
+{% if post %}
+<p class="small"><a href="/blog">← Blog</a></p>
+<div class="posts">{{ post_card(post, players) }}</div>
+{% else %}
+<h1>Blog</h1>
+<div class="posts">
+  {% for p in posts.rows %}{{ post_card(p, players) }}
+  {% else %}<p class="muted">No posts yet.</p>{% endfor %}
+</div>
+{% if posts.pages > 1 %}
+<nav class="pager">
+  {% if posts.page > 1 %}<a class="button" href="/blog?page={{ posts.page - 1 }}">← Newer</a>{% endif %}
+  <span class="muted small">Page {{ posts.page }} of {{ posts.pages }}</span>
+  {% if posts.page < posts.pages %}<a class="button" href="/blog?page={{ posts.page + 1 }}">Older →</a>{% endif %}
+</nav>
+{% endif %}
+{% endif %}
+{% endblock %}

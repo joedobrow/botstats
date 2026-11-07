@@ -6,6 +6,7 @@ import logging
 from datetime import datetime, timezone
 
 from config import DISCORD_TOKEN, ADMIN_USER_ID, LOOKUP_CHANNEL_IDS, SITE_URL, TIP_URL
+import content_mirror
 from fetcher import fetch_and_store_matches_for_division, fetch_and_store_season
 from db import (init_db, get_division, get_guild_division, update_division,
                 get_all_divisions, get_scold_channel, set_guild_settings, get_guild_settings,
@@ -2260,6 +2261,8 @@ SCOLD_MESSAGES = [
 
 @bot.event
 async def on_message(message: discord.Message):
+    if content_mirror.is_content(message.channel.id):
+        await content_mirror.save(message)
     if message.author.bot or not message.guild:
         return
 
@@ -2404,6 +2407,69 @@ bot.setup_hook = _setup_once
 @bot.event
 async def on_ready():
     logger.info(f"Logged in as {bot.user} (ID: {bot.user.id})")
+    # Catch the Blog up on whatever happened in #content while we were away.
+    if not content_sync.is_running():
+        content_sync.start()
+
+
+# ---------------------------------------------------------------------------
+# The site's Blog: a copy of #content (content_mirror)
+# ---------------------------------------------------------------------------
+
+@tasks.loop(minutes=10)
+async def content_sync():
+    try:
+        await content_mirror.reconcile(bot)
+    except Exception:
+        logger.exception("content: sync failed")
+
+
+@bot.event
+async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
+    await content_mirror.refetch(bot, payload.channel_id, payload.message_id)
+
+
+@bot.event
+async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
+    if content_mirror.is_content(payload.channel_id):
+        content_mirror.remove([payload.message_id])
+
+
+@bot.event
+async def on_raw_bulk_message_delete(payload: discord.RawBulkMessageDeleteEvent):
+    if content_mirror.is_content(payload.channel_id):
+        content_mirror.remove(payload.message_ids)
+
+
+# Reactions and poll votes change what a post shows.
+@bot.event
+async def on_raw_reaction_add(payload):
+    await content_mirror.refetch(bot, payload.channel_id, payload.message_id)
+
+
+@bot.event
+async def on_raw_reaction_remove(payload):
+    await content_mirror.refetch(bot, payload.channel_id, payload.message_id)
+
+
+@bot.event
+async def on_raw_reaction_clear(payload):
+    await content_mirror.refetch(bot, payload.channel_id, payload.message_id)
+
+
+@bot.event
+async def on_raw_reaction_clear_emoji(payload):
+    await content_mirror.refetch(bot, payload.channel_id, payload.message_id)
+
+
+@bot.event
+async def on_raw_poll_vote_add(payload):
+    await content_mirror.refetch(bot, payload.channel_id, payload.message_id)
+
+
+@bot.event
+async def on_raw_poll_vote_remove(payload):
+    await content_mirror.refetch(bot, payload.channel_id, payload.message_id)
 
 
 if __name__ == "__main__":

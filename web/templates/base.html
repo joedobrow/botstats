@@ -71,7 +71,7 @@ document.querySelectorAll("[data-theme-toggle]").forEach(function (b) {
 </script>
 {% set nav = [("/seasons", "Seasons"), ("/players", "Players"), ("/matches", "Matches"),
               ("/fantasy", "Fantasy"), ("/subs", "Sub finder"), ("/hall-of-fame", "Hall of Fame"),
-              ("/rules", "Rules"), ("/about", "About")] %}
+              ("/rules", "Rules"), ("/blog", "Blog")] %}
 <header class="topbar">
   <div class="wrap topbar-row">
     <a class="brand" href="/" title="Ability Draft Community League">
@@ -274,7 +274,7 @@ document.addEventListener("keydown", function (e) { if (e.key === "Escape") clos
 </script>
 <footer class="wrap muted">
   <span>Match data from OpenDota and Windrun.io.</span>
-  <span class="footer-links"><a href="/feedback?from={{ path|urlencode }}">Give feedback</a> ·
+  <span class="footer-links"><a href="/about">About</a> · <a href="/feedback?from={{ path|urlencode }}">Give feedback</a> ·
     <a href="{{ TIP_URL }}" rel="noopener" target="_blank">Tip jar</a></span>
 </footer>
 </body>

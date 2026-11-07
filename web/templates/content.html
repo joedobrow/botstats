@@ -1,0 +1,94 @@
+{# One #content message as the Blog shows it (content_mirror.to_post). #}
+{% from "macros.html" import player_link %}
+{% macro post_card(p, players, compact=False) -%}
+{% set lone_link = p.content.strip() if p.content else "" %}
+{% set hide_text = lone_link and p.embeds and p.embeds|selectattr("url", "equalto", lone_link)|selectattr("type", "in", ["gifv", "image"])|list %}
+<article class="post{% if compact %} post-compact{% endif %}" id="m{{ p.id }}">
+  <header class="post-head">
+    <img class="post-avatar" src="{{ p.author.avatar }}" alt="" loading="lazy">
+    <span class="post-author">
+      {%- if players.get(p.author.id) %}{{ player_link(players[p.author.id], p.author.name) }}{% else %}{{ p.author.name }}{% endif %}
+      {%- if p.author.bot %} <span class="tag">Bot</span>{% endif %}</span>
+    <a class="post-date muted" href="/blog/{{ p.id }}">{{ p.created_at|date("%b %-d, %Y · %-I:%M %p") }}</a>
+    {% if p.edited_at %}<span class="muted small" title="Edited {{ p.edited_at|date('%b %-d, %-I:%M %p') }}">(edited)</span>{% endif %}
+  </header>
+
+  {% if p.reply %}
+  <a class="post-reply muted small" href="/blog/{{ p.reply.id }}">↪ {{ p.reply.author or "Replying" }}{% if p.reply.snippet %}: {{ p.reply.snippet|truncate(90) }}{% endif %}</a>
+  {% endif %}
+
+  {% if p.type == "system" %}
+  <p class="muted">{{ p.author.name }} {{ p.system_text }}</p>
+  {% elif p.type == "poll_result" %}
+  {% set r = p.poll_result %}
+  <p class="post-pollresult">
+    {% if r.poll_id %}<a href="/blog/{{ r.poll_id }}">Poll</a>{% else %}Poll{% endif %} ended: <strong>{{ r.question }}</strong>
+    {% if r.winner %}· {{ r.winner }} won, {{ r.winner_votes }} of {{ r.total }} vote{{ "s" if r.total != 1 }}{% else %}· no votes{% endif %}
+  </p>
+  {% else %}
+    {% if p.content and not hide_text %}<div class="post-body">{{ discord_text(p) }}</div>{% endif %}
+
+    {% if p.poll %}
+    <div class="post-poll">
+      <p class="post-poll-q">{{ p.poll.question }}</p>
+      {% for a in p.poll.answers %}
+      {% set share = (100 * a.votes / p.poll.total) if p.poll.total else 0 %}
+      <div class="post-poll-answer">
+        <span class="post-poll-bar" style="width: {{ share|round(1) }}%"></span>
+        <span class="post-poll-text">{% if a.emoji.url %}<img class="emoji" src="{{ a.emoji.url }}" alt="">{% elif a.emoji.text %}{{ a.emoji.text }}{% endif %} {{ a.text }}</span>
+        <span class="num">{{ a.votes }}</span>
+      </div>
+      {% endfor %}
+      <p class="muted small">{{ p.poll.total }} vote{{ "s" if p.poll.total != 1 }} · {% if p.poll.final %}Final results{% elif p.poll.expires %}Closes {{ p.poll.expires|date("%b %-d, %-I:%M %p") }}{% endif %}</p>
+    </div>
+    {% endif %}
+
+    {% for a in p.attachments %}
+      {% if a.kind == "image" and a.url %}
+      <a class="post-media{% if a.spoiler %} spoiler-media{% endif %}" href="{{ a.url }}" target="_blank" rel="noopener">
+        <img src="{{ a.url }}" alt="{{ a.filename }}" loading="lazy"{% if a.width %} width="{{ a.width }}" height="{{ a.height }}"{% endif %}></a>
+      {% elif a.kind == "video" and a.url %}
+      <video class="post-media" src="{{ a.url }}" controls preload="metadata"{% if a.width %} width="{{ a.width }}" height="{{ a.height }}"{% endif %}></video>
+      {% else %}
+      <a class="post-file" href="{{ p.jump_url }}" rel="noopener" target="_blank">📎 {{ a.filename }}</a>
+      {% endif %}
+    {% endfor %}
+
+    {% for e in p.embeds %}
+      {% if e.type == "gifv" and e.video %}
+      <video class="post-media" src="{{ e.video }}" autoplay loop muted playsinline{% if e.thumbnail %} poster="{{ e.thumbnail }}"{% endif %}></video>
+      {% elif e.type == "image" and (e.image or e.thumbnail) %}
+      <a class="post-media" href="{{ e.url or e.image or e.thumbnail }}" target="_blank" rel="noopener"><img src="{{ e.image or e.thumbnail }}" alt="" loading="lazy"></a>
+      {% elif e.title or e.description or e.thumbnail or e.image %}
+      <div class="embed{% if e.type == 'video' %} embed-video{% endif %}">
+        <div class="embed-text">
+          {% if e.provider %}<span class="muted small">{{ e.provider }}</span>{% endif %}
+          {% if e.author %}<span class="small">{{ e.author }}</span>{% endif %}
+          {% if e.title %}<span class="embed-title">{% if e.url %}<a href="{{ e.url }}" target="_blank" rel="noopener nofollow">{{ e.title }}</a>{% else %}{{ e.title }}{% endif %}</span>{% endif %}
+          {% if e.description %}<div class="embed-desc">{{ discord_text({"content": e.description}) }}</div>{% endif %}
+          {% for f in e.fields %}<div class="small"><strong>{{ f.name }}</strong> {{ discord_text({"content": f.value}) }}</div>{% endfor %}
+        </div>
+        {% if e.type == "video" and e.thumbnail %}
+        <a class="embed-big" href="{{ e.url }}" target="_blank" rel="noopener nofollow"><img src="{{ e.thumbnail }}" alt="" loading="lazy"></a>
+        {% elif e.image %}
+        <a class="embed-big" href="{{ e.url or e.image }}" target="_blank" rel="noopener nofollow"><img src="{{ e.image }}" alt="" loading="lazy"></a>
+        {% elif e.thumbnail %}
+        <img class="embed-thumb" src="{{ e.thumbnail }}" alt="" loading="lazy">
+        {% endif %}
+      </div>
+      {% endif %}
+    {% endfor %}
+
+    {% for s in p.stickers if s.url %}<img class="post-sticker" src="{{ s.url }}" alt="{{ s.name }}" title="{{ s.name }}" loading="lazy">{% endfor %}
+  {% endif %}
+
+  {% if p.reactions or p.thread %}
+  <footer class="post-foot">
+    {% for r in p.reactions %}
+    <span class="reaction">{% if r.url %}<img class="emoji" src="{{ r.url }}" alt=":{{ r.name }}:" title=":{{ r.name }}:">{% else %}{{ r.text }}{% endif %} {{ r.count }}</span>
+    {% endfor %}
+    {% if p.thread %}<a class="muted small" href="{{ p.jump_url }}" rel="noopener" target="_blank">Thread: {{ p.thread.name }}</a>{% endif %}
+  </footer>
+  {% endif %}
+</article>
+{%- endmacro %}

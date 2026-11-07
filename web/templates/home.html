@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "macros.html" import player_link, team_cell, season_status %}
+{% from "content.html" import post_card %}
 {% block content %}
 <section class="banner">
   <h1 class="visually-hidden">Ability Draft Community League</h1>
@@ -107,6 +108,13 @@
         {% endfor %}
         </tbody>
       </table>
+    </section>
+    {% endif %}
+
+    {% if posts %}
+    <section class="box">
+      <header class="box-head"><h2>Blog</h2><a href="/blog">All posts</a></header>
+      <div class="box-body posts">{% for p in posts %}{{ post_card(p, post_players, compact=True) }}{% endfor %}</div>
     </section>
     {% endif %}
   </div>

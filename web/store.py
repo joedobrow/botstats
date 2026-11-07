@@ -505,6 +505,92 @@ def _migrate_views_out_of_main_db() -> None:
     logger.info("moved %d page views into %s", len(views), VIEWS_DB)
 
 
+# The Blog's copy of the #content channel (content_mirror) keeps its own
+# file, as page views do: the bot writes to it whenever someone reacts to a
+# post, and in the league's database each write would empty the stat cache.
+CONTENT_DB = str(Path(db.DB_PATH).with_name("site_content.db"))
+CONTENT_PER_PAGE = 20
+
+
+def _content_conn() -> sqlite3.Connection:
+    conn = sqlite3.connect(CONTENT_DB)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL;")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS content_posts (
+            message_id  INTEGER PRIMARY KEY,   -- the Discord message
+            channel_id  INTEGER NOT NULL,
+            created_at  TEXT NOT NULL,         -- ISO, UTC
+            data        TEXT NOT NULL          -- content_mirror.to_post, as JSON
+        )""")
+    return conn
+
+
+def save_content_post(post: dict) -> bool:
+    """Store a post; False when it was already stored exactly so."""
+    data = json.dumps(post, sort_keys=True)
+    with _content_conn() as conn:
+        row = conn.execute("SELECT data FROM content_posts WHERE message_id = ?", (post["id"],)).fetchone()
+        if row and row["data"] == data:
+            return False
+        conn.execute("INSERT OR REPLACE INTO content_posts (message_id, channel_id, created_at, data) "
+                     "VALUES (?, ?, ?, ?)", (post["id"], post["channel_id"], post["created_at"], data))
+    return True
+
+
+def delete_content_posts(message_ids: list[int]) -> list[dict]:
+    """Remove posts; returns what was removed, for its files."""
+    if not message_ids:
+        return []
+    marks = ",".join("?" * len(message_ids))
+    with _content_conn() as conn:
+        rows = conn.execute(f"SELECT data FROM content_posts WHERE message_id IN ({marks})",
+                            message_ids).fetchall()
+        conn.execute(f"DELETE FROM content_posts WHERE message_id IN ({marks})", message_ids)
+    return [json.loads(r["data"]) for r in rows]
+
+
+def content_post_ids(channel_id: int) -> set[int]:
+    with _content_conn() as conn:
+        return {r[0] for r in conn.execute("SELECT message_id FROM content_posts WHERE channel_id = ?",
+                                           (channel_id,))}
+
+
+def content_posts(page: int = 1, per_page: int = CONTENT_PER_PAGE) -> dict:
+    """Newest first, a page at a time: {rows, page, pages}."""
+    with _content_conn() as conn:
+        total = conn.execute("SELECT COUNT(*) FROM content_posts").fetchone()[0]
+        pages = max(1, -(-total // per_page))
+        page = min(max(1, page), pages)
+        rows = conn.execute("SELECT data FROM content_posts ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                            (per_page, (page - 1) * per_page)).fetchall()
+    return {"rows": [json.loads(r["data"]) for r in rows], "page": page, "pages": pages}
+
+
+def content_post(message_id: int) -> dict | None:
+    with _content_conn() as conn:
+        row = conn.execute("SELECT data FROM content_posts WHERE message_id = ?", (message_id,)).fetchone()
+    return json.loads(row["data"]) if row else None
+
+
+def content_authors(posts: list[dict]) -> dict[int, int]:
+    """{Discord user id: account_id} for the posts' authors who are league
+    players, by the Discord name the site has for them (discord_handles)."""
+    from discord_sync import _candidates, _norm
+    by_handle: dict[str, int] = {}
+    for aid, handle in discord_handles().items():
+        for c in _candidates(handle):
+            by_handle.setdefault(_norm(c), aid)
+    out = {}
+    for p in posts:
+        a = p["author"]
+        aid = next((by_handle[_norm(n)] for n in (a.get("username"), a.get("global_name"), a.get("name"))
+                    if n and _norm(n) in by_handle), None)
+        if aid:
+            out[a["id"]] = aid
+    return out
+
+
 def _visitor_salt(day: str) -> str:
     """The day's salt, made once and shared by every process."""
     with _views_conn() as conn:

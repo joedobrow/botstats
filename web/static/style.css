@@ -932,3 +932,54 @@ a.result-link { color: inherit; }
 /* Admin → Uncredited games: a team picker and its Save on one line. */
 .side-pick { display: flex; gap: 6px; align-items: center; }
 .side-pick select { width: auto; min-width: 0; }
+
+/* Blog: the #content channel, a message at a time (templates/content.html). */
+.posts { display: flex; flex-direction: column; gap: 14px; }
+.post { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; min-width: 0; }
+.box-body .post { background: none; border: 0; border-radius: 0; padding: 0 0 12px; border-bottom: 1px solid var(--border); }
+.box-body .post:last-child { border-bottom: 0; padding-bottom: 0; }
+.post-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
+.post-avatar { width: 28px; height: 28px; border-radius: 50%; }
+.post-author { font-weight: 600; }
+.post-date { font-size: 0.85rem; }
+.post-reply { display: block; margin: -2px 0 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.post-body { overflow-wrap: anywhere; line-height: 1.5; }
+.post-body p { margin: 0 0 6px; }
+.post-body h3, .post-body h4, .post-body h5 { margin: 8px 0 4px; }
+.post-body blockquote { margin: 4px 0; padding-left: 10px; border-left: 3px solid var(--border); }
+.post-body ul, .post-body ol { margin: 4px 0; padding-left: 22px; }
+.post-body pre { background: var(--tag-bg); padding: 8px 10px; border-radius: 6px; overflow-x: auto; }
+.post-body code { background: var(--tag-bg); padding: 0 4px; border-radius: 4px; font-size: 0.9em; }
+.post-body pre code { background: none; padding: 0; }
+.post-body .subtext { color: var(--muted); font-size: 0.85rem; }
+.post-compact .post-body { display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical; overflow: hidden; }
+.mention { background: var(--tag-bg); border-radius: 4px; padding: 0 3px; }
+.spoiler { background: var(--text); color: transparent; border-radius: 3px; cursor: pointer; }
+.spoiler:hover, .spoiler:focus { background: var(--tag-bg); color: inherit; }
+.emoji { width: 1.3em; height: 1.3em; vertical-align: -0.3em; }
+.post-media { display: block; margin: 8px 0; max-width: 100%; }
+.post-media img, video.post-media { max-width: min(100%, 520px); max-height: 420px; width: auto; height: auto; border-radius: 6px; }
+.spoiler-media img { filter: blur(24px); transition: filter 0.2s; }
+.spoiler-media:hover img, .spoiler-media:focus img { filter: none; }
+.post-file { display: inline-block; margin: 6px 0; }
+.post-sticker { width: 120px; height: 120px; margin: 6px 0; }
+.embed { display: flex; gap: 12px; margin: 8px 0; padding: 10px 12px; max-width: 520px; background: var(--bg);
+         border-left: 4px solid var(--border); border-radius: 4px; }
+.embed-video { flex-direction: column; }
+.embed-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
+.embed-title { font-weight: 600; }
+.embed-desc { font-size: 0.9rem; }
+.embed-desc p { margin: 0; }
+.embed-thumb { width: 72px; height: 72px; object-fit: cover; border-radius: 4px; flex: none; }
+.embed-big img { max-width: 100%; border-radius: 4px; }
+.embed-video .embed-big { order: 2; }
+.post-poll { margin: 8px 0; max-width: 520px; }
+.post-poll-q { font-weight: 600; margin: 0 0 6px; }
+.post-poll-answer { position: relative; display: flex; justify-content: space-between; gap: 10px;
+                    padding: 5px 10px; margin-bottom: 4px; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.post-poll-bar { position: absolute; inset: 0 auto 0 0; background: var(--tag-bg); }
+.post-poll-text, .post-poll-answer .num { position: relative; }
+.post-pollresult { margin: 0; }
+.post-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; }
+.reaction { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; border: 1px solid var(--border);
+            border-radius: 999px; font-size: 0.85rem; background: var(--bg); }

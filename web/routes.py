@@ -21,7 +21,7 @@ from markupsafe import Markup
 import db
 from config import GAME_MODE_FILTERS, LEAGUE_TZ, REGION_CLUSTERS, STEAM_API_KEY, TIP_URL
 from player_api import account_id_from
-from web import draft, markup, notify, steam, store, uploads
+from web import discord_md, draft, markup, notify, steam, store, uploads
 
 TEMPLATE_DIR = Path(__file__).parent / "templates"
 STATIC_DIR = Path(__file__).parent / "static"
@@ -90,7 +90,8 @@ def rings(account_id: int | None) -> Markup:
 
 env.globals.update(season_url=season_url, team_url=team_url, hero=store.hero, rings=rings,
                    POSITION_NAMES=POSITION_NAMES, SEASON_STATUSES=store.SEASON_STATUSES,
-                   TIP_URL=TIP_URL)
+                   TIP_URL=TIP_URL,
+                   discord_text=lambda post: discord_md.render(post.get("content"), post.get("names"), LEAGUE_TZ))
 
 
 def _asset_version() -> int:
@@ -332,7 +333,8 @@ async def home(request: web.Request):
                       else open_seasons)
     return render(request, "home.html", blocks=blocks, many_divisions=many,
                   results=results[:8], leaders=leaders[:5], team_names=team_names,
-                  signup_seasons=signup_seasons,
+                  signup_seasons=signup_seasons, posts=(posts := store.content_posts(per_page=3)["rows"]),
+                  post_players=store.content_authors(posts),
                   season_cards=_season_cards(request, blocks, open_seasons, mine))
 
 
@@ -403,6 +405,23 @@ async def info(request: web.Request):
 @routes.get("/about")
 async def about(request: web.Request):
     return render(request, "text_page.html", title="About", text=store.get_text("about"))
+
+
+@routes.get("/blog")
+async def blog(request: web.Request):
+    page = re.sub(r"\D", "", request.query.get("page", ""))
+    posts = store.content_posts(int(page) if page else 1)
+    return render(request, "blog.html", title="Blog", posts=posts,
+                  players=store.content_authors(posts["rows"]))
+
+
+@routes.get(r"/blog/{message_id:\d+}")
+async def blog_post(request: web.Request):
+    post = store.content_post(int(request.match_info["message_id"]))
+    if not post:
+        return not_found(request, "Post")
+    return render(request, "blog.html", title="Blog", post=post,
+                  players=store.content_authors([post]))
 
 
 @routes.get("/rules")
