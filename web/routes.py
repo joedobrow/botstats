@@ -123,6 +123,9 @@ def render(request: web.Request, template: str, status: int = 200, **ctx) -> web
                theme=theme,
                is_uberadmin=request.get("is_uberadmin", False),
                csrf=request.get("csrf", ""), path=request.path,
+               # League games credited to nobody: admins get a nudge on every page.
+               unclaimed=(store.unclaimed_count()
+                          if request.get("is_admin") and request.path != "/admin/sides" else 0),
                # Where a Log in link brings you back to: this page as it is,
                # filters and all.
                login_url="/login?" + urlencode({"next": request.path_qs}),
@@ -1753,6 +1756,45 @@ async def admin_page(request: web.Request):
                   divisions=store.divisions(), admins=admins,
                   regions=sorted(REGION_CLUSTERS), game_modes=sorted(GAME_MODE_FILTERS),
                   about=store.get_text("about"), rules=store.get_text("rules"))
+
+
+@routes.get("/admin/sides")
+async def admin_sides(request: web.Request):
+    """Games with a side no team is credited for, to say whose it was."""
+    _require_admin(request)
+    seasons = store.all_seasons()
+    chosen = _query_season(request.query, seasons)
+    shown = [chosen] if chosen else store.current_seasons()
+    blocks = []
+    for season in shown:
+        teams = {t["captain"]: t["name"] for t in store.season_teams(season, matches=[])}
+        blocks.append({"season": season, "games": store.unclaimed_sides(season), "team_names": teams,
+                       "teams": sorted(teams.items(), key=lambda kv: kv[1].lower())})
+    others = [(s, n) for s in seasons if s not in shown and (n := len(store.unclaimed_sides(s)))]
+    return render(request, "admin_sides.html", title="Uncredited games", blocks=blocks, others=others,
+                  one_season=bool(chosen))
+
+
+@routes.post("/admin/sides")
+async def admin_sides_set(request: web.Request):
+    _require_admin(request)
+    form = await request.post()
+    season = _form_season(form)
+    match_id = re.sub(r"\D", "", str(form.get("match_id") or ""))
+    side, choice = form.get("side"), (form.get("captain") or "").strip()
+    if not match_id or side not in ("radiant", "dire"):
+        raise web.HTTPBadRequest(text="Which game, and which side?")
+    teams = {t["captain"]: t["name"] for t in store.season_teams(season, matches=[])}
+    if choice == "__standins__":
+        captain, said = None, "stand-ins"
+    elif choice in teams:
+        captain, said = choice, teams[choice]
+    else:
+        raise web.HTTPBadRequest(text="Pick a team from the list.")
+    db.set_match_team_override(int(match_id), side, captain, set_by=request["user"]["account_id"])
+    back = "/admin/sides" + (f"?season={season['id']}/{season['division_id']}"
+                             if request.query.get("season") or form.get("one_season") else "")
+    raise _go(back, f"Match {match_id}: {side.title()} was {said}.")
 
 
 @routes.get("/feedback")

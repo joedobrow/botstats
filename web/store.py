@@ -2082,3 +2082,42 @@ def set_text(key: str, value: str) -> None:
             INSERT INTO site_text (key, value) VALUES (?, ?)
             ON CONFLICT(key) DO UPDATE SET value = excluded.value
         """, (key, value))
+
+
+def unclaimed_sides(season: dict) -> list[dict]:
+    """League games with a side no team is credited for and no admin has
+    ruled on: fewer than three of any roster played it, so the game counts
+    for nobody's record. Newest first, one row per game:
+    {match_id, start_time, radiant_win, sides: [{side, team, open, hint}]}
+    where `team` is the captain credited now (None for nobody), `open` says
+    this side still needs a ruling, and `hint` is [(captain, players on the
+    side)] for the teams who had someone there, most first."""
+    sid, did = season["id"], season["division_id"]
+
+    def build():
+        if not db.get_player_costs(sid, did):
+            return []                       # no draft, no teams to credit
+        matches = [m for m in season_matches(season) if m["match_id"] > 0
+                   and (not m["radiant_team"] or not m["dire_team"])]
+        ids = [m["match_id"] for m in matches]
+        ruled = db.get_match_team_overrides(ids)
+        counts = db.get_side_roster_counts(sid, did, ids)
+        out = []
+        for m in matches:
+            sides = []
+            for side in ("radiant", "dire"):
+                n = counts.get(m["match_id"], {}).get(side, {})
+                sides.append({"side": side, "team": m[f"{side}_team"],
+                              "open": not m[f"{side}_team"] and side not in ruled.get(m["match_id"], {}),
+                              "hint": sorted(n.items(), key=lambda kv: -kv[1])})
+            if any(s["open"] for s in sides):
+                out.append({"match_id": m["match_id"], "start_time": m["start_time"],
+                            "radiant_win": m["radiant_win"], "sides": sides})
+        return out
+
+    return db._derived(("unclaimed_sides", sid, did), build)
+
+
+def unclaimed_count() -> int:
+    """Games needing a ruling in the seasons being played now: the admin alert."""
+    return sum(len(unclaimed_sides(s)) for s in current_seasons())

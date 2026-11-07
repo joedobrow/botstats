@@ -100,6 +100,7 @@ document.querySelectorAll("[data-theme-toggle]").forEach(function (b) {
 <main class="wrap">
 {# The answer to the form just sent: every handler redirects with ?notice= (routes._go). #}
 {% if notice %}<p class="notice" role="status">{{ notice }}</p>{% endif %}
+{% if unclaimed %}<p class="notice error"><a href="/admin/sides">{{ unclaimed }} league game{{ "s" if unclaimed != 1 }} credited to no team</a></p>{% endif %}
 {% block content %}{% endblock %}
 </main>
 <script>

@@ -928,3 +928,7 @@ label.check .pos { margin-right: 2px; }
 .fantasy-split td.win, .fantasy-split td.loss { font-weight: 500; }
 /* A result that links to its match keeps its win/loss colour. */
 a.result-link { color: inherit; }
+
+/* Admin → Uncredited games: a team picker and its Save on one line. */
+.side-pick { display: flex; gap: 6px; align-items: center; }
+.side-pick select { width: auto; min-width: 0; }

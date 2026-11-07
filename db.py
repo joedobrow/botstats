@@ -2960,7 +2960,7 @@ def get_captain_account_ids(season_id: int, division_id: int) -> dict[str, int |
 def get_head_to_head_matches(
     season_id: int, division_id: int, captain_a: str, captain_b: str,
 ) -> list[dict]:
-    """Find matches where both teams had ≥3 of their roster on opposite sides.
+    """Matches the two teams played each other, by get_match_team_captains.
 
     Each returned dict has:
         match_id, start_time, duration, a_won (bool)
@@ -3006,14 +3006,12 @@ def get_head_to_head_matches(
         elif slot >= 128:
             m["dire"].add(d["account_id"])
 
+    owners = get_match_team_captains(season_id, division_id, list(by_match))
     results: list[dict] = []
     for match_id, m in by_match.items():
-        r_a = len(roster_a & m["radiant"])
-        d_a = len(roster_a & m["dire"])
-        r_b = len(roster_b & m["radiant"])
-        d_b = len(roster_b & m["dire"])
-        a_radiant = r_a >= 3 and d_b >= 3
-        a_dire    = d_a >= 3 and r_b >= 3
+        o = owners.get(match_id, {})
+        a_radiant = o.get("radiant") == captain_a and o.get("dire") == captain_b
+        a_dire    = o.get("dire") == captain_a and o.get("radiant") == captain_b
         if not (a_radiant or a_dire):
             continue
         if a_radiant:
@@ -3218,7 +3216,27 @@ def get_match_team_captains(
     """
     if not match_ids or not season_id:
         return {}
+    counts = get_side_roster_counts(season_id, division_id, match_ids)
+    overrides = get_match_team_overrides(list(counts))
+    result: dict[int, dict[str, str | None]] = {}
+    for mid, by_side in counts.items():
+        result[mid] = {}
+        for side, n in by_side.items():
+            if side in overrides.get(mid, {}):
+                result[mid][side] = overrides[mid][side]   # an admin said so
+                continue
+            cap = max(n, key=n.get, default=None)
+            result[mid][side] = cap if cap and n[cap] >= 3 else None
+    return result
 
+
+def get_side_roster_counts(
+    season_id: int, division_id: int, match_ids: list[int],
+) -> dict[int, dict[str, dict[str, int]]]:
+    """How many of each team's roster (4 drafted + captain when resolvable)
+    played on each side of each match: {match_id: {side: {captain: n}}},
+    teams with nobody on a side left out. get_match_team_captains decides
+    from these; an admin choosing a side's team sees them as a hint."""
     costs = get_player_costs(season_id, division_id)
     cap_aids = get_captain_account_ids(season_id, division_id)
     rosters: dict[str, set[int]] = {}
@@ -3244,18 +3262,9 @@ def get_match_team_captains(
                     side = sides[r["match_id"]].get(r["team_side"])
                     if side is not None:
                         side.add(r["account_id"])
-
-    overrides = get_match_team_overrides(list(sides))
-    result: dict[int, dict[str, str | None]] = {}
-    for mid, by_side in sides.items():
-        result[mid] = {}
-        for side, aids in by_side.items():
-            if side in overrides.get(mid, {}):
-                result[mid][side] = overrides[mid][side]   # an admin said so
-                continue
-            cap = max(rosters, key=lambda c: len(rosters[c] & aids), default=None)
-            result[mid][side] = cap if cap and len(rosters[cap] & aids) >= 3 else None
-    return result
+    return {mid: {side: {cap: len(roster & aids) for cap, roster in rosters.items() if roster & aids}
+                  for side, aids in by_side.items()}
+            for mid, by_side in sides.items()}
 
 
 def get_team_match_aggregates(season_id: int, division_id: int) -> dict[str, dict]:
@@ -3399,19 +3408,17 @@ def get_team_match_aggregates(season_id: int, division_id: int) -> dict[str, dic
         out["fantasy_points"] = sum(c["points"] for p in parts for c in p)
         return out
 
+    # Whose side is whose: the standings' rule, admins' choices and all.
+    owners = get_match_team_captains(season_id, division_id, list(matches))
     teams: dict[str, dict] = {}
     for cap, roster in rosters.items():
         team_match_stats: list[dict] = []
         wins = 0
         for match_id, m in matches.items():
-            r_overlap = sum(1 for p in m["radiant"] if p["account_id"] in roster)
-            d_overlap = sum(1 for p in m["dire"]    if p["account_id"] in roster)
             side, won = None, False
-            # When both sides have ≥3 of the team (rare — e.g., mixed lobby),
-            # pick the side with the higher overlap.
-            if r_overlap >= 3 and r_overlap >= d_overlap:
+            if owners.get(match_id, {}).get("radiant") == cap:
                 side, won = m["radiant"], bool(m["radiant_win"])
-            elif d_overlap >= 3:
+            elif owners.get(match_id, {}).get("dire") == cap:
                 side, won = m["dire"], not bool(m["radiant_win"])
             if not side or len(side) != 5:
                 continue

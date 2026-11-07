@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% from "macros.html" import team_cell, team_label %}
+{% block content %}
+<p class="small"><a href="/admin">← Admin</a></p>
+<h1>Uncredited games</h1>
+
+{% for b in blocks %}
+{% set season = b.season %}
+<section class="panel">
+  <h2 class="flush"><a href="{{ season_url(season) }}">{{ season.label }}</a></h2>
+  <div class="scroll">
+  <table>
+    <thead><tr><th>Date</th><th>Radiant</th><th>Dire</th><th>Winner</th></tr></thead>
+    <tbody>
+    {% for g in b.games %}
+      <tr>
+        <td class="nowrap"><a href="/match/{{ g.match_id }}">{{ g.start_time|date("%b %-d") }}</a></td>
+        {% for s in g.sides %}
+        <td>
+          {% if s.open %}
+          <form method="post" action="/admin/sides" class="side-pick">
+            <input type="hidden" name="csrf" value="{{ csrf }}">
+            <input type="hidden" name="season_id" value="{{ season.id }}">
+            <input type="hidden" name="division_id" value="{{ season.division_id }}">
+            {% if one_season %}<input type="hidden" name="one_season" value="1">{% endif %}
+            <input type="hidden" name="match_id" value="{{ g.match_id }}">
+            <input type="hidden" name="side" value="{{ s.side }}">
+            {% set played = dict(s.hint) %}
+            {% set top = s.hint[0][0] if s.hint else None %}
+            <select name="captain" aria-label="{{ s.side|title }} team">
+              <option value="__standins__"{% if not top %} selected{% endif %}>Stand-ins</option>
+              {% for cap, name in b.teams %}
+              <option value="{{ cap }}"{% if cap == top %} selected{% endif %}>{{ team_label(name, cap) }}{% if played.get(cap) %} · {{ played[cap] }} played{% endif %}</option>
+              {% endfor %}
+            </select>
+            <button class="primary">Save</button>
+          </form>
+          {% else %}{{ team_cell(season, s.team, b.team_names) }}{% endif %}
+        </td>
+        {% endfor %}
+        <td>{{ "Radiant" if g.radiant_win else "Dire" }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="4" class="muted">No uncredited games.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+{% else %}
+<p class="muted">No season is being played.</p>
+{% endfor %}
+
+{% if others %}
+<p class="small muted">Older seasons:
+  {% for s, n in others %}<a href="/admin/sides?season={{ s.id }}/{{ s.division_id }}">{{ s.label }}</a> ({{ n }}){{ ", " if not loop.last }}{% endfor %}
+</p>
+{% endif %}
+{% endblock %}
