@@ -67,14 +67,16 @@
     <button type="button" class="replay-play" aria-label="Play the draft" title="Play the draft">▶</button>
     <input type="range" class="replay-slider" min="0" max="{{ board.total }}" value="{{ board.total }}" aria-label="Pick">
   </div>
-  <div class="replay-body">
-  <div class="scroll">
+  <div class="replay-body{% if not board.pool %} no-pool{% endif %}">
+  {% set radiant_rows = board.rows|selectattr("side", "equalto", "radiant")|list %}
+  {% for side, rows in (("radiant", radiant_rows), ("dire", board.rows|reject("in", radiant_rows)|list)) %}
+  <div class="scroll replay-side {{ side }}">
   <table class="replay-board">
-    <thead><tr><th>Player</th>{% for r in range(board.rounds) %}<th title="Round {{ r + 1 }}">R{{ r + 1 }}</th>{% endfor %}</tr></thead>
+    <thead><tr><th class="side-name">{{ side|capitalize }}</th>{% for r in range(board.rounds) %}<th title="Round {{ r + 1 }}">R{{ r + 1 }}</th>{% endfor %}</tr></thead>
     <tbody>
-    {% for row in board.rows %}
+    {% for row in rows %}
       {% set name = row.player.display_name if row.player else "Private player" %}
-      <tr class="{{ row.side or '' }}">
+      <tr>
         <td class="sb-name" title="{{ name }}">{{ player_link(row.account_id, name) }}</td>
         {% for pk in row.picks %}
         <td>{% if pk %}<a class="replay-pick" href="/ability/{{ pk.id }}" data-n="{{ pk.n }}">{{ pick_icon(pk) }}<span class="replay-n">{{ pk.n }}</span></a>{% endif %}</td>
@@ -84,6 +86,7 @@
     </tbody>
   </table>
   </div>
+  {% endfor %}
   {% if board.pool %}
   <div class="pool-grid" aria-label="Pool">
     {% for row in board.pool %}{% set top = loop.index0 < 2 %}

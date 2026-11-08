@@ -1013,14 +1013,27 @@ table.collapsed tbody tr:nth-child(n+7) { display: none; }
 .replay-controls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
 .replay-play { width: 36px; height: 32px; padding: 0; }
 .replay-slider { flex: 1 1 240px; max-width: 420px; accent-color: var(--accent); }
-.replay-body { display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start; }
-.replay-body > .scroll { flex: 0 1 auto; min-width: 0; }
-.replay-board { width: auto; }
-.replay-board td.sb-name { max-width: 9em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.replay-board td, .replay-board th { text-align: center; padding: 4px 6px; }
+/* Radiant | pool | Dire; narrower, the pool goes under both teams; on a phone, one column. */
+.replay-body { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); grid-template-areas: "radiant pool dire";
+  gap: 16px; align-items: start; }
+.replay-body.no-pool { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "radiant dire"; }
+.replay-side.radiant { grid-area: radiant; }
+.replay-side.dire { grid-area: dire; }
+.replay-body .pool-grid { grid-area: pool; }
+@media (max-width: 1000px) {
+  .replay-body, .replay-body.no-pool { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "radiant dire" "pool pool"; }
+  .replay-body .pool-grid { justify-content: center; }
+}
+@media (max-width: 640px) {
+  .replay-body, .replay-body.no-pool { grid-template-columns: minmax(0, 1fr); grid-template-areas: "radiant" "dire" "pool"; }
+}
+.replay-board { width: 100%; }
+.replay-board th.side-name { font-weight: 600; }
+.replay-side.radiant th.side-name { color: var(--radiant); }
+.replay-side.dire th.side-name { color: var(--dire); }
+.replay-board td.sb-name { max-width: 8em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.replay-board td, .replay-board th { text-align: center; padding: 4px 3px; }
 .replay-board td.sb-name, .replay-board th:first-child { text-align: left; }
-.replay-board tr.radiant td.sb-name { box-shadow: inset 3px 0 var(--radiant); }
-.replay-board tr.dire td.sb-name { box-shadow: inset 3px 0 var(--dire); }
 .replay-board tr.picking td.sb-name { font-weight: 600; }
 .replay-pick { position: relative; display: inline-block; line-height: 0; border-radius: 5px; }
 .replay-pick img { width: 34px; height: 34px; border-radius: 4px; margin: 0; }
