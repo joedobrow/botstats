@@ -65,7 +65,7 @@
 <div class="draft-replay" data-total="{{ board.total }}">
   <div class="replay-controls">
     <button type="button" class="replay-play" aria-label="Play the draft" title="Play the draft">▶</button>
-    <input type="range" class="replay-slider" min="0" max="{{ board.total }}" value="{{ board.total }}" aria-label="Pick">
+    <input type="range" class="replay-slider" min="0" max="{{ board.total }}" value="0" aria-label="Pick">
     <span class="replay-steps">
       <button type="button" class="replay-step" data-step="-1" aria-label="Back one pick" title="Back one pick">−</button>
       <button type="button" class="replay-step" data-step="1" aria-label="Forward one pick" title="Forward one pick">+</button>
@@ -145,7 +145,7 @@
     slider.value = Math.min(total, Math.max(0, +slider.value + +b.dataset.step));
     show(+slider.value);
   }));
-  show(total);
+  show(+slider.value);    // 0, or where the browser left it on Back
 })();
 </script>
 {% endif %}
