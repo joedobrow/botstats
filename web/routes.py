@@ -1207,9 +1207,7 @@ def _fantasy_picks_page(request: web.Request, view: str, season: dict | None, *,
     """/fantasy's Abilities view: each pick, hero models included, by what
     the players who drafted it did (store.ability_table)."""
     q = request.query
-    min_games = re.sub(r"\D", "", q.get("min_games", ""))
-    table = store.ability_table(season, min_games=int(min_games) if min_games else None,
-                                only_divisions=_scope_divisions(season, division_id))
+    table = store.ability_table(season, min_games=0, only_divisions=_scope_divisions(season, division_id))
     return render(request, "fantasy.html", title="Fantasy", view=view, picks=table, q=q,
                   seasons=seasons, divisions=divisions, division_id=division_id, season=season,
                   pick_query=_pick_query(season, division_id))

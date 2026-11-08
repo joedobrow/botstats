@@ -1028,3 +1028,7 @@ table.collapsed tbody tr:nth-child(n+7) { display: none; }
 .replay-pick.later { opacity: 0.08; filter: grayscale(1); }
 .replay-pick.now { outline: 2px solid var(--accent); outline-offset: 2px; }
 .replay-pick.now .replay-n { color: var(--accent); font-weight: 600; }
+
+/* /fantasy Abilities: the find-as-you-type box */
+.ability-search { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 8px 0; }
+.ability-search input[type=search] { flex: 0 1 260px; min-width: 0; }
