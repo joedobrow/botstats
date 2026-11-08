@@ -2108,6 +2108,7 @@ def match_detail(match_id: int) -> dict | None:
         p["fantasy_breakdown"] = fantasy.breakdown(db.per_match_stats(p))
         for c in p["fantasy_breakdown"]:
             c["stat"] = fantasy.describe(c)
+    m["draft_board"] = draft_board(match_id, players)
     m["radiant"] = [p for p in players if p["team_side"] == "radiant"]
     m["dire"] = [p for p in players if p["team_side"] == "dire"]
     season = season_of_match(all_seasons(), m)
@@ -2119,6 +2120,32 @@ def match_detail(match_id: int) -> dict | None:
             cap = caps.get(match_id, {}).get(side)
             m[f"{side}_team"] = teams.get(cap) if cap else None
     return m
+
+
+def draft_board(match_id: int, players: list[dict]) -> dict | None:
+    """The draft pick by pick, for the match page's replay: a row per
+    player in the order they first picked (so the snake reads down the
+    first round and back up the next), a column per round.
+    {"rows": [{player, side, picks: [pick or None per round]}], "rounds", "total"}"""
+    picks = db.get_match_picks(match_id)
+    if not picks:
+        return None
+    by_account = {p["account_id"]: p for p in players}
+    order: list[int] = []
+    for pk in picks:
+        if pk["account_id"] not in order:
+            order.append(pk["account_id"])
+    seats = len(order)
+    rounds = -(-len(picks) // seats)
+    rows = {aid: {"player": by_account.get(aid), "account_id": aid,
+                  "side": (by_account.get(aid) or {}).get("team_side"), "picks": [None] * rounds}
+            for aid in order}
+    for i, pk in enumerate(picks):          # numbered by position, in case windrun's skip one
+        n = i + 1
+        rnd = min(i // seats, rounds - 1)
+        rows[pk["account_id"]]["picks"][rnd] = {**draft_pick(pk["ability_id"]), "id": pk["ability_id"],
+                                                "n": n, "round": rnd + 1}
+    return {"rows": [rows[a] for a in order], "rounds": rounds, "total": len(picks)}
 
 
 # ---------------------------------------------------------------------------

@@ -10,7 +10,7 @@ first one somewhere both can reach (usually `db.py`) and call it from both place
 
 | Question | Ask | Not |
 |---|---|---|
-| Which season is a division playing? | `db.playing_season_id`, i.e. `division["current_season_id"]` from any `db` division getter; `store.current_seasons()` on the site | the raw `divisions.current_season_id` column (that's `division["season_pointer"]`, which only the weekly fetch reads) |
+| Which season is a division playing? | `db.playing_season_id`, i.e. `division["current_season_id"]` from any `db` division getter; `store.current_seasons()` on the site | the raw `divisions.current_season_id` column (that's `division["season_pointer"]`, which only the daily fetch reads) |
 | What rating do we show? | `db.displayed_ratings(division)`, `db.displayed_rating(aid, division)`, `store.player_ratings()` | `player_ratings_cache.internal_rating` plus your own fantasy adjustment |
 | Who has enough games to rank? | `db.qualified` / `db.games_needed` | a fixed number in a template or route |
 | Which team played a side of a game | `db.get_match_team_captains` (3 of a roster, or an admin's ruling in Admin → Uncredited games) | counting roster overlap yourself |

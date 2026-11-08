@@ -4057,6 +4057,15 @@ def get_match_draft(match_id: int) -> dict[int, list[int]]:
     return {aid: sorted(ids, key=lambda i: i >= 0) for aid, ids in out.items()}  # model first, stable
 
 
+def get_match_picks(match_id: int) -> list[dict]:
+    """A game's draft as it happened: every pick in order, as
+    {pick_order, account_id, ability_id}. [] if none stored."""
+    with _conn() as conn:
+        return [dict(r) for r in conn.execute(
+            "SELECT pick_order, account_id, ability_id FROM match_drafts WHERE match_id = ? ORDER BY pick_order",
+            (match_id,))]
+
+
 def append_draft_event(season_id: int, division_id: int, kind: str,
                        actor: int | None, payload: dict | None = None) -> int:
     """Add one thing that happened to a draft, and return its id.

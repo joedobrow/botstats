@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "macros.html" import hero_icon, draft_icons, player_link %}
+{% from "macros.html" import hero_icon, draft_icons, pick_icon, player_link %}
 {% block content %}
 {% if m.season %}<p class="small"><a href="{{ season_url(m.season) }}?tab=matches">← {{ m.season.label }}</a></p>{% endif %}
 {% set by_hand = m.match_id < 0 %}
@@ -58,6 +58,79 @@
   </div>
   {% endif %}
 {% endfor %}
+
+{% set board = m.draft_board %}
+{% if board %}
+<h2>Draft</h2>
+<div class="draft-replay" data-total="{{ board.total }}">
+  <div class="replay-controls">
+    <button type="button" class="replay-play" aria-label="Play the draft" title="Play the draft">▶</button>
+    <input type="range" class="replay-slider" min="0" max="{{ board.total }}" value="{{ board.total }}" aria-label="Pick">
+    <span class="replay-label muted small">All {{ board.total }} picks</span>
+  </div>
+  <div class="scroll">
+  <table class="replay-board">
+    <thead><tr><th>Player</th>{% for r in range(board.rounds) %}<th>Round {{ r + 1 }}</th>{% endfor %}</tr></thead>
+    <tbody>
+    {% for row in board.rows %}
+      {% set name = row.player.display_name if row.player else "Private player" %}
+      <tr class="{{ row.side or '' }}" data-player="{{ name }}">
+        <td class="sb-name" title="{{ name }}">{{ player_link(row.account_id, name) }}</td>
+        {% for pk in row.picks %}
+        <td>{% if pk %}<a class="replay-pick" href="/ability/{{ pk.id }}" data-n="{{ pk.n }}" data-name="{{ pk.name }}">{{ pick_icon(pk) }}<span class="replay-n">{{ pk.n }}</span></a>{% endif %}</td>
+        {% endfor %}
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+<script>
+(() => {
+  const box = document.querySelector(".draft-replay");
+  const total = +box.dataset.total;
+  const slider = box.querySelector(".replay-slider");
+  const play = box.querySelector(".replay-play");
+  const label = box.querySelector(".replay-label");
+  const picks = [...box.querySelectorAll(".replay-pick")];
+  const rounds = box.querySelectorAll("thead th").length - 1;
+  const seats = Math.ceil(total / rounds);
+  let timer = null;
+
+  function show(v) {
+    let now = null;
+    for (const a of picks) {
+      const n = +a.dataset.n;
+      a.classList.toggle("later", n > v);
+      a.classList.toggle("now", n === v && v < total);
+      if (n === v) now = a;
+    }
+    box.querySelectorAll("tr.picking").forEach(tr => tr.classList.remove("picking"));
+    if (now && v < total) {
+      const tr = now.closest("tr");
+      tr.classList.add("picking");
+      label.textContent = `Pick ${v} · Round ${Math.ceil(v / seats)} · ${tr.dataset.player} took ${now.dataset.name}`;
+    } else {
+      label.textContent = v === 0 ? "Before the first pick" : `All ${total} picks`;
+    }
+  }
+  function stop() { clearInterval(timer); timer = null; play.textContent = "▶"; play.setAttribute("aria-label", "Play the draft"); }
+  play.addEventListener("click", () => {
+    if (timer) return stop();
+    if (+slider.value >= total) slider.value = 0;
+    show(+slider.value);
+    play.textContent = "❚❚"; play.setAttribute("aria-label", "Pause");
+    timer = setInterval(() => {
+      slider.value = +slider.value + 1;
+      show(+slider.value);
+      if (+slider.value >= total) stop();
+    }, 700);
+  });
+  slider.addEventListener("input", () => { stop(); show(+slider.value); });
+  show(total);
+})();
+</script>
+{% endif %}
 
 {# Where each player's fantasy score came from: a row per part of the
    formula, a column per player, Radiant then Dire. #}

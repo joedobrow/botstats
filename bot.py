@@ -2286,18 +2286,19 @@ async def on_message(message: discord.Message):
 
 
 # ---------------------------------------------------------------------------
-# Weekly auto-fetch (Thursday 09:00 UTC)
+# Daily fetch (09:00 UTC); ratings on Thursdays
 # ---------------------------------------------------------------------------
-# League night is Wednesday evening ET and wraps up around 03:30 UTC Thursday.
-# 09:00 UTC (5am EDT / 4am EST) leaves OpenDota a few hours to ingest the
-# games and still has everything in place before anyone's awake.
+# NA's league night is Wednesday evening ET and wraps up around 03:30 UTC
+# Thursday; 09:00 UTC leaves OpenDota a few hours to ingest the games. The
+# games and their drafts are fetched every day: windrun rarely has a draft
+# parsed by the next morning, and a weekly retry left a week's drafts missing
+# until the week after. Both are cheap when nothing is new (one OpenDota
+# request per season, one windrun request per game still missing a draft).
+# Ratings cost five seconds of windrun per player, so they stay weekly.
 
 @tasks.loop(time=datetime.min.time().replace(hour=9, tzinfo=timezone.utc))
-async def weekly_fetch():
-    # Only run on Thursdays (weekday() == 3)
-    if datetime.now(timezone.utc).weekday() != 3:
-        return
-    logger.info("Weekly fetch triggered (Thursday 09:00 UTC)")
+async def daily_fetch():
+    logger.info("Daily fetch triggered (09:00 UTC)")
 
     # Fetch each division's current season once: divisions sharing a season
     # (one league) are all filled in by the same fetch.
@@ -2310,23 +2311,24 @@ async def weekly_fetch():
         try:
             count = await fetch_and_store_season(season_id)
             total_count += count
-            logger.info(f"Weekly fetch for league {season_id}: {count} match(es)")
+            logger.info(f"Daily fetch for league {season_id}: {count} match(es)")
         except Exception:
-            logger.exception(f"Weekly fetch failed for league {season_id}")
+            logger.exception(f"Daily fetch failed for league {season_id}")
 
-    logger.info(f"Weekly fetch complete: {total_count} total match(es) across {len(divisions)} division(s)")
+    logger.info(f"Daily fetch complete: {total_count} total match(es) across {len(divisions)} division(s)")
 
-    # Drafts are asked for once, as each game is stored, and windrun usually
-    # hasn't parsed the replay that soon — which is why games fetched the
-    # morning after they were played never got their picks at all. Ask again
-    # for the ones still missing. Wrapped: windrun being down must not take
-    # the fetch loop with it.
+    # A game's draft is asked for as it's stored, and again each day until
+    # windrun has it (games_missing_drafts gives up after 30 days). Wrapped:
+    # windrun being down must not take the fetch loop with it.
     try:
         from fetcher import backfill_drafts
         for season_id in seasons:
             await backfill_drafts(season_id)
     except Exception:
         logger.exception("Draft backfill failed")
+
+    if datetime.now(timezone.utc).weekday() != 3:      # ratings: Thursdays only
+        return
 
     # Then re-rate everyone who has played, while the new results are the
     # freshest thing in the database — the fantasy adjustment is fitted from
@@ -2392,7 +2394,7 @@ async def _setup_once():
     except Exception:
         logger.exception("Failed to start the web server")
 
-    weekly_fetch.start()
+    daily_fetch.start()
 
     try:
         synced = await tree.sync()

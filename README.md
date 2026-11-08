@@ -13,7 +13,7 @@ changing anything.
 ## Layout
 
 ```
-bot.py              Discord client, slash commands, weekly fetch
+bot.py              Discord client, slash commands, daily fetch
 db.py               Schema, migrations, and every stat the bot and site share
 fetcher.py          OpenDota fetches; Windrun drafts (windrun.py)
 fantasy.py          The fantasy points formula
@@ -99,7 +99,8 @@ fly ssh sftp get /tmp/snap.db copy.db -a dota-bot
 - **Admin → Discord** hands out the server's `players` and `captains` roles
   from a season's signups and rebuilds the `Captain Rooms` voice channels,
   for every division sharing that Discord server at once.
-- The weekly fetch runs Thursdays at 09:00 UTC, after Wednesday league night.
+- Games and their Ability Draft picks are fetched daily at 09:00 UTC; ratings
+  are refreshed with the Thursday run, after Wednesday league night.
   `/refresh_leaderboard` runs it on demand.
 
 ## Slash commands
