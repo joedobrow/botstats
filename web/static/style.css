@@ -1012,6 +1012,8 @@ table.collapsed tbody tr:nth-child(n+7) { display: none; }
 /* Match page: the draft, pick by pick */
 .replay-controls { display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 8px; }
 .replay-play { width: 36px; height: 32px; padding: 0; }
+.replay-steps { display: inline-flex; gap: 4px; }
+.replay-step { width: 32px; height: 32px; padding: 0; font-size: 1.1rem; line-height: 1; }
 .replay-slider { flex: 1 1 240px; max-width: 420px; accent-color: var(--accent); }
 /* Radiant | pool | Dire; narrower, the pool goes under both teams; on a phone, one column. */
 .replay-body { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); grid-template-areas: "radiant pool dire";
