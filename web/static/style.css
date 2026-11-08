@@ -1013,6 +1013,10 @@ table.collapsed tbody tr:nth-child(n+7) { display: none; }
 .replay-controls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
 .replay-play { width: 36px; height: 32px; padding: 0; }
 .replay-slider { flex: 1 1 240px; max-width: 420px; accent-color: var(--accent); }
+.replay-body { display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start; }
+.replay-body > .scroll { flex: 0 1 auto; min-width: 0; }
+.replay-board { width: auto; }
+.replay-board td.sb-name { max-width: 9em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .replay-board td, .replay-board th { text-align: center; padding: 4px 6px; }
 .replay-board td.sb-name, .replay-board th:first-child { text-align: left; }
 .replay-board tr.radiant td.sb-name { box-shadow: inset 3px 0 var(--radiant); }
@@ -1031,3 +1035,15 @@ table.collapsed tbody tr:nth-child(n+7) { display: none; }
 /* /fantasy Abilities: the find-as-you-type box */
 .ability-search { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 8px 0; }
 .ability-search input[type=search] { flex: 0 1 260px; min-width: 0; }
+.pool-grid { display: grid; grid-template-columns: repeat(8, 34px); gap: 4px; align-content: start; }
+.pool-grid .pool-cell:nth-child(16) ~ .pool-cell:nth-child(-n+24) { margin-top: 10px; }  /* gap under the ultimates */
+.pool-cell { width: 34px; height: 34px; border-radius: 4px; background: var(--tag-bg); line-height: 0; }
+.pool-cell.empty { background: none; }
+.pool-cell.ult { box-shadow: inset 0 0 0 1px var(--accent); }
+.pool-item { display: block; transition: opacity 0.15s; }
+.pool-item img { width: 34px; height: 34px; border-radius: 4px; margin: 0; }
+.pool-item img.draft-model { object-fit: contain; }
+.pool-item.taken { opacity: 0; pointer-events: none; }
+.pool-cell .draft-unknown { display: grid; place-items: center; width: 34px; height: 34px; color: var(--muted); line-height: 1; }
+/* A pick icon keeps its size when its picture won't load (the name is in its title). */
+img.draft-ability, img.draft-model { display: inline-block; overflow: hidden; font-size: 0; vertical-align: middle; background: var(--tag-bg); }

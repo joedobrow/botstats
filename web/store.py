@@ -54,7 +54,14 @@ def hero(hero_id: int) -> dict:
 
 _STATIC = Path(__file__).parent / "static"
 _ABILITIES: dict[int, dict] = {int(k): v for k, v in json.loads((_STATIC / "abilities.json").read_text()).items()}
+# Ability Draft's own copies (kez_ravens_veil_ad) have no picture of their own.
+for _a in _ABILITIES.values():
+    if _a.get("img", "").endswith("_ad.png"):
+        _a["img"] = _a["img"][:-7] + ".png"
 _SERVERS: dict[int, str] = {int(k): v for k, v in json.loads((_STATIC / "servers.json").read_text()).items()}
+# Each Ability Draft ability's hero, slot order and whether it's an ultimate
+# (scripts/build_ad_abilities.py), for laying out a game's pool.
+_AD: dict[int, dict] = {int(k): v for k, v in json.loads((_STATIC / "ad_abilities.json").read_text()).items()}
 
 
 def draft_pick(ability_id: int) -> dict:
@@ -2145,7 +2152,77 @@ def draft_board(match_id: int, players: list[dict]) -> dict | None:
         rnd = min(i // seats, rounds - 1)
         rows[pk["account_id"]]["picks"][rnd] = {**draft_pick(pk["ability_id"]), "id": pk["ability_id"],
                                                 "n": n, "round": rnd + 1}
-    return {"rows": [rows[a] for a in order], "rounds": rounds, "total": len(picks)}
+    return {"rows": [rows[a] for a in order], "rounds": rounds, "total": len(picks),
+            "pool": draft_pool(picks, db.get_match_unpicked(match_id))}
+
+
+def draft_pool(picks: list[dict], unpicked: list[int]) -> list[list] | None:
+    """The pool the players drafted from, laid out as the game shows it:
+    8 columns, the twelve heroes' ultimates in two rows on top, then a row
+    per pair of heroes, each with its three abilities beside it (heroes 1-6
+    on the left, 7-12 on the right).
+
+    Each cell is None (an empty corner), {"unknown": True}, or a pick with
+    "n", the pick number that took it (None if nobody did). An ability goes
+    with its own hero; the ones a hero doesn't bring (Morphling's ultimate,
+    say) are filled from the pool's leftovers, ultimates into an empty
+    ultimate slot. A slot nothing fits stays a question mark."""
+    if not unpicked:
+        return None
+    taken = {pk["ability_id"]: i + 1 for i, pk in enumerate(picks)}
+    pool = list(taken) + [a for a in unpicked if a not in taken]
+    models = sorted((-a for a in pool if a < 0), key=lambda h: hero(h)["name"])[:12]
+    models += [None] * (12 - len(models))
+    slots = {h: {"basic": [], "ult": []} for h in models if h}
+
+    leftovers = []
+    for a in sorted((a for a in pool if a > 0), key=lambda a: _AD.get(a, {}).get("order", 99)):
+        info = _AD.get(a)
+        own = slots.get(info["hero"]) if info else None
+        if own is not None:
+            own["ult" if info["ult"] else "basic"].append(a)
+        else:
+            leftovers.append(a)
+    for own in slots.values():                     # more than a hero has room for
+        while len(own["basic"]) > 3:
+            extra = own["basic"].pop()
+            (own["ult"] if not own["ult"] else leftovers).append(extra)
+        leftovers += own["ult"][1:]
+        del own["ult"][1:]
+    # Others' abilities fill the gaps: ultimates first into ultimate slots.
+    leftovers.sort(key=lambda a: not _AD.get(a, {}).get("ult"))
+    for a in list(leftovers):
+        want = "ult" if _AD.get(a, {}).get("ult") else "basic"
+        room = next((o for o in slots.values() if len(o[want]) < (1 if want == "ult" else 3)), None)
+        if room is None:
+            room = next((o for o in slots.values() if len(o["basic"]) < 3), None)
+            want = "basic"
+            if room is None:
+                room = next((o for o in slots.values() if not o["ult"]), None)
+                want = "ult"
+        if room is not None:
+            room[want].append(a)
+            leftovers.remove(a)
+
+    def cell(a):
+        if a is None:
+            return {"unknown": True}
+        return {**draft_pick(a), "id": a, "n": taken.get(a)}
+
+    def ult(h):
+        return cell(slots[h]["ult"][0] if h and slots[h]["ult"] else None)
+
+    def basics(h):
+        got = slots[h]["basic"] if h else []
+        return [cell(got[i] if i < len(got) else None) for i in range(3)]
+
+    grid = [[None] + [ult(models[i]) for i in (0, 1, 2, 6, 7, 8)] + [None],
+            [None] + [ult(models[i]) for i in (3, 4, 5, 9, 10, 11)] + [None]]
+    for k in range(6):
+        left, right = models[k], models[k + 6]
+        grid.append([cell(-left if left else None)] + basics(left) + basics(right)
+                    + [cell(-right if right else None)])
+    return grid
 
 
 # ---------------------------------------------------------------------------

@@ -159,6 +159,16 @@ CREATE TABLE IF NOT EXISTS match_drafts (
 )"""
 
 
+# The rest of a draft's pool: the models and abilities nobody took (windrun's
+# ignoredSpells). With the picks, the whole board the players chose from.
+DRAFT_POOL_TABLE = """
+CREATE TABLE IF NOT EXISTS match_draft_pool (
+    match_id    INTEGER NOT NULL REFERENCES matches(match_id),
+    ability_id  INTEGER NOT NULL,
+    PRIMARY KEY (match_id, ability_id)
+)"""
+
+
 AWARDS_TABLE = """
 CREATE TABLE IF NOT EXISTS season_awards (
     season_id    INTEGER NOT NULL REFERENCES seasons(id),
@@ -191,7 +201,7 @@ DRAFT_EVENTS_INDEX = (
 
 # Bumped by each structural migration in _MIGRATIONS; stored in the database
 # as PRAGMA user_version so every migration runs exactly once, in order.
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 
 def init_db():
@@ -389,6 +399,7 @@ def init_db():
             {PLAYERS_TABLE};
 
             {DRAFTS_TABLE};
+            {DRAFT_POOL_TABLE};
 
             {AWARDS_TABLE};
 
@@ -1202,9 +1213,24 @@ def _add_division_schedule(conn: sqlite3.Connection) -> None:
         raise
 
 
+def _add_draft_pool(conn: sqlite3.Connection) -> None:
+    """Migration 8: the picks nobody made in each Ability Draft game
+    (match_draft_pool), for the match page's draft board."""
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute(DRAFT_POOL_TABLE)
+        conn.execute("PRAGMA user_version = 8")
+        conn.execute("COMMIT")
+        logger.info("Migration 8: added match_draft_pool")
+    except Exception:
+        if conn.in_transaction:
+            conn.execute("ROLLBACK")
+        raise
+
+
 _MIGRATIONS = [_migrate_seasons_to_ids, _migrate_to_divisions, _add_match_drafts,
                _player_cost_nullable, _add_season_awards, _add_draft_events,
-               _add_division_schedule]
+               _add_division_schedule, _add_draft_pool]
 
 
 def _migrate_ranked_mmr_overrides_to_rank():
@@ -4008,13 +4034,36 @@ def realign_stored_drafts() -> int:
     return changed
 
 
-def save_match_draft(match_id: int, picks: list[tuple[int, int, int]]) -> None:
+def save_match_draft(match_id: int, picks: list[tuple[int, int, int]],
+                     unpicked: list[int] | None = None) -> None:
     """Store a game's draft: (pick_order, account_id, ability_id) per pick,
-    replacing any stored before."""
+    and the ability ids left in the pool, replacing any stored before.
+    unpicked=None leaves a stored pool alone."""
     with _conn() as conn:
         conn.execute("DELETE FROM match_drafts WHERE match_id = ?", (match_id,))
         conn.executemany("INSERT INTO match_drafts (match_id, pick_order, account_id, ability_id) VALUES (?, ?, ?, ?)",
                          [(match_id, *p) for p in picks])
+        if unpicked is not None:
+            conn.execute("DELETE FROM match_draft_pool WHERE match_id = ?", (match_id,))
+            conn.executemany("INSERT OR IGNORE INTO match_draft_pool (match_id, ability_id) VALUES (?, ?)",
+                             [(match_id, a) for a in unpicked])
+
+
+def get_match_unpicked(match_id: int) -> list[int]:
+    """The models and abilities nobody took in a game's draft; [] if unknown."""
+    with _conn() as conn:
+        return [r[0] for r in conn.execute(
+            "SELECT ability_id FROM match_draft_pool WHERE match_id = ?", (match_id,))]
+
+
+def games_missing_pool() -> list[int]:
+    """Games with a stored draft but no stored pool: drafts fetched before
+    the pool was kept."""
+    with _conn() as conn:
+        return [r[0] for r in conn.execute("""
+            SELECT DISTINCT d.match_id FROM match_drafts d
+            WHERE NOT EXISTS (SELECT 1 FROM match_draft_pool p WHERE p.match_id = d.match_id)
+            ORDER BY d.match_id DESC""")]
 
 
 def get_draft_picks(scope: MatchScope) -> list[dict]:

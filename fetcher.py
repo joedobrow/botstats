@@ -498,8 +498,22 @@ async def fetch_draft(match_id: int) -> bool:
     # windrun can pin a build on the wrong player (seat swaps); file each
     # build under whoever actually played its hero.
     builds = assign_builds_to_heroes(match_id, builds)
-    save_match_draft(match_id, [(po, account, ability) for account, picks in builds.items() for po, ability in picks])
+    unpicked = [s["abilityId"] for s in data.get("ignoredSpells") or [] if s.get("abilityId")]
+    save_match_draft(match_id, [(po, account, ability) for account, picks in builds.items() for po, ability in picks],
+                     unpicked)
     return True
+
+
+async def backfill_pools() -> int:
+    """Fetch the draft again for games stored before the pool was kept, for
+    the match page's board. One windrun request each, at its five seconds:
+    run once, by hand."""
+    from db import games_missing_pool
+    done = 0
+    for match_id in games_missing_pool():
+        done += await fetch_draft(match_id)
+    logger.info("Stored the pool for %d games", done)
+    return done
 
 
 async def backfill_drafts(season_id: int) -> int:

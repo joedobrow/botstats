@@ -67,9 +67,10 @@
     <button type="button" class="replay-play" aria-label="Play the draft" title="Play the draft">▶</button>
     <input type="range" class="replay-slider" min="0" max="{{ board.total }}" value="{{ board.total }}" aria-label="Pick">
   </div>
+  <div class="replay-body">
   <div class="scroll">
   <table class="replay-board">
-    <thead><tr><th>Player</th>{% for r in range(board.rounds) %}<th>Round {{ r + 1 }}</th>{% endfor %}</tr></thead>
+    <thead><tr><th>Player</th>{% for r in range(board.rounds) %}<th title="Round {{ r + 1 }}">R{{ r + 1 }}</th>{% endfor %}</tr></thead>
     <tbody>
     {% for row in board.rows %}
       {% set name = row.player.display_name if row.player else "Private player" %}
@@ -83,6 +84,19 @@
     </tbody>
   </table>
   </div>
+  {% if board.pool %}
+  <div class="pool-grid" aria-label="Pool">
+    {% for row in board.pool %}{% set top = loop.index0 < 2 %}
+      {% for c in row %}
+      {% if c is none %}<span class="pool-cell empty"></span>
+      {% elif c.unknown %}<span class="pool-cell{% if top %} ult{% endif %}"><span class="draft-unknown" title="Not known">?</span></span>
+      {% else %}<span class="pool-cell{% if top %} ult{% endif %}{% if c.kind == 'hero' %} model{% endif %}"><a class="pool-item" href="/ability/{{ c.id }}"{% if c.n %} data-n="{{ c.n }}"{% endif %}>{{ pick_icon(c) }}</a></span>
+      {% endif %}
+      {% endfor %}
+    {% endfor %}
+  </div>
+  {% endif %}
+  </div>
 </div>
 <script>
 (() => {
@@ -91,6 +105,7 @@
   const slider = box.querySelector(".replay-slider");
   const play = box.querySelector(".replay-play");
   const picks = [...box.querySelectorAll(".replay-pick")];
+  const pool = [...box.querySelectorAll(".pool-item[data-n]")];
   let timer = null;
 
   function show(v) {
@@ -101,6 +116,7 @@
       a.classList.toggle("now", n === v && v < total);
       if (n === v) now = a;
     }
+    for (const a of pool) a.classList.toggle("taken", +a.dataset.n <= v);
     box.querySelectorAll("tr.picking").forEach(tr => tr.classList.remove("picking"));
     if (now && v < total) now.closest("tr").classList.add("picking");
   }
