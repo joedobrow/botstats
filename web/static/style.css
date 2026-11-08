@@ -1013,7 +1013,6 @@ table.collapsed tbody tr:nth-child(n+7) { display: none; }
 .replay-controls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
 .replay-play { width: 36px; height: 32px; padding: 0; }
 .replay-slider { flex: 1 1 240px; max-width: 420px; accent-color: var(--accent); }
-.replay-label { flex: 1 1 100%; min-height: 1.4em; }
 .replay-board td, .replay-board th { text-align: center; padding: 4px 6px; }
 .replay-board td.sb-name, .replay-board th:first-child { text-align: left; }
 .replay-board tr.radiant td.sb-name { box-shadow: inset 3px 0 var(--radiant); }
