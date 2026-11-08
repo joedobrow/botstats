@@ -1010,7 +1010,7 @@ table.collapsed tbody tr:nth-child(n+7) { display: none; }
 .more-toggle { margin-top: 8px; }
 
 /* Match page: the draft, pick by pick */
-.replay-controls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+.replay-controls { display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 8px; }
 .replay-play { width: 36px; height: 32px; padding: 0; }
 .replay-slider { flex: 1 1 240px; max-width: 420px; accent-color: var(--accent); }
 /* Radiant | pool | Dire; narrower, the pool goes under both teams; on a phone, one column. */
