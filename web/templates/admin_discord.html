@@ -48,7 +48,14 @@
       <td>{{ player_link(r.account_id, r.name) }}</td>
       <td>{{ r.discord }}</td>
       <td class="{{ '' if m else 'loss' }}" data-sort="{{ m.display_name|lower if m else '~' }}">{% if m %}{{ m.display_name }} <span class="muted small">@{{ m.name }}</span>{% else %}Not found{% endif %}</td>
-      <td class="small role-cell">{% for role in r.roles %}<span class="tag">{{ role }}</span> {% endfor %}
+      <td class="small role-cell">{% for role in r.roles %}<span class="tag role-tag" data-role="{{ role.name }}">{{ role.name }}
+        {%- if role.is_assignable() %}<form method="post" action="/admin/discord/role/remove" class="inline"
+              data-confirm="Take {{ role.name }} off {{ m.display_name }}?">
+          <input type="hidden" name="csrf" value="{{ csrf }}">
+          <input type="hidden" name="guild_id" value="{{ m.guild.id }}">
+          <input type="hidden" name="member_id" value="{{ m.id }}">
+          <input type="hidden" name="role_id" value="{{ role.id }}">
+          <button class="role-x" aria-label="Take {{ role.name }} off {{ r.name }}" title="Remove">×</button></form>{% endif %}</span> {% endfor %}
         {%- if m and role_choices.get(m.guild.id) %}<button type="button" class="add-role" data-guild="{{ m.guild.id }}" data-member="{{ m.id }}" aria-label="Give {{ r.name }} a role" title="Give a role">+</button>{% endif %}</td>
     </tr>
   {% else %}
@@ -80,7 +87,7 @@ document.querySelectorAll("button.add-role").forEach(function (plus) {
     var tpl = document.querySelector('template[data-role-picker="' + plus.dataset.guild + '"]');
     var form = tpl.content.firstElementChild.cloneNode(true);
     form.querySelector("[name=member_id]").value = plus.dataset.member;
-    var held = Array.prototype.map.call(plus.parentNode.querySelectorAll(".tag"), function (t) { return t.textContent; });
+    var held = Array.prototype.map.call(plus.parentNode.querySelectorAll(".role-tag"), function (t) { return t.dataset.role; });
     Array.prototype.forEach.call(form.querySelectorAll("option"), function (o) { if (held.indexOf(o.textContent) !== -1) o.remove(); });
     form.querySelector("[data-cancel]").addEventListener("click", function () { form.remove(); plus.hidden = false; });
     plus.hidden = true;

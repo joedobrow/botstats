@@ -176,6 +176,10 @@ def main() -> int:
     said = run(discord_sync.add_role(client, 1, bob.id, mods.id, "test"))
     check("giving one role", mods in bob.roles and said == "Gave Bob Mods.", said)
     check("giving it again says so", "already has" in run(discord_sync.add_role(client, 1, bob.id, mods.id, "test")))
+    said = run(discord_sync.remove_role(client, 1, bob.id, mods.id, "test"))
+    check("taking one role off", mods not in bob.roles and said == "Took Mods off Bob.", said)
+    check("taking off a role they don't have says so",
+          "doesn't have" in run(discord_sync.remove_role(client, 1, bob.id, mods.id, "test")))
     try:
         run(discord_sync.add_role(client, 1, bob.id, top.id, "test"))
         check("a role above the bot is refused", False)

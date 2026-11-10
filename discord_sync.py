@@ -206,6 +206,15 @@ def assignable_roles(guild) -> list:
 async def add_role(client: discord.Client, guild_id: int, member_id: int, role_id: int, by: str) -> str:
     """Give one member one role. Returns a sentence saying what happened;
     raises LookupError for a member, role or server that isn't there."""
+    return await _one_role(client, guild_id, member_id, role_id, by, give=True)
+
+
+async def remove_role(client: discord.Client, guild_id: int, member_id: int, role_id: int, by: str) -> str:
+    """Take one role off one member, as add_role gives one."""
+    return await _one_role(client, guild_id, member_id, role_id, by, give=False)
+
+
+async def _one_role(client, guild_id: int, member_id: int, role_id: int, by: str, *, give: bool) -> str:
     guild = client.get_guild(guild_id)
     if guild is None:
         raise LookupError("The bot isn't in that Discord server.")
@@ -218,10 +227,15 @@ async def add_role(client: discord.Client, guild_id: int, member_id: int, role_i
             member = await guild.fetch_member(member_id)
         except discord.NotFound as e:
             raise LookupError("They're not in the server any more.") from e
-    if role in member.roles:
+    if give and role in member.roles:
         return f"{member.display_name} already has {role.name}."
+    if not give and role not in member.roles:
+        return f"{member.display_name} doesn't have {role.name}."
     try:
-        await member.add_roles(role, reason=f"Added on adcl.gg by {by}")
+        if give:
+            await member.add_roles(role, reason=f"Added on adcl.gg by {by}")
+        else:
+            await member.remove_roles(role, reason=f"Removed on adcl.gg by {by}")
     except discord.Forbidden as e:
         raise LookupError("Discord refused: the bot needs Manage Roles, above that role.") from e
-    return f"Gave {member.display_name} {role.name}."
+    return f"Gave {member.display_name} {role.name}." if give else f"Took {role.name} off {member.display_name}."

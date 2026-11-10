@@ -1976,7 +1976,8 @@ async def admin_discord(request: web.Request):
             names = store.player_identities([r["account_id"] for r in rows])
             for r in rows:
                 r["name"] = names.get(r["account_id"], {}).get("name") or str(r["account_id"])
-                r["roles"] = [x.name for x in r["member"].roles if not x.is_default()] if r["member"] else []
+                r["roles"] = ([x for x in sorted(r["member"].roles, key=lambda x: -x.position) if not x.is_default()]
+                              if r["member"] else [])
             ctx["rows"] = sorted(rows, key=lambda r: r["name"].lower())
             ctx["role_choices"] = {g: discord_sync.assignable_roles(notify.client.get_guild(g))
                                    for g in guilds if notify.client.get_guild(g)}
@@ -2007,9 +2008,9 @@ async def admin_discord_sync(request: web.Request):
     raise _go("/admin/discord", "Sync started.")
 
 
-@routes.post("/admin/discord/role")
+@routes.post(r"/admin/discord/role{remove:(/remove)?}")
 async def admin_discord_role(request: web.Request):
-    """Give one server member one role."""
+    """Give one server member one role, or take one off (…/role/remove)."""
     import discord_sync
 
     _require_admin(request)
@@ -2022,7 +2023,8 @@ async def admin_discord_role(request: web.Request):
         raise web.HTTPBadRequest(text="The bot isn't running here, so Discord can't be reached.")
     by = (request.get("user") or {}).get("steam_name") or "an admin"
     try:
-        said = await discord_sync.add_role(notify.client, guild_id, member_id, role_id, by)
+        change = discord_sync.remove_role if request.match_info["remove"] else discord_sync.add_role
+        said = await change(notify.client, guild_id, member_id, role_id, by)
     except LookupError as e:
         raise web.HTTPBadRequest(text=str(e))
     raise _go("/admin/discord", said)
