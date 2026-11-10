@@ -456,8 +456,6 @@ h2.with-action { display: flex; align-items: center; gap: 10px; }
 .panel details { margin-top: 1.4em; }
 .panel details summary { cursor: pointer; }
 .panel details > .form { margin-top: 14px; }
-.admin-nav { display: flex; flex-wrap: wrap; gap: 14px; margin: 0 0 6px; }
-.admin-nav a { font-size: 0.9rem; }
 ul.plain { list-style: none; padding: 0; margin: 0; }
 ul.plain li { padding: 4px 0; border-bottom: 1px solid var(--border); }
 ul.plain li:last-child { border-bottom: 0; }
@@ -472,7 +470,6 @@ ul.plain li:last-child { border-bottom: 0; }
 .bar-fill { background: var(--accent); border-radius: 2px 2px 0 0; min-height: 1px; }
 .bar:hover .bar-fill { background: var(--text); }
 .bar-day { font-size: 0.6rem; color: var(--muted); text-align: center; padding-top: 3px; }
-.admin-nav a.active { font-weight: 700; color: var(--accent); }
 
 /* A one-select season picker, as wide as its longest season. */
 .season-pick { margin: 14px 0; }
@@ -1062,3 +1059,11 @@ table.collapsed tbody tr:nth-child(n+7) { display: none; }
 .pool-cell .draft-unknown { display: grid; place-items: center; width: 34px; height: 34px; color: var(--muted); line-height: 1; }
 /* A pick icon keeps its size when its picture won't load (the name is in its title). */
 img.draft-ability, img.draft-model { display: inline-block; overflow: hidden; font-size: 0; vertical-align: middle; background: var(--tag-bg); }
+
+/* Admin: the pages as tabs, and the main page's sections as plain links. */
+.admin-tabs { margin: 16px 0 4px; }
+.jump-links { display: flex; flex-wrap: wrap; gap: 4px 0; margin: -4px 0 12px; font-size: 0.9rem; }
+.jump-links a + a::before { content: "·"; display: inline-block; color: var(--muted); margin: 0 10px; }
+.discord-search { max-width: 480px; margin: 8px 0 14px; }
+.discord-actions { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px; margin-top: 14px; }
+button:disabled, button:disabled:hover { opacity: 0.45; cursor: not-allowed; filter: none; }

@@ -1,16 +1,14 @@
 {% extends "base.html" %}
-{% from "macros.html" import season_name, season_start %}
+{% from "macros.html" import season_name, season_start, admin_tabs %}
 {% block content %}
+{{ admin_tabs("admin") }}
 <h1>Admin</h1>
-<nav class="admin-nav">
+<nav class="jump-links" aria-label="On this page">
   <a href="#seasons">Seasons</a>
   <a href="#rollover">Season setup</a>
   <a href="#divisions">Divisions</a>
   {% if is_uberadmin %}<a href="#admins">Admins</a>{% endif %}
   <a href="#text">Site text</a>
-  <a href="/admin/traffic">Traffic</a>
-  <a href="/admin/discord">Discord</a>
-  <a href="/admin/feedback">Feedback</a>
 </nav>
 
 <section class="panel" id="seasons">

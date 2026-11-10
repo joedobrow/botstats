@@ -168,3 +168,14 @@
 {% macro league_night(schedule) -%}
 {% if schedule %}<span class="league-night">{{ schedule.label }}<span class="muted" data-local-night="{{ schedule.next_at }}" data-tz="{{ schedule.tz }}" hidden></span></span>{% endif %}
 {%- endmacro %}
+
+{# The admin pages, as tabs across the top of each. #}
+{% macro admin_tabs(active) -%}
+<nav class="subtabs admin-tabs" aria-label="Admin">
+  {% for key, href, label in [("admin", "/admin", "Admin"), ("sides", "/admin/sides", "Uncredited games"),
+                              ("discord", "/admin/discord", "Discord"), ("traffic", "/admin/traffic", "Traffic"),
+                              ("feedback", "/admin/feedback", "Feedback")] %}
+  <a href="{{ href }}"{% if key == active %} class="active" aria-current="page"{% endif %}>{{ label }}</a>
+  {% endfor %}
+</nav>
+{%- endmacro %}

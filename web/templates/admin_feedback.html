@@ -1,7 +1,7 @@
 {% extends "base.html" %}
-{% from "macros.html" import player_link %}
+{% from "macros.html" import player_link, admin_tabs %}
 {% block content %}
-<p class="small"><a href="/admin">← Admin</a></p>
+{{ admin_tabs("feedback") }}
 <h1>Feedback</h1>
 <div class="scroll">
 <table>

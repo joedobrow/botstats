@@ -234,23 +234,22 @@ def discord_handles() -> dict[int, str]:
     return out
 
 
-def signed_up_people(seasons: list[dict]) -> list[dict]:
-    """Everyone signed up for these seasons, once each, for the Discord sync:
-    [{account_id, name, discord, captain, division}]. A person signed up in
-    two divisions is a captain if they captain either."""
+def signed_up_people(season: dict) -> list[dict]:
+    """Everyone signed up for a season, once each, for the Discord sync:
+    [{account_id, name, discord, level}], level being captain, player or
+    standin (the highest a person signed up on any of their accounts)."""
     handles, links = discord_handles(), alt_links()
     groups = db.account_groups(links)
+    rank = {"captain": 2, "player": 1, "standin": 0}
     out: dict[int, dict] = {}
-    for season in seasons:
-        for s in list_signups(season):
-            person = links.get(s["account_id"], s["account_id"])
-            accounts = [s["account_id"]] + [a for a in groups.get(s["account_id"], []) if a != s["account_id"]]
-            row = out.setdefault(person, {
-                "account_id": s["account_id"], "name": s["name"], "captain": False,
-                "division": season["division"],
-                "discord": next((handles[a] for a in accounts if a in handles), None)})
-            if s["level_is"] == "captain" and not row["captain"]:
-                row.update(captain=True, division=season["division"])
+    for s in list_signups(season):
+        person = links.get(s["account_id"], s["account_id"])
+        accounts = [s["account_id"]] + [a for a in groups.get(s["account_id"], []) if a != s["account_id"]]
+        row = out.setdefault(person, {
+            "account_id": s["account_id"], "name": s["name"], "level": s["level_is"],
+            "discord": next((handles[a] for a in accounts if a in handles), None)})
+        if rank.get(s["level_is"], 0) > rank.get(row["level"], 0):
+            row["level"] = s["level_is"]
     return sorted(out.values(), key=lambda r: r["name"].lower())
 
 

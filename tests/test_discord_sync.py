@@ -5,6 +5,7 @@ Nothing here talks to Discord. The server, its members, roles and channels
 are stand-ins that record what was done to them.
 """
 import asyncio
+import itertools
 import os
 import sys
 
@@ -14,6 +15,7 @@ sys.path.insert(0, ROOT)
 import discord_sync    # noqa: E402
 
 failures: list[str] = []
+_ids = itertools.count(1)
 
 
 def check(label: str, ok: bool, detail: str = "") -> None:
@@ -22,13 +24,20 @@ def check(label: str, ok: bool, detail: str = "") -> None:
         failures.append(label)
 
 
-class Named:
+class Role:
     def __init__(self, name):
-        self.name = name
+        self.name, self.id = name, next(_ids)
+
+    def is_default(self):
+        return self.name == "@everyone"
+
+    def __repr__(self):
+        return self.name
 
 
 class Member:
     def __init__(self, name, global_name=None, nick=None, roles=()):
+        self.id = next(_ids)
         self.name, self.discriminator, self.global_name, self.nick = name, "0", global_name, nick
         self.display_name = nick or global_name or name
         self.roles = list(roles)
@@ -40,31 +49,41 @@ class Member:
         self.roles = [r for r in self.roles if r not in roles]
 
 
-class Channel(Named):
+class Channel:
     def __init__(self, name, category):
-        super().__init__(name)
-        self.category = category
+        self.name, self.category = name, category
 
     async def delete(self, reason=None):
         self.category.channels.remove(self)
 
 
-class Category(Named):
+class Category:
     def __init__(self, name):
-        super().__init__(name)
-        self.channels = []
+        self.name, self.channels = name, []
 
 
 class Guild:
-    def __init__(self, members, roles, categories):
-        self.name, self.members, self.roles, self.categories = "Test server", members, roles, categories
+    def __init__(self, members, roles=(), categories=()):
+        self.name, self.members, self.roles, self.categories = "Test server", members, list(roles), list(categories)
 
     async def fetch_members(self, limit=None):
         for m in self.members:
             yield m
 
+    async def create_role(self, name, reason=None):
+        role = Role(name)
+        self.roles.append(role)
+        return role
+
+    async def create_category(self, name, reason=None):
+        cat = Category(name)
+        self.categories.append(cat)
+        return cat
+
     async def create_voice_channel(self, name, category, reason=None):
-        category.channels.append(Channel(name, category))
+        ch = Channel(name, category)
+        category.channels.append(ch)
+        return ch
 
 
 class Client:
@@ -75,52 +94,77 @@ class Client:
         return self.guild if guild_id == 1 else None
 
 
+NA = {"name": "NA", "slug": "na"}
+EU = {"name": "EU", "slug": "eu"}
+
+
+def run(coro):
+    return asyncio.run(coro)
+
+
 def main() -> int:
-    players, captains = Named("Players"), Named("Captains")
-    rooms = Category("captain rooms")
-    rooms.channels.append(Channel("Last season's captain", rooms))
+    check("roles are named for the division", discord_sync.role_names(NA) == ("player-na", "captain-na"))
+
     alice = Member("alice")
     bob = Member("bob_new", global_name="Bob")
     carol = Member("carol", nick="Carol C")
-    leftover = Member("dave", roles=[players, captains])     # had roles last season
-    bystander = Member("erin", roles=[Named("Mods")])
-    guild = Guild([alice, bob, carol, leftover, bystander], [players, captains], [rooms])
+    leftover = Member("dave")                  # had NA's roles last season
+    erin = Member("erin", roles=[Role("Mods")])
+    guild = Guild([alice, bob, carol, leftover, erin])
+    client = Client(guild)
 
     people = [
-        {"account_id": 1, "name": "Alice", "discord": "@Alice", "captain": True, "division": "NA"},
-        {"account_id": 2, "name": "Bob", "discord": "bob_new#1234", "captain": False, "division": "NA"},
-        {"account_id": 3, "name": "Carol", "discord": "Carol C (call me carol)", "captain": False, "division": "EU"},
-        {"account_id": 4, "name": "Frank", "discord": "frank", "captain": True, "division": "EU"},
-        {"account_id": 5, "name": "Gus", "discord": None, "captain": False, "division": "NA"},
+        {"account_id": 1, "name": "Alice", "discord": "@Alice", "level": "captain"},
+        {"account_id": 2, "name": "Bob", "discord": "bob_new#1234", "level": "player"},
+        {"account_id": 3, "name": "Carol", "discord": "Carol C (call me carol)", "level": "player"},
+        {"account_id": 4, "name": "Frank", "discord": "frank", "level": "captain"},
+        {"account_id": 5, "name": "Gus", "discord": "erin", "level": "standin"},
     ]
-    plan = asyncio.run(discord_sync.plan(Client(guild), 1, people))
+    plan = run(discord_sync.plan(client, 1, people, NA))
     found = {r["name"]: r["member"] for r in plan["rows"]}
     check("matches a name typed with an @ and other capitals", found["Alice"] is alice)
     check("matches an old name#1234", found["Bob"] is bob)
     check("matches a server nickname, note in parentheses and all", found["Carol"] is carol)
-    check("someone not in the server isn't matched", found["Frank"] is None and found["Gus"] is None)
-    check("the role and category names ignore capitals", not plan["missing"], str(plan["missing"]))
+    check("someone not in the server isn't matched", found["Frank"] is None)
+    check("stand-ins are left out", "Gus" not in found)
+    check("roles not made yet are None in the plan", plan["player_role"] is None and plan["category"] is None)
 
-    lines = asyncio.run(discord_sync.apply(plan))
-    check("captains get both roles", players in alice.roles and captains in alice.roles)
-    check("players get the players role only", players in bob.roles and captains not in bob.roles)
-    check("last season's roles come off people not signed up", leftover.roles == [])
-    check("other roles are left alone", [r.name for r in bystander.roles] == ["Mods"])
-    names = sorted(c.name for c in rooms.channels)
-    check("one room per captain, named with the division when there are several",
-          names == ["Alice (NA)", "Frank (EU)"], str(names))
-    check("says what happened", lines[0].startswith("Roles given to 3 of 5 people; 2 not found"), lines[0])
+    lines = run(discord_sync.apply(plan))
+    roles = {r.name: r for r in guild.roles}
+    check("the roles and the category are made", {"player-na", "captain-na"} <= set(roles)
+          and any(c.name == discord_sync.CAPTAIN_ROOMS for c in guild.categories), str(list(roles)))
+    pna, cna = roles["player-na"], roles["captain-na"]
+    check("captains get both roles", pna in alice.roles and cna in alice.roles)
+    check("players get the player role only", pna in bob.roles and cna not in bob.roles)
+    check("stand-ins and others get nothing", [r.name for r in erin.roles] == ["Mods"])
+    rooms = guild.categories[0]
+    check("a room per captain, named with the division",
+          sorted(c.name for c in rooms.channels) == ["Alice (NA)", "Frank (NA)"], str([c.name for c in rooms.channels]))
+    check("says what happened", "3 of 4 people" in lines[0] and "Made player-na, captain-na" in lines[0], lines[0])
+
+    # Next season: Bob captains, Alice is gone, Dave somehow had the role.
+    leftover.roles.append(pna)
+    eu_room = Channel("Zed (EU)", rooms)
+    rooms.channels.append(eu_room)
+    people2 = [{"account_id": 2, "name": "Bob", "discord": "bob_new", "level": "captain"}]
+    run(discord_sync.apply(run(discord_sync.plan(client, 1, people2, NA))))
+    check("the roles come off people no longer signed up", pna not in alice.roles and pna not in leftover.roles)
+    check("no second copy of a role is made", sum(r.name == "player-na" for r in guild.roles) == 1)
+    check("the division's rooms follow its captains; another division's are left",
+          sorted(c.name for c in rooms.channels) == ["Bob (NA)", "Zed (EU)"], str([c.name for c in rooms.channels]))
+
+    lines = run(discord_sync.delete_rooms(client, 1))
+    check("deleting rooms empties the category", rooms.channels == [] and rooms in guild.categories, lines[0])
+
+    hits = run(discord_sync.search(client, 1, "car", {3: "Carol C", 9: "carol"}))
+    check("search finds members by any of their names, with their site accounts",
+          len(hits) == 1 and hits[0]["member"] is carol and sorted(hits[0]["accounts"]) == [3, 9], str(hits))
 
     try:
-        asyncio.run(discord_sync.plan(Client(guild), 99, people))
+        run(discord_sync.plan(client, 99, people, NA))
         check("a server the bot isn't in is refused", False)
     except LookupError:
         check("a server the bot isn't in is refused", True)
-    bare = Guild([alice], [], [])
-    plan = asyncio.run(discord_sync.plan(Client(bare), 1, people))
-    lines = asyncio.run(discord_sync.apply(plan))
-    check("without the roles and category nothing changes",
-          len(plan["missing"]) == 3 and alice.roles == [players, captains] and lines[0].startswith("Nothing changed"))
 
     print()
     if failures:

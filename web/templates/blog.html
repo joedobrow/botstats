@@ -6,6 +6,7 @@
 <div class="posts">{{ post_card(post, players) }}</div>
 {% else %}
 <h1>Blog</h1>
+<p class="muted">A mirror of the {% if channel_url %}<a href="{{ channel_url }}" rel="noopener">#content</a>{% else %}#content{% endif %} channel on our Discord.</p>
 <div class="posts">
   {% for p in posts.rows %}{{ post_card(p, players) }}
   {% else %}<p class="muted">No posts yet.</p>{% endfor %}

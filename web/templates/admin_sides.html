@@ -1,7 +1,7 @@
 {% extends "base.html" %}
-{% from "macros.html" import team_cell, team_label %}
+{% from "macros.html" import team_cell, team_label, admin_tabs %}
 {% block content %}
-<p class="small"><a href="/admin">← Admin</a></p>
+{{ admin_tabs("sides") }}
 <h1>Uncredited games</h1>
 
 {% for b in blocks %}
