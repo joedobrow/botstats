@@ -6,93 +6,57 @@
 
 {% if problem %}<p class="notice error">{{ problem }}</p>{% endif %}
 
-<form method="get" class="search discord-search" role="search">
-  {% if season %}<input type="hidden" name="season" value="{{ season.id }}/{{ season.division_id }}">{% endif %}
-  <input type="search" name="q" value="{{ query }}" placeholder="Find someone by Discord name" aria-label="Find someone by Discord name" autocomplete="off">
-  <button>Find</button>
-</form>
-
-{% if results is not none %}
-<div class="scroll">
-<table>
-  <thead><tr><th>Discord</th><th>Username</th><th>On the site</th><th>Roles</th></tr></thead>
-  <tbody>
-  {% for r in results[:50] %}
-    <tr>
-      <td class="with-avatar"><img class="avatar" src="{{ r.member.display_avatar.replace(size=64).url }}" alt="">{{ r.member.display_name }}</td>
-      <td class="muted">@{{ r.member.name }}</td>
-      <td>{% for aid, name in r.players %}{{ player_link(aid, name) }}{% if not loop.last %}, {% endif %}{% else %}<span class="muted">Not linked</span>{% endfor %}</td>
-      <td class="small">{% for role in r.roles %}<span class="tag">{{ role }}</span> {% endfor %}</td>
-    </tr>
-  {% else %}
-    <tr><td colspan="4" class="muted">Nobody in the server matches “{{ query }}”.</td></tr>
-  {% endfor %}
-  </tbody>
-</table>
-</div>
-{% endif %}
-
-{% if run %}
+{% for run in runs %}
 <p class="notice{% if run.running %} running{% endif %}" {% if run.running %}data-reload{% endif %}>
   {% if run.running %}{{ run.what }}…
   {% else %}{{ run.what }}, {{ run.at|int|date("%b %-d, %-I:%M %p") }}, by {{ run.by }}: {{ run.lines|join(" ") }}{% endif %}
 </p>
-{% endif %}
+{% endfor %}
 
-{% if seasons %}
-<section class="panel">
-  <h2 class="flush">Season roles and captain rooms</h2>
-  <form method="get" class="season-pick">
-    {% if query %}<input type="hidden" name="q" value="{{ query }}">{% endif %}
-    <select name="season" aria-label="Season" onchange="this.form.submit()">
-      {% for s in seasons %}
-      <option value="{{ s.id }}/{{ s.division_id }}"{% if season and s.id == season.id and s.division_id == season.division_id %} selected{% endif %}>{{ s.division }} · {{ s.label }} · {{ s.signup_count }} signed up</option>
+{% if choices %}
+<div class="discord-actions">
+  <form method="post" action="/admin/discord/sync" class="discord-sync"
+        data-confirm="Give the chosen division's roles to its season's signups, take them off everyone else, and set up its captain rooms?">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <select name="division_id" aria-label="Division to sync">
+      {% for c in choices %}
+      <option value="{{ c.division.id }}">{{ c.division.name }} · {{ c.season.label }} · {{ c.season.signup_count }} signed up</option>
       {% endfor %}
     </select>
-    <noscript><button>Show</button></noscript>
+    <button class="primary"{% if problem or running %} disabled{% endif %}>Sync roles and captain rooms</button>
   </form>
-
-  {% if plan %}
-  <div class="scroll">
-  <table class="sortable">
-    <thead><tr><th data-sort-type="text">Player</th><th data-sort-type="text">Role</th>
-      <th data-sort-type="text">Discord name on the site</th><th data-sort-type="text">Server member</th></tr></thead>
-    <tbody>
-    {% for r in plan.rows %}
-      <tr>
-        <td>{{ player_link(r.account_id, r.name) }}</td>
-        <td>{{ roles[1] if r.level == "captain" else roles[0] }}</td>
-        <td>{{ r.discord or "" }}</td>
-        <td class="{{ '' if r.member else 'loss' }}">{{ r.member.display_name if r.member else "Not found" }}</td>
-      </tr>
-    {% else %}
-      <tr><td colspan="4" class="muted">Nobody signed up yet.</td></tr>
-    {% endfor %}
-    </tbody>
-  </table>
-  </div>
-  {% endif %}
-
-  <div class="discord-actions">
-    <form method="post" action="/admin/discord/sync"
-          data-confirm="Give {{ roles[0] }} and {{ roles[1] }} to {{ season.division }} · {{ season.label }}'s signups, take them off everyone else, and set up its captain rooms?">
-      <input type="hidden" name="csrf" value="{{ csrf }}">
-      <input type="hidden" name="season_id" value="{{ season.id }}">
-      <input type="hidden" name="division_id" value="{{ season.division_id }}">
-      <button class="primary"{% if problem or not plan or not plan.rows or (run and run.running) %} disabled{% endif %}>Sync roles and captain rooms</button>
-    </form>
-    <form method="post" action="/admin/discord/rooms/delete"
-          data-confirm="Delete every channel in Captain Rooms, for every division?">
-      <input type="hidden" name="csrf" value="{{ csrf }}">
-      <input type="hidden" name="guild_id" value="{{ season.guild_id }}">
-      <input type="hidden" name="season" value="{{ season.id }}/{{ season.division_id }}">
-      <button class="danger"{% if problem or (run and run.running) %} disabled{% endif %}>Delete all captain rooms</button>
-    </form>
-  </div>
-</section>
+  <form method="post" action="/admin/discord/rooms/delete" data-confirm="Delete every channel in Captain Rooms, for every division?">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <button class="danger"{% if problem or running %} disabled{% endif %}>Delete all captain rooms</button>
+  </form>
+</div>
 {% else %}
 <p class="muted">No division is tied to a Discord server. Set one under Admin → Divisions.</p>
 {% endif %}
+
+<form class="search" data-live-filter="#discord-table" role="search">
+  <input type="search" placeholder="Find someone by name or Discord name" aria-label="Find someone" autocomplete="off">
+</form>
+<div class="scroll">
+<table class="sortable" id="discord-table">
+  <thead><tr><th data-sort-type="text">Player</th><th data-sort-type="text">Discord name on the site</th>
+    <th data-sort-type="text">Server member</th><th>Roles</th></tr></thead>
+  <tbody>
+  {% for r in rows %}
+    {% set m = r.member %}
+    <tr data-search="{{ ([r.name, r.discord] + ([m.name, m.global_name or '', m.nick or '', m.display_name] if m else []))|join(' ')|lower }}">
+      <td>{{ player_link(r.account_id, r.name) }}</td>
+      <td>{{ r.discord }}</td>
+      <td class="{{ '' if m else 'loss' }}" data-sort="{{ m.display_name|lower if m else '~' }}">{% if m %}{{ m.display_name }} <span class="muted small">@{{ m.name }}</span>{% else %}Not found{% endif %}</td>
+      <td class="small">{% for role in r.roles %}<span class="tag">{{ role }}</span> {% endfor %}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="4" class="muted">Nobody yet.</td></tr>
+  {% endfor %}
+  {% if rows %}<tr class="no-results" hidden><td colspan="4" class="muted">Nobody matches.</td></tr>{% endif %}
+  </tbody>
+</table>
+</div>
 
 <script>
 // While a job runs, check back every few seconds.

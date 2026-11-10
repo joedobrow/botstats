@@ -156,10 +156,6 @@ def main() -> int:
     lines = run(discord_sync.delete_rooms(client, 1))
     check("deleting rooms empties the category", rooms.channels == [] and rooms in guild.categories, lines[0])
 
-    hits = run(discord_sync.search(client, 1, "car", {3: "Carol C", 9: "carol"}))
-    check("search finds members by any of their names, with their site accounts",
-          len(hits) == 1 and hits[0]["member"] is carol and sorted(hits[0]["accounts"]) == [3, 9], str(hits))
-
     try:
         run(discord_sync.plan(client, 99, people, NA))
         check("a server the bot isn't in is refused", False)

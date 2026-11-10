@@ -253,6 +253,18 @@ def signed_up_people(season: dict) -> list[dict]:
     return sorted(out.values(), key=lambda r: r["name"].lower())
 
 
+def discord_people() -> list[dict]:
+    """Everyone the site has a Discord name for, once per person (filed under
+    their main account): [{account_id, discord}]."""
+    links = alt_links()
+    out: dict[int, dict] = {}
+    for aid, handle in discord_handles().items():
+        main = links.get(aid, aid)
+        if main not in out or aid == main:
+            out[main] = {"account_id": main, "discord": handle}
+    return list(out.values())
+
+
 def player_discord(account_id: int) -> str | None:
     """How to reach this person on Discord, on any of their accounts."""
     handles = discord_handles()

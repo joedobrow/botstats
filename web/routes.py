@@ -1941,81 +1941,89 @@ def _discord_run(guild_id: int, label: str, request: web.Request, work) -> None:
     task.add_done_callback(_discord_tasks.discard)
 
 
+def _discord_choices() -> list[dict]:
+    """Each division tied to a Discord server, with the season a sync hands
+    roles out for: its newest season with signups, else its newest."""
+    seasons = _discord_seasons()
+    out = []
+    for d in store.divisions():
+        mine = [s for s in seasons if s["division_id"] == d["id"]]
+        season = next((s for s in mine if s["signup_count"]), None) or (mine[0] if mine else None)
+        if season:
+            out.append({"division": d, "season": season})
+    return out
+
+
 @routes.get("/admin/discord")
 async def admin_discord(request: web.Request):
-    """Find a person on the league's Discord, and hand out a season's
-    player and captain roles and captain rooms."""
+    """Everyone the site has a Discord name for, matched to the server's
+    members; and a division's season roles and captain rooms."""
     import discord_sync
 
     _require_admin(request)
-    q = request.query
-    seasons = _discord_seasons()
-    season = _query_season(q, seasons) or next((s for s in seasons if s["signup_count"]), None) \
-        or (seasons[0] if seasons else None)
-    ctx = {"seasons": seasons, "season": season, "query": (q.get("q") or "").strip()[:100],
-           "results": None, "plan": None, "problem": None,
-           "run": _discord_runs.get(season["guild_id"]) if season else None}
-    if season:
-        ctx["roles"] = discord_sync.role_names({"slug": season["division_slug"], "name": season["division"]})
+    choices = _discord_choices()
+    guilds = sorted({c["season"]["guild_id"] for c in choices})
+    ctx = {"choices": choices, "rows": [], "problem": None,
+           "runs": [_discord_runs[g] for g in guilds if g in _discord_runs]}
     if notify.client is None:
         ctx["problem"] = "The bot isn't running here, so Discord can't be reached."
-        return render(request, "admin_discord.html", title="Discord", **ctx)
-    try:
-        if ctx["query"]:
-            handles = store.discord_handles()
-            results = []
-            for guild_id in sorted({s["guild_id"] for s in seasons}):
-                results += await discord_sync.search(notify.client, guild_id, ctx["query"], handles)
-            names = store.player_identities([a for r in results for a in r["accounts"]])
-            for r in results:
-                r["players"] = [(a, names.get(a, {}).get("name") or str(a)) for a in r["accounts"]]
-            ctx["results"] = results
-        if season:
-            division = next(d for d in store.divisions() if d["id"] == season["division_id"])
-            ctx["plan"] = await discord_sync.plan(notify.client, season["guild_id"],
-                                                  store.signed_up_people(season), division)
-    except LookupError as e:
-        ctx["problem"] = str(e)
+    else:
+        try:
+            members = []
+            for g in guilds:
+                members += (await discord_sync.server_members(notify.client, g))[1]
+            rows = discord_sync.match(members, store.discord_people())
+            names = store.player_identities([r["account_id"] for r in rows])
+            for r in rows:
+                r["name"] = names.get(r["account_id"], {}).get("name") or str(r["account_id"])
+                r["roles"] = [x.name for x in r["member"].roles if not x.is_default()] if r["member"] else []
+            ctx["rows"] = sorted(rows, key=lambda r: r["name"].lower())
+        except LookupError as e:
+            ctx["problem"] = str(e)
+    ctx["running"] = any(r["running"] for r in ctx["runs"])
     return render(request, "admin_discord.html", title="Discord", **ctx)
 
 
 @routes.post("/admin/discord/sync")
 async def admin_discord_sync(request: web.Request):
-    """Give a season's players and captains their division's roles, take
-    them off everyone else, and set up its captain rooms, in the background."""
+    """Give a division's season players and captains their roles, take them
+    off everyone else, and set up its captain rooms, in the background."""
     import discord_sync
 
     _require_admin(request)
-    season = _form_season(await request.post())
-    found = next((s for s in _discord_seasons() if s["id"] == season["id"]
-                  and s["division_id"] == season["division_id"]), None)
-    if found is None:
-        raise web.HTTPBadRequest(text="That season's division isn't tied to a Discord server.")
-    division = next(d for d in store.divisions() if d["id"] == season["division_id"])
+    division_id = re.sub(r"\D", "", (await request.post()).get("division_id", ""))
+    choice = next((c for c in _discord_choices() if str(c["division"]["id"]) == division_id), None)
+    if choice is None:
+        raise web.HTTPBadRequest(text="That division isn't tied to a Discord server.")
+    season, division = choice["season"], choice["division"]
 
     async def work():
-        plan = await discord_sync.plan(notify.client, found["guild_id"], store.signed_up_people(season), division)
+        plan = await discord_sync.plan(notify.client, season["guild_id"], store.signed_up_people(season), division)
         return await discord_sync.apply(plan)
 
-    _discord_run(found["guild_id"], f"Syncing {season['label']} · {season['division']}", request, work)
-    raise _go("/admin/discord?" + urlencode({"season": f"{season['id']}/{season['division_id']}"}), "Sync started.")
+    _discord_run(season["guild_id"], f"Syncing {division['name']} · {season['label']}", request, work)
+    raise _go("/admin/discord", "Sync started.")
 
 
 @routes.post("/admin/discord/rooms/delete")
 async def admin_discord_rooms_delete(request: web.Request):
-    """Delete every captain room on a server."""
+    """Delete every captain room, on every server a division uses."""
     import discord_sync
 
     _require_admin(request)
-    data = await request.post()
-    guild_id = int(re.sub(r"\D", "", data.get("guild_id", "")) or 0)
-    if guild_id not in {s["guild_id"] for s in _discord_seasons()}:
-        raise web.HTTPBadRequest(text="No division uses that Discord server.")
-    _discord_run(guild_id, "Deleting captain rooms", request,
-                 lambda: discord_sync.delete_rooms(notify.client, guild_id))
-    back = str(data.get("season") or "")
-    raise _go("/admin/discord" + ("?" + urlencode({"season": back}) if re.fullmatch(r"\d+/\d+", back) else ""),
-              "Deleting captain rooms.")
+    await request.post()
+    guilds = sorted({c["season"]["guild_id"] for c in _discord_choices()})
+    if not guilds:
+        raise web.HTTPBadRequest(text="No division is tied to a Discord server.")
+
+    async def work():
+        lines = []
+        for g in guilds:
+            lines += await discord_sync.delete_rooms(notify.client, g)
+        return lines
+
+    _discord_run(guilds[0], "Deleting captain rooms", request, work)
+    raise _go("/admin/discord", "Deleting captain rooms.")
 
 
 @routes.get("/admin/feedback")

@@ -10,6 +10,8 @@ rooms, so NA and EU can share a server. Stand-ins get nothing.
 People are matched to server members by the Discord name the site has for
 them (store.discord_handles). Admin → Discord runs it: plan() is the
 preview, apply() makes the changes, delete_rooms() empties Captain Rooms.
+Admin → Discord's table is everyone the site has a Discord name for, run
+through match().
 """
 from __future__ import annotations
 
@@ -63,7 +65,7 @@ def _keys(m) -> list[str]:
     return [k for k in (m.name, f"{m.name}#{m.discriminator}", m.global_name, m.nick) if k]
 
 
-async def _members(client: discord.Client, guild_id: int):
+async def server_members(client: discord.Client, guild_id: int):
     guild = client.get_guild(guild_id)
     if guild is None:
         raise LookupError("The bot isn't in that Discord server.")
@@ -89,7 +91,7 @@ async def plan(client: discord.Client, guild_id: int, people: list[dict], divisi
     anything. people: [{account_id, name, discord, level}], one per person.
     Returns {guild, members, rows, division, player_role, captain_role,
     category}: a role or the category is None when it's still to be made."""
-    guild, members = await _members(client, guild_id)
+    guild, members = await server_members(client, guild_id)
     player_name, captain_name = role_names(division)
     return {"guild": guild, "members": members, "division": division,
             "rows": match(members, [p for p in people if p.get("level") != "standin"]),
@@ -193,19 +195,3 @@ async def delete_rooms(client: discord.Client, guild_id: int) -> list[str]:
         if await step(f"deleting {ch.name}", ch.delete(reason=REASON)):
             gone += 1
     return step.report([f"Deleted {gone} captain room{'' if gone == 1 else 's'}."])
-
-
-async def search(client: discord.Client, guild_id: int, query: str, handles: dict[int, str]) -> list[dict]:
-    """Server members whose name has the query in it, each with the site
-    accounts whose Discord name points at them: [{member, roles, accounts}]."""
-    guild, members = await _members(client, guild_id)
-    q = _norm(query)
-    hits = [m for m in members if any(q in _norm(k) for k in _keys(m))]
-    found = match(hits, [{"account_id": a, "discord": h} for a, h in handles.items()])
-    accounts: dict[int, list[int]] = {}
-    for f in found:
-        if f["member"]:
-            accounts.setdefault(f["member"].id, []).append(f["account_id"])
-    return [{"member": m, "roles": [r.name for r in m.roles if not r.is_default()],
-             "accounts": accounts.get(m.id, [])}
-            for m in sorted(hits, key=lambda m: m.display_name.lower())]
