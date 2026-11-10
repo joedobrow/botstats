@@ -25,11 +25,14 @@ def check(label: str, ok: bool, detail: str = "") -> None:
 
 
 class Role:
-    def __init__(self, name):
-        self.name, self.id = name, next(_ids)
+    def __init__(self, name, position=1, managed=False):
+        self.name, self.id, self.position, self.managed = name, next(_ids), position, managed
 
     def is_default(self):
         return self.name == "@everyone"
+
+    def is_assignable(self):
+        return not self.is_default() and not self.managed and self.position < 50
 
     def __repr__(self):
         return self.name
@@ -65,6 +68,15 @@ class Category:
 class Guild:
     def __init__(self, members, roles=(), categories=()):
         self.name, self.members, self.roles, self.categories = "Test server", members, list(roles), list(categories)
+        self.id = 1
+        for m in members:
+            m.guild = self
+
+    def get_role(self, role_id):
+        return next((r for r in self.roles if r.id == role_id), None)
+
+    def get_member(self, member_id):
+        return next((m for m in self.members if m.id == member_id), None)
 
     async def fetch_members(self, limit=None):
         for m in self.members:
@@ -155,6 +167,20 @@ def main() -> int:
 
     lines = run(discord_sync.delete_rooms(client, 1))
     check("deleting rooms empties the category", rooms.channels == [] and rooms in guild.categories, lines[0])
+
+    mods, bot_role, top = Role("Mods", 5), Role("Some bot", 3, managed=True), Role("Owner", 60)
+    guild.roles += [mods, bot_role, top]
+    picks = discord_sync.assignable_roles(guild)
+    check("only roles the bot can hand out are offered, highest first",
+          picks[0] is mods and bot_role not in picks and top not in picks, str(picks))
+    said = run(discord_sync.add_role(client, 1, bob.id, mods.id, "test"))
+    check("giving one role", mods in bob.roles and said == "Gave Bob Mods.", said)
+    check("giving it again says so", "already has" in run(discord_sync.add_role(client, 1, bob.id, mods.id, "test")))
+    try:
+        run(discord_sync.add_role(client, 1, bob.id, top.id, "test"))
+        check("a role above the bot is refused", False)
+    except LookupError:
+        check("a role above the bot is refused", True)
 
     try:
         run(discord_sync.plan(client, 99, people, NA))

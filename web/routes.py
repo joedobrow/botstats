@@ -1963,7 +1963,7 @@ async def admin_discord(request: web.Request):
     _require_admin(request)
     choices = _discord_choices()
     guilds = sorted({c["season"]["guild_id"] for c in choices})
-    ctx = {"choices": choices, "rows": [], "problem": None,
+    ctx = {"choices": choices, "rows": [], "problem": None, "role_choices": {},
            "runs": [_discord_runs[g] for g in guilds if g in _discord_runs]}
     if notify.client is None:
         ctx["problem"] = "The bot isn't running here, so Discord can't be reached."
@@ -1978,6 +1978,8 @@ async def admin_discord(request: web.Request):
                 r["name"] = names.get(r["account_id"], {}).get("name") or str(r["account_id"])
                 r["roles"] = [x.name for x in r["member"].roles if not x.is_default()] if r["member"] else []
             ctx["rows"] = sorted(rows, key=lambda r: r["name"].lower())
+            ctx["role_choices"] = {g: discord_sync.assignable_roles(notify.client.get_guild(g))
+                                   for g in guilds if notify.client.get_guild(g)}
         except LookupError as e:
             ctx["problem"] = str(e)
     ctx["running"] = any(r["running"] for r in ctx["runs"])
@@ -2003,6 +2005,27 @@ async def admin_discord_sync(request: web.Request):
 
     _discord_run(season["guild_id"], f"Syncing {division['name']} · {season['label']}", request, work)
     raise _go("/admin/discord", "Sync started.")
+
+
+@routes.post("/admin/discord/role")
+async def admin_discord_role(request: web.Request):
+    """Give one server member one role."""
+    import discord_sync
+
+    _require_admin(request)
+    data = await request.post()
+    guild_id, member_id, role_id = (int(re.sub(r"\D", "", data.get(k, "")) or 0)
+                                    for k in ("guild_id", "member_id", "role_id"))
+    if guild_id not in {s["guild_id"] for s in _discord_seasons()}:
+        raise web.HTTPBadRequest(text="No division uses that Discord server.")
+    if notify.client is None:
+        raise web.HTTPBadRequest(text="The bot isn't running here, so Discord can't be reached.")
+    by = (request.get("user") or {}).get("steam_name") or "an admin"
+    try:
+        said = await discord_sync.add_role(notify.client, guild_id, member_id, role_id, by)
+    except LookupError as e:
+        raise web.HTTPBadRequest(text=str(e))
+    raise _go("/admin/discord", said)
 
 
 @routes.post("/admin/discord/rooms/delete")

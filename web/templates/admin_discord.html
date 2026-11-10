@@ -48,7 +48,8 @@
       <td>{{ player_link(r.account_id, r.name) }}</td>
       <td>{{ r.discord }}</td>
       <td class="{{ '' if m else 'loss' }}" data-sort="{{ m.display_name|lower if m else '~' }}">{% if m %}{{ m.display_name }} <span class="muted small">@{{ m.name }}</span>{% else %}Not found{% endif %}</td>
-      <td class="small">{% for role in r.roles %}<span class="tag">{{ role }}</span> {% endfor %}</td>
+      <td class="small role-cell">{% for role in r.roles %}<span class="tag">{{ role }}</span> {% endfor %}
+        {%- if m and role_choices.get(m.guild.id) %}<button type="button" class="add-role" data-guild="{{ m.guild.id }}" data-member="{{ m.id }}" aria-label="Give {{ r.name }} a role" title="Give a role">+</button>{% endif %}</td>
     </tr>
   {% else %}
     <tr><td colspan="4" class="muted">Nobody yet.</td></tr>
@@ -58,7 +59,36 @@
 </table>
 </div>
 
+{% for guild_id, roles in role_choices.items() %}
+<template data-role-picker="{{ guild_id }}">
+  <form method="post" action="/admin/discord/role" class="role-picker">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="hidden" name="guild_id" value="{{ guild_id }}">
+    <input type="hidden" name="member_id" value="">
+    <select name="role_id" aria-label="Role">{% for role in roles %}<option value="{{ role.id }}">{{ role.name }}</option>{% endfor %}</select>
+    <button class="primary small-button">Give</button>
+    <button type="button" class="linklike small" data-cancel>Cancel</button>
+  </form>
+</template>
+{% endfor %}
+
 <script>
+// The + in a Roles cell opens a role picker there, one at a time.
+document.querySelectorAll("button.add-role").forEach(function (plus) {
+  plus.addEventListener("click", function () {
+    document.querySelectorAll("form.role-picker").forEach(function (f) { f.previousElementSibling.hidden = false; f.remove(); });
+    var tpl = document.querySelector('template[data-role-picker="' + plus.dataset.guild + '"]');
+    var form = tpl.content.firstElementChild.cloneNode(true);
+    form.querySelector("[name=member_id]").value = plus.dataset.member;
+    var held = Array.prototype.map.call(plus.parentNode.querySelectorAll(".tag"), function (t) { return t.textContent; });
+    Array.prototype.forEach.call(form.querySelectorAll("option"), function (o) { if (held.indexOf(o.textContent) !== -1) o.remove(); });
+    form.querySelector("[data-cancel]").addEventListener("click", function () { form.remove(); plus.hidden = false; });
+    plus.hidden = true;
+    plus.after(form);
+    form.querySelector("select").focus();
+  });
+});
+
 // While a job runs, check back every few seconds.
 if (document.querySelector("[data-reload]")) setTimeout(function () { location.reload(); }, 4000);
 </script>

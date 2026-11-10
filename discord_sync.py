@@ -195,3 +195,33 @@ async def delete_rooms(client: discord.Client, guild_id: int) -> list[str]:
         if await step(f"deleting {ch.name}", ch.delete(reason=REASON)):
             gone += 1
     return step.report([f"Deleted {gone} captain room{'' if gone == 1 else 's'}."])
+
+
+def assignable_roles(guild) -> list:
+    """The roles the bot can hand out: not @everyone, not a bot's or an
+    integration's own, and below the bot's highest role. Highest first."""
+    return sorted((r for r in guild.roles if r.is_assignable()), key=lambda r: -r.position)
+
+
+async def add_role(client: discord.Client, guild_id: int, member_id: int, role_id: int, by: str) -> str:
+    """Give one member one role. Returns a sentence saying what happened;
+    raises LookupError for a member, role or server that isn't there."""
+    guild = client.get_guild(guild_id)
+    if guild is None:
+        raise LookupError("The bot isn't in that Discord server.")
+    role = guild.get_role(role_id)
+    if role is None or not role.is_assignable():
+        raise LookupError("The bot can't hand out that role.")
+    member = guild.get_member(member_id)
+    if member is None:
+        try:
+            member = await guild.fetch_member(member_id)
+        except discord.NotFound as e:
+            raise LookupError("They're not in the server any more.") from e
+    if role in member.roles:
+        return f"{member.display_name} already has {role.name}."
+    try:
+        await member.add_roles(role, reason=f"Added on adcl.gg by {by}")
+    except discord.Forbidden as e:
+        raise LookupError("Discord refused: the bot needs Manage Roles, above that role.") from e
+    return f"Gave {member.display_name} {role.name}."
