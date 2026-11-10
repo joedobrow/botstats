@@ -1,8 +1,8 @@
 {% extends "base.html" %}
 {% from "macros.html" import team_cell, team_label, admin_tabs %}
 {% block content %}
-{{ admin_tabs("sides") }}
 <h1>Uncredited games</h1>
+{{ admin_tabs("sides") }}
 
 {% for b in blocks %}
 {% set season = b.season %}

@@ -1060,10 +1060,8 @@ table.collapsed tbody tr:nth-child(n+7) { display: none; }
 /* A pick icon keeps its size when its picture won't load (the name is in its title). */
 img.draft-ability, img.draft-model { display: inline-block; overflow: hidden; font-size: 0; vertical-align: middle; background: var(--tag-bg); }
 
-/* Admin: the pages as tabs, and the main page's sections as plain links. */
-.admin-tabs { margin: 16px 0 4px; }
-.jump-links { display: flex; flex-wrap: wrap; gap: 4px 0; margin: -4px 0 12px; font-size: 0.9rem; }
-.jump-links a + a::before { content: "·"; display: inline-block; color: var(--muted); margin: 0 10px; }
+/* Admin: the pages as tabs under each one's heading. */
+.admin-tabs { margin: -4px 0 16px; }
 .discord-actions { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 10px; margin: 8px 0 18px; }
 .discord-sync { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .discord-sync select { width: auto; }
